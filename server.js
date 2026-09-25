@@ -25,8 +25,19 @@ async function query(text, params = []) { return pool.query(text, params); }
 async function ensureRuntimeSchema() {
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS sect TEXT NOT NULL DEFAULT 'Hàn Thiên Môn';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS position TEXT NOT NULL DEFAULT 'Ngoại môn đệ tử';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS rank TEXT NOT NULL DEFAULT 'Luyện Khí';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_power INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS experience INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS birthday TEXT NOT NULL DEFAULT '';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hobby TEXT NOT NULL DEFAULT '';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS storage_capacity INTEGER NOT NULL DEFAULT 30;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gacha_claimed BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root TEXT;
@@ -162,6 +173,121 @@ async function ensureRuntimeSchema() {
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS speed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS spirit INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS skill TEXT NOT NULL DEFAULT '';
+  `);
+}
+
+// v3.6.27: Bí Cảnh schema self-healing guard.
+// Một số Render databases được tạo từ các phiên bản rất cũ và có thể thiếu
+// cột dù migration lúc khởi động đã chạy trước đó. Các endpoint Bí Cảnh gọi
+// guard này để tự phục hồi ngay trước khi truy vấn dữ liệu.
+async function ensureBicanhSchema() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS secret_realms (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT '',
+      required_realm_index INTEGER NOT NULL DEFAULT 0,
+      required_realm_name TEXT NOT NULL DEFAULT 'Luyện Khí',
+      activation_cost INTEGER NOT NULL DEFAULT 1,
+      funded_stones INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'funding',
+      active_until TIMESTAMPTZ,
+      paused_until TIMESTAMPTZ,
+      danger_percent INTEGER NOT NULL DEFAULT 10,
+      debuff_percent INTEGER NOT NULL DEFAULT 5,
+      loot_tier INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS required_realm_index INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS required_realm_name TEXT NOT NULL DEFAULT 'Luyện Khí';
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS activation_cost INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS funded_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'funding';
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS active_until TIMESTAMPTZ;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS paused_until TIMESTAMPTZ;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS danger_percent INTEGER NOT NULL DEFAULT 10;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS debuff_percent INTEGER NOT NULL DEFAULT 5;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS loot_tier INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+    CREATE TABLE IF NOT EXISTS secret_realm_contributions (
+      id BIGSERIAL PRIMARY KEY,
+      realm_id INTEGER NOT NULL REFERENCES secret_realms(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS id BIGSERIAL;
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS realm_id INTEGER;
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS user_id INTEGER;
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS amount INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+    CREATE TABLE IF NOT EXISTS secret_realm_runs (
+      id BIGSERIAL PRIMARY KEY,
+      realm_id INTEGER NOT NULL REFERENCES secret_realms(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      outcome TEXT NOT NULL DEFAULT 'failure',
+      reward_type TEXT NOT NULL DEFAULT '',
+      reward_item_id INTEGER,
+      reward_quantity INTEGER NOT NULL DEFAULT 0,
+      reward_stones INTEGER NOT NULL DEFAULT 0,
+      spirit_gain INTEGER NOT NULL DEFAULT 0,
+      debuff_percent INTEGER NOT NULL DEFAULT 0,
+      debuff_until TIMESTAMPTZ,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS realm_id INTEGER;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS user_id INTEGER;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS outcome TEXT NOT NULL DEFAULT 'failure';
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT '';
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS reward_item_id INTEGER;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS reward_quantity INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS reward_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS spirit_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS debuff_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS debuff_until TIMESTAMPTZ;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Vật phẩm';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS price INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS spirit_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS support TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm_tier INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS attack INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS defense INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS speed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS spirit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS skill TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+
+    ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
   `);
 }
 
@@ -1253,6 +1379,39 @@ app.post('/api/login',async(req,res)=>{
 app.get('/api/me',auth,async(req,res)=>res.json({user:{id:req.session.user_id,username:req.session.username,displayName:req.session.display_name,createdAt:req.session.created_at}}));
 app.post('/api/logout',auth,async(req,res)=>{await query('DELETE FROM sessions WHERE token=$1',[req.token]);res.json({ok:true});});
 
+// NHẬN LINH THẠCH HẰNG NGÀY · 100 linh thạch / ngày
+// Giao dịch được khóa theo hồ sơ để tránh nhận trùng khi bấm nhiều lần hoặc nhiều tab.
+app.post('/api/spirit-stones/claim',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    await ensureRuntimeSchema();
+    const uid=req.session.user_id;
+    const today=(await client.query(`SELECT (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS today`)).rows[0].today;
+    const p=(await client.query(`SELECT user_id,spirit_stones,last_stone_claim FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ.'});}
+    if(p.last_stone_claim && String(p.last_stone_claim).slice(0,10)===String(today)){
+      await client.query('ROLLBACK');
+      return res.status(400).json({error:'Hôm nay bạn đã nhận 100 linh thạch. Hãy quay lại ngày mai.'});
+    }
+    const amount=100;
+    const nextStones=Number(p.spirit_stones||0)+amount;
+    await client.query(`UPDATE profiles SET spirit_stones=$2,last_stone_claim=$3,updated_at=NOW() WHERE user_id=$1`,[uid,nextStones,today]);
+    await client.query(`INSERT INTO daily_activity(user_id,activity_date,train_count,buy_count,stone_claim_count)
+      VALUES($1,$2,0,0,1)
+      ON CONFLICT(user_id) DO UPDATE SET
+        activity_date=EXCLUDED.activity_date,
+        stone_claim_count=CASE WHEN daily_activity.activity_date=$2 THEN daily_activity.stone_claim_count+1 ELSE 1 END`,[uid,today]);
+    await logActivityEvent(client,uid,'stone_claim');
+    await client.query('COMMIT');
+    res.json({ok:true,amount,spiritStones:nextStones,canClaimStones:false,message:`Đã nhận ${amount.toLocaleString('vi-VN')} linh thạch hôm nay.`});
+  }catch(e){
+    try{await client.query('ROLLBACK')}catch{};
+    console.error('spirit stones claim:',{message:e.message,code:e.code,detail:e.detail,hint:e.hint,position:e.position,table:e.table,column:e.column});
+    res.status(500).json({error:'Không thể nhận linh thạch. Giao dịch đã được hoàn tác.'});
+  }finally{client.release();}
+});
+
 function attributesFor(spirit){
   const st=stageFor(Number(spirit)||0); const s=Number(spirit)||0;
   return {congLuc:10+st.realmIndex*35+st.tier*8+Math.floor(s/250),phongThu:10+st.realmIndex*28+st.tier*7+Math.floor(s/300),thanPhap:10+st.realmIndex*22+st.tier*6+Math.floor(s/400),ngoTinh:8+st.realmIndex*5+st.tier*2+Math.floor(s/700),khiVan:5+st.realmIndex*2+Math.floor(st.tier/3)};
@@ -2155,6 +2314,7 @@ async function secretRealmLoot(client,userId,realm){
 
 app.get('/api/bicanh',auth,async(req,res)=>{
   try{
+    await ensureBicanhSchema();
     const uid=req.session.user_id;
     const me=(await query(`SELECT spirit_power,spirit_stones,secret_realm_debuff_until,secret_realm_debuff_percent FROM profiles WHERE user_id=$1`,[uid])).rows[0];
     if(!me) return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});
@@ -2178,7 +2338,7 @@ app.get('/api/bicanh',auth,async(req,res)=>{
     }));
     res.json({realms,me:{...me,stage:stage.stage,realmIndex:stage.realmIndex}});
   }catch(e){
-    console.error('bicanh load:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,position:e?.position,where:e?.where,query:e?.query});
+    console.error('bicanh load:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,position:e?.position,where:e?.where,query:e?.query,table:e?.table,column:e?.column});
     res.status(500).json({error:`Không thể mở Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});
   }
 });
@@ -2186,6 +2346,7 @@ app.get('/api/bicanh',auth,async(req,res)=>{
 app.post('/api/bicanh/contribute',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
+    await ensureBicanhSchema();
     const uid=req.session.user_id, realmId=Number(req.body?.realmId), amount=Math.floor(Number(req.body?.amount));
     if(!Number.isInteger(realmId)||realmId<1||!Number.isInteger(amount)||amount<1)return res.status(400).json({error:'Số linh thạch đóng góp không hợp lệ.'});
     await client.query('BEGIN');
@@ -2209,12 +2370,13 @@ app.post('/api/bicanh/contribute',auth,async(req,res)=>{
     await client.query(`UPDATE secret_realms SET funded_stones=$2 WHERE id=$1`,[realmId,funded]);
     await client.query('COMMIT');
     res.json({ok:true,activated:false,paid:pay,funded,remaining:Number(realm.activation_cost)-funded,message:`Đã đóng ${pay} linh thạch. Còn ${Number(realm.activation_cost)-funded} linh thạch để khởi động.`});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh contribute:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint});res.status(500).json({error:`Đóng góp Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh contribute:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,table:e?.table,column:e?.column,query:e?.query});res.status(500).json({error:`Đóng góp Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
 });
 
 app.post('/api/bicanh/enter',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
+    await ensureBicanhSchema();
     const uid=req.session.user_id, realmId=Number(req.body?.realmId);
     if(!Number.isInteger(realmId)||realmId<1)return res.status(400).json({error:'Bí Cảnh không hợp lệ.'});
     await client.query('BEGIN');
@@ -2257,11 +2419,12 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
     await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,debuff_percent,debuff_until,note) VALUES($1,$2,'failure',$3,NOW() + ($4::double precision * INTERVAL '1 minute'),$5)`,[realmId,uid,debuff,String(duration),note]);
     await client.query('COMMIT');
     res.json({ok:true,outcome:'failure',successChance,lossSpirit:loss,newSpirit,stage:ns.stage,debuffPercent:debuff,debuffMinutes:duration,message:note});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh enter:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint});res.status(500).json({error:`Tham gia Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh enter:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,table:e?.table,column:e?.column,query:e?.query});res.status(500).json({error:`Tham gia Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
 });
 
 app.get('/api/bicanh/history',auth,async(req,res)=>{
-  try{const r=await query(`SELECT r.id,r.outcome,r.reward_type,r.reward_quantity,r.reward_stones,r.spirit_gain,r.debuff_percent,r.note,r.created_at,sr.name AS realm_name,ti.name AS reward_item_name FROM secret_realm_runs r JOIN secret_realms sr ON sr.id=r.realm_id LEFT JOIN treasure_items ti ON ti.id=r.reward_item_id WHERE r.user_id=$1 ORDER BY r.id DESC LIMIT 30`,[req.session.user_id]);res.json({rows:r.rows});}
+  try{
+    await ensureBicanhSchema();const r=await query(`SELECT r.id,r.outcome,r.reward_type,r.reward_quantity,r.reward_stones,r.spirit_gain,r.debuff_percent,r.note,r.created_at,sr.name AS realm_name,ti.name AS reward_item_name FROM secret_realm_runs r JOIN secret_realms sr ON sr.id=r.realm_id LEFT JOIN treasure_items ti ON ti.id=r.reward_item_id WHERE r.user_id=$1 ORDER BY r.id DESC LIMIT 30`,[req.session.user_id]);res.json({rows:r.rows});}
   catch(e){res.status(500).json({error:'Không thể tải lịch sử Bí Cảnh.'});}
 });
 
@@ -2682,8 +2845,41 @@ app.post('/api/disciples/gift',auth,async(req,res)=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // BẰNG HỮU · Kết giao + chat riêng
 // ─────────────────────────────────────────────────────────────────────────────
+// Khiêu chiến cần schema đầy đủ ngay cả khi Render đang dùng DB cũ.
+// Guard này chạy trước các API lôi đài để tránh SELECT vào cột chưa tồn tại.
+async function ensureChallengeSchema(){
+  await query(`
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS rank TEXT NOT NULL DEFAULT 'Luyện Khí';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_power INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_until TIMESTAMPTZ;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
+  `);
+  await query(`
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_max_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_max_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS turn_user_id INTEGER;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS round_number INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_actor_id INTEGER;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_damage NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action TEXT NOT NULL DEFAULT '';
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+  `);
+}
+
 app.get('/api/challenges',auth,async(req,res)=>{
   try{
+    await ensureChallengeSchema();
     const uid=req.session.user_id;
     const [users,pending,history,activeRows]=await Promise.all([
       query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier,p.challenge_debuff_until,p.challenge_debuff_percent,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
@@ -2711,6 +2907,7 @@ app.get('/api/challenges',auth,async(req,res)=>{
 });
 
 app.post('/api/challenges/offline',auth,async(req,res)=>{
+  await ensureChallengeSchema();
   const client=await pool.connect();
   try{
     const uid=req.session.user_id,target=Number(req.body?.userId);
@@ -2735,6 +2932,7 @@ app.post('/api/challenges/offline',auth,async(req,res)=>{
 });
 
 app.post('/api/challenges/online/request',auth,async(req,res)=>{
+  await ensureChallengeSchema();
   const client=await pool.connect();
   try{
     const uid=req.session.user_id,target=Number(req.body?.userId);
@@ -2758,6 +2956,7 @@ app.post('/api/challenges/online/request',auth,async(req,res)=>{
 });
 
 app.post('/api/challenges/online/respond',auth,async(req,res)=>{
+  await ensureChallengeSchema();
   const client=await pool.connect();
   try{
     const uid=req.session.user_id,requestId=Number(req.body?.requestId),action=String(req.body?.action||'');
@@ -2788,6 +2987,7 @@ app.post('/api/challenges/online/respond',auth,async(req,res)=>{
 });
 
 app.post('/api/challenges/online/action',auth,async(req,res)=>{
+  await ensureChallengeSchema();
   const client=await pool.connect();
   try{
     const uid=req.session.user_id,requestId=Number(req.body?.requestId);

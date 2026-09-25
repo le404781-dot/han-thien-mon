@@ -1,0 +1,10 @@
+HÀN THIÊN MÔN v3.6.27 – FIX BÍ CẢNH MISSING COLUMN
+
+- Thêm ensureBicanhSchema() tự phục hồi schema ngay trước khi gọi các API Bí Cảnh.
+- CREATE TABLE IF NOT EXISTS cho secret_realms, secret_realm_contributions, secret_realm_runs.
+- ALTER TABLE ... ADD COLUMN IF NOT EXISTS cho toàn bộ cột Bí Cảnh và các catalog được dùng khi nhận thưởng.
+- Bổ sung updated_at cho inventory và các cột cần thiết cho profiles.
+- Áp dụng guard cho /api/bicanh, /api/bicanh/contribute, /api/bicanh/enter, /api/bicanh/history.
+- Mở rộng log lỗi để hiện table/column/query nếu PostgreSQL vẫn báo missing column.
+- Không xóa dữ liệu người dùng.
+- Kiểm tra cú pháp server.js: OK.

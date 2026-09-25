@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.29 – FIX KHIÊU CHIẾN
+
+- Thêm ensureChallengeSchema() chạy trước toàn bộ API Khiêu Chiến.
+- Tự bổ sung các cột profiles mà lôi đài dùng, đặc biệt avatar/title/rank/spirit_power và các cột debuff/equipment.
+- Tự bổ sung toàn bộ cột HP/lượt đánh của challenge_requests cho database Render cũ.
+- Áp dụng guard cho: mở lôi đài online, chấp nhận/từ chối, tung tuyệt chiêu online, khiêu chiến offline và tải màn Khiêu Chiến.
+- Giữ nguyên cơ chế Thanh Máu, đánh theo lượt và sát thương phụ thuộc cảnh giới.
+- Mục tiêu chính: xử lý lỗi PostgreSQL errorMissingColumn khiến UI hiện “Không thể mở Khiêu Chiến.”
