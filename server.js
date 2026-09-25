@@ -153,6 +153,10 @@ async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(user_id,item_id)
     );
+    -- Migration for databases created by older Hàn Thiên Môn versions.
+    -- CREATE TABLE IF NOT EXISTS does not modify an existing inventory table.
+    ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    UPDATE inventory SET updated_at=NOW() WHERE updated_at IS NULL;
 
     CREATE TABLE IF NOT EXISTS market_listings (
       id BIGSERIAL PRIMARY KEY,
