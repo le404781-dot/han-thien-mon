@@ -128,6 +128,10 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_speed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_spirit INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_skill TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_online_at TIMESTAMPTZ;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_date DATE;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_earned INTEGER NOT NULL DEFAULT 0;
+
 
     UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0), realm_tier=COALESCE(realm_tier,1);
 
@@ -172,6 +176,8 @@ async function initDb() {
       requirement_type TEXT NOT NULL,
       requirement_value INTEGER NOT NULL DEFAULT 1,
       reward_stones INTEGER NOT NULL DEFAULT 0 CHECK(reward_stones >= 0),
+      reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL,
+      reward_quantity INTEGER NOT NULL DEFAULT 0 CHECK(reward_quantity >= 0),
       active BOOLEAN NOT NULL DEFAULT TRUE
     );
     CREATE TABLE IF NOT EXISTS user_quest_claims (
@@ -189,6 +195,10 @@ async function initDb() {
       stone_claim_count INTEGER NOT NULL DEFAULT 0
     );
   `);
+
+  await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL`);
+  await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_quantity INTEGER NOT NULL DEFAULT 0`);
+  await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_stones INTEGER NOT NULL DEFAULT 0`);
 
   await query('INSERT INTO profiles(user_id) SELECT id FROM users ON CONFLICT (user_id) DO NOTHING');
   const existingUsers = await query('SELECT id FROM users');
@@ -234,7 +244,18 @@ async function initDb() {
       ['Kho báu Hàn Thiên','Mua 3 vật phẩm tại Tàng Bảo Các.','buy',3,180],
       ['Nhận lộc thiên đạo','Nhận linh thạch hằng ngày.','stone_claim',1,50]
     ];
-    for (const q of quests) await query('INSERT INTO sect_quests(name,description,requirement_type,requirement_value,reward_stones) VALUES($1,$2,$3,$4,$5)',q);
+    for (const q of quests) await query('INSERT INTO sect_quests(name,description,requirement_type,requirement_value,reward_stones,reward_item_id,reward_quantity) VALUES($1,$2,$3,$4,$5,NULL,0) ON CONFLICT(name) DO NOTHING',q);
+  }
+  // Nhiệm Vụ Đường dùng vật phẩm làm phần thưởng; giữ reward_stones cũ để tương thích dữ liệu.
+  const rewardMap = [
+    ['Vận công nhập môn','Tụ Linh Đan',1],
+    ['Tu luyện tinh tiến','Hàn Tuyết Đan',1],
+    ['Thám bảo sơn môn','Tụ Linh Đan',1],
+    ['Kho báu Hàn Thiên','Ngọc Bội Hộ Tâm',1],
+    ['Nhận lộc thiên đạo','Tụ Linh Đan',2]
+  ];
+  for (const [qname,itemName,qty] of rewardMap) {
+    await query(`UPDATE sect_quests SET reward_item_id=(SELECT id FROM treasure_items WHERE name=$2), reward_quantity=$3, reward_stones=0 WHERE name=$1`,[qname,itemName,qty]);
   }
 }
 
@@ -443,7 +464,7 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     else trainCount=Number(a.rows[0].train_count)||0;
     const prof=(await query('SELECT spirit_power,spirit_root_rarity FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
     const currentStage=stageFor(Number(prof.spirit_power)||0);
-    const maxDaily=Math.max(3,10-currentStage.realmIndex);
+    const maxDaily=Math.max(2,10-currentStage.realmIndex);
     if(trainCount>=maxDaily)return res.status(429).json({error:`Hôm nay đã vận công ${trainCount}/${maxDaily} lần. Cảnh giới càng cao càng khó tu luyện; hãy quay lại ngày mai.`,trainCount,maxDaily});
     const baseMax=Math.max(28,72-currentStage.realmIndex*5-currentStage.tier*2);
     const baseMin=Math.max(12,Math.floor(baseMax*0.55));
@@ -456,6 +477,47 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     await addDailyActivity(req.session.user_id,'train_count',1);
     res.json({gain,spirit,experience:r.rows[0].experience,progress:progressFor(spirit),rank:stage.realm,stage:stage.stage,trainCount:trainCount+1,maxDaily});
   } catch(e){console.error(e);res.status(500).json({error:'Không thể vận công lúc này.'});}
+});
+
+app.post('/api/cultivation/online',auth,async(req,res)=>{
+  try{
+    await ensureProfile(req.session.user_id);
+    const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const p=(await client.query(`SELECT spirit_power,last_online_at,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
+      const st=stageFor(Number(p.spirit_power)||0);
+      const maxDaily=Math.max(2,10-st.realmIndex);
+      const a=(await client.query(`SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id])).rows[0];
+      const trainCount= a && String(a.activity_date).slice(0,10)===today ? Number(a.train_count)||0 : 0;
+      if(trainCount<maxDaily){
+        await client.query('UPDATE profiles SET last_online_at=NOW(),online_spirit_date=$2,online_spirit_earned=0 WHERE user_id=$1',[req.session.user_id,today]);
+        await client.query('COMMIT');
+        return res.json({mode:'cultivation',active:false,gain:0,onlineEarned:0});
+      }
+      let earned=String(p.online_spirit_date||'').slice(0,10)===today ? Number(p.online_spirit_earned)||0 : 0;
+      let last=p.last_online_at?new Date(p.last_online_at).getTime():Date.now();
+      if(!p.last_online_at || String(p.online_spirit_date||'').slice(0,10)!==today) last=Date.now();
+      const elapsed=Math.max(0,Date.now()-last);
+      const minutes=Math.floor(elapsed/60000);
+      const dailyCap=600;
+      const rate=1+st.realmIndex;
+      const gain=Math.max(0,Math.min(minutes*rate,dailyCap-earned));
+      let spirit=Number(p.spirit_power)||0;
+      if(gain>0){
+        spirit+=gain; earned+=gain;
+        const ns=stageFor(spirit);
+        await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,last_online_at=NOW(),online_spirit_date=$6,online_spirit_earned=$7,updated_at=NOW() WHERE user_id=$1`,
+          [req.session.user_id,spirit,gain,ns.realm,ns.tier,today,earned]);
+      } else {
+        await client.query(`UPDATE profiles SET last_online_at=NOW(),online_spirit_date=$2,online_spirit_earned=$3 WHERE user_id=$1`,[req.session.user_id,today,earned]);
+      }
+      await client.query('COMMIT');
+      const ns=stageFor(spirit);
+      res.json({mode:'online',active:true,gain,onlineEarned:earned,dailyCap,rate,spirit,stage:ns.stage,nextTickSeconds:60});
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
+  }catch(e){console.error('online cultivation:',e);res.status(500).json({error:'Không thể cập nhật linh lực trực tuyến.'});}
 });
 
 
@@ -611,12 +673,12 @@ app.get('/api/inventory',auth,async(req,res)=>{
 app.get('/api/quests',auth,async(req,res)=>{
   try {
     await touchDailyActivity(req.session.user_id);
-    const r=await query(`SELECT q.*,COALESCE(a.train_count,0)::int AS train_count,COALESCE(a.buy_count,0)::int AS buy_count,COALESCE(a.stone_claim_count,0)::int AS stone_claim_count,
+    const r=await query(`SELECT q.*,ti.name AS reward_item_name,COALESCE(a.train_count,0)::int AS train_count,COALESCE(a.buy_count,0)::int AS buy_count,COALESCE(a.stone_claim_count,0)::int AS stone_claim_count,
       EXISTS(SELECT 1 FROM user_quest_claims c WHERE c.user_id=$1 AND c.quest_id=q.id AND c.claim_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS claimed
-      FROM sect_quests q LEFT JOIN daily_activity a ON a.user_id=$1 WHERE q.active=true ORDER BY q.id`,[req.session.user_id]);
+      FROM sect_quests q LEFT JOIN treasure_items ti ON ti.id=q.reward_item_id LEFT JOIN daily_activity a ON a.user_id=$1 WHERE q.active=true ORDER BY q.id`,[req.session.user_id]);
     const rows=r.rows.map(q=>{
       const progress=q.requirement_type==='train'?q.train_count:q.requirement_type==='buy'?q.buy_count:q.stone_claim_count;
-      return {...q,progress:Math.min(progress,q.requirement_value),completed:progress>=q.requirement_value};
+      return {...q,progress:Math.min(progress,q.requirement_value),completed:progress>=q.requirement_value,rewardItem:q.reward_item_id?{id:q.reward_item_id,name:q.reward_item_name,quantity:Number(q.reward_quantity)||0}:null};
     });
     res.json({rows});
   } catch(e){res.status(500).json({error:'Không thể mở Nhiệm Vụ Đường.'});}
@@ -627,7 +689,7 @@ app.post('/api/quests/:id/claim',auth,async(req,res)=>{
     const questId=Number(req.params.id);
     if(!Number.isInteger(questId))return res.status(400).json({error:'Nhiệm vụ không hợp lệ.'});
     await client.query('BEGIN');
-    const qR=await client.query('SELECT * FROM sect_quests WHERE id=$1 AND active=true FOR UPDATE',[questId]);
+    const qR=await client.query('SELECT q.*,ti.name AS reward_item_name FROM sect_quests q LEFT JOIN treasure_items ti ON ti.id=q.reward_item_id WHERE q.id=$1 AND q.active=true FOR UPDATE',[questId]);
     if(!qR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy nhiệm vụ.'});}
     const q=qR.rows[0];
     const aR=await client.query(`SELECT COALESCE(train_count,0)::int AS train_count,COALESCE(buy_count,0)::int AS buy_count,COALESCE(stone_claim_count,0)::int AS stone_claim_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id]);
@@ -636,12 +698,44 @@ app.post('/api/quests/:id/claim',auth,async(req,res)=>{
     if(progress<q.requirement_value){await client.query('ROLLBACK');return res.status(400).json({error:`Chưa hoàn thành nhiệm vụ. Tiến độ ${progress}/${q.requirement_value}.`});}
     const c=await client.query(`INSERT INTO user_quest_claims(user_id,quest_id,claim_date) VALUES($1,$2,(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) ON CONFLICT DO NOTHING RETURNING id`,[req.session.user_id,questId]);
     if(!c.rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Hôm nay bạn đã nhận thưởng nhiệm vụ này.'});}
-    const p=await client.query('UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones',[req.session.user_id,q.reward_stones]);
+    let rewardItem=null;
+    if(q.reward_item_id && Number(q.reward_quantity)>0){
+      const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW())
+        ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()
+        RETURNING quantity`,[req.session.user_id,q.reward_item_id,Number(q.reward_quantity)]);
+      rewardItem={name:q.reward_item_name,quantity:Number(q.reward_quantity),total:Number(ir.rows[0].quantity)};
+    }
+    const p=await client.query('SELECT spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id]);
     await client.query('COMMIT');
-    res.json({ok:true,reward:q.reward_stones,spiritStones:p.rows[0].spirit_stones});
+    res.json({ok:true,rewardItem,spiritStones:Number(p.rows[0]?.spirit_stones||0)});
   } catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể nhận thưởng nhiệm vụ.'});}
   finally{client.release();}
 });
+
+const ROOT_CODEX = [
+  ['Kim Linh Căn','Phàm','Tăng độ sắc bén của công lực, thiên về công kích và luyện khí.','+2% hiệu quả tu luyện'],
+  ['Mộc Linh Căn','Phàm','Sinh cơ dồi dào, hồi phục tốt và ổn định căn cơ.','+2% hiệu quả tu luyện'],
+  ['Thủy Linh Căn','Phàm','Khí tức mềm dẻo, thích hợp pháp thuật và điều tức.','+2% hiệu quả tu luyện'],
+  ['Hỏa Linh Căn','Phàm','Nhiệt lực mạnh, công kích bộc phát cao.','+2% hiệu quả tu luyện'],
+  ['Thổ Linh Căn','Phàm','Căn cơ vững chắc, thiên về phòng ngự.','+2% hiệu quả tu luyện'],
+  ['Băng Linh Căn','Hạ Phẩm','Hàn khí ngưng tụ, tăng khả năng khống chế.','+8% hiệu quả tu luyện'],
+  ['Phong Linh Căn','Hạ Phẩm','Thân pháp nhẹ như gió, tăng tốc độ vận công.','+8% hiệu quả tu luyện'],
+  ['Lôi Linh Căn','Trung Phẩm','Lôi lực bộc phát, công thủ đều mạnh.','+18% hiệu quả tu luyện'],
+  ['Âm Linh Căn','Thượng Phẩm','Khí tức u minh, giỏi che giấu và cảm ứng linh khí.','+28% hiệu quả tu luyện'],
+  ['Dương Linh Căn','Thượng Phẩm','Dương khí thuần hậu, tăng sức sống và công lực.','+28% hiệu quả tu luyện'],
+  ['Thiên Linh Căn','Thần Thoại','Tư chất hiếm có, hấp thu linh khí cực nhanh.','+55% hiệu quả tu luyện']
+];
+const BEAST_CODEX = [
+  ['Hàn Ngọc Hồ','Phàm','Hồ linh thú hệ băng, hỗ trợ điều tức và cảm nhận linh khí.','Công 35 · Phòng 30 · Thân 55 · Linh 40'],
+  ['Thanh Vân Hạc','Hạ Phẩm','Linh cầm tốc độ cao, thiên về thân pháp và né tránh.','Công 45 · Phòng 35 · Thân 80 · Linh 50'],
+  ['Lôi Ảnh Lang','Trung Phẩm','Lang thú hệ lôi, bộc phát mạnh trong giao chiến.','Công 90 · Phòng 55 · Thân 85 · Linh 70'],
+  ['Xích Viêm Hổ','Thượng Phẩm','Hổ thú hỏa hệ, công kích áp đảo và khí thế mạnh.','Công 120 · Phòng 95 · Thân 65 · Linh 85'],
+  ['Huyền Quy','Hiếm','Linh thú hộ pháp, phòng ngự cực mạnh và bảo vệ chủ nhân.','Công 70 · Phòng 160 · Thân 30 · Linh 100'],
+  ['Cửu U Miêu','Sử Thi','Linh miêu u minh, tăng thân pháp và cảm nhận nguy hiểm.','Công 110 · Phòng 75 · Thân 150 · Linh 125'],
+  ['Tử Điện Điêu','Thần Thoại','Điện thú cực hiếm, tốc độ và linh lực đều vượt trội.','Công 180 · Phòng 120 · Thân 210 · Linh 190']
+];
+app.get('/api/linh-can-bang',auth,async(req,res)=>res.json({rows:ROOT_CODEX.map(x=>({name:x[0],rarity:x[1],description:x[2],support:x[3]}))}));
+app.get('/api/linh-thu-bang',auth,async(req,res)=>res.json({rows:BEAST_CODEX.map(x=>({name:x[0],rarity:x[1],description:x[2],attributes:x[3]}))}));
 
 app.get('/api/leaderboard',async(req,res)=>{
   try {

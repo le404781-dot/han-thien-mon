@@ -43,11 +43,11 @@ function renderGuestAreas(){
  $('#cultivationArea').innerHTML=`<div class="empty-state compact"><h3>Thiên đạo chờ người hữu duyên</h3><p>Đăng nhập để bắt đầu vận công và tích lũy linh lực.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
  $('#chatArea').innerHTML=`<div class="empty-state compact"><h3>Truyền âm bị phong</h3><p>Chỉ môn nhân đã nhập môn mới có thể vào Chat tổng.</p><button class="btn primary" onclick="renderAuth('register')">Đăng ký</button></div>`;
  $('#treasureArea').innerHTML=`<div class="empty-state compact"><h3>Tàng Bảo Các đang phong ấn</h3><p>Đăng nhập để nhận linh thạch hằng ngày và mua vật phẩm.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#questsArea').innerHTML=`<div class="empty-state compact"><h3>Nhiệm Vụ Đường đang phong ấn</h3><p>Đăng nhập để nhận nhiệm vụ và linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
- loadLeaderboard(); loadSect();
+ loadLeaderboard(); loadSect(); loadCodex();
 }
 
 async function loadProfile(){
- try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadAchievements();loadTreasure();loadQuests();}
+ try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);if(Number(currentProfile.trainCount)>=Number(currentProfile.maxDaily))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadQuests();}
  catch(e){if(e.message.includes('đăng nhập')){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}}
 }
 function renderProfile(p){
@@ -65,15 +65,32 @@ function openProfileEditor(){
  $('#profileForm').onsubmit=async e=>{e.preventDefault();const msg=$('#profileMsg');try{await api('/api/profile',{method:'PATCH',headers:authHeaders(),body:JSON.stringify({displayName:$('#pDisplay').value,title:$('#pTitle').value,position:$('#pPosition').value,avatar:$('#pAvatar').value,birthday:$('#pBirthday').value,hobby:$('#pHobby').value,bio:$('#pBio').value})});$('#accountModal').close();await loadProfile();await loadLeaderboard();msg.textContent='';}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }
+let onlineTimer=null;
+async function onlineCultivationTick(){
+  if(!getToken()||!currentProfile)return;
+  try{
+    const d=await api('/api/cultivation/online',{method:'POST',headers:authHeaders(),body:'{}'});
+    if(d.mode==='online' && d.gain>0){
+      const msg=$('#trainMsg'); if(msg)msg.textContent=`☁ Trực tuyến: +${d.gain} linh lực. Tích lũy online hôm nay ${d.onlineEarned}/${d.dailyCap}. Tốc độ ${d.rate} linh lực/phút.`;
+      await loadProfile();
+    }
+  }catch{}
+}
+function startOnlineCultivation(){
+  if(onlineTimer)clearInterval(onlineTimer);
+  onlineTimer=setInterval(onlineCultivationTick,30000);
+  onlineCultivationTick();
+}
 function renderCultivation(p){
  const prog=p.progress;
+ const maxDaily=Number(p.maxDaily||10), trainCount=Number(p.trainCount||0);
  const realms=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp'];
  $('#cultivationArea').innerHTML=`<div class="cultivation-grid">
- <article class="cultivation-card"><div class="rank-emblem">${esc(p.avatar)}</div><div><span class="eyebrow">CẢNH GIỚI HIỆN TẠI</span><h3>${esc(p.stage)}</h3><p class="muted">${esc(p.title)} · ${esc(p.sect)}</p><div class="tier-badge">Tầng ${p.tier}/9 · ${esc(p.realm)}</div></div><button class="btn primary train-btn" id="trainBtn">⚔ Vận công</button></article>
+ <article class="cultivation-card"><div class="rank-emblem">${esc(p.avatar)}</div><div><span class="eyebrow">CẢNH GIỚI HIỆN TẠI</span><h3>${esc(p.stage)}</h3><p class="muted">${esc(p.title)} · ${esc(p.sect)}</p><div class="tier-badge">Tầng ${p.tier}/9 · ${esc(p.realm)}</div></div><button class="btn primary train-btn" id="trainBtn" ${trainCount>=maxDaily?'disabled':''}>${trainCount>=maxDaily?'☁ Đã đủ lượt':'⚔ Vận công'}</button></article>
  <article class="power-card"><div class="power-head"><div><span>Linh lực</span><strong>${Number(p.spirit_power).toLocaleString('vi-VN')}</strong></div><span>${prog.next?`Còn ${prog.remaining.toLocaleString('vi-VN')} để tiến vào ${esc(prog.next)}`:'Đã đạt cảnh giới tối cao'}</span></div><div class="progress"><i style="width:${prog.percent}%"></i></div><div class="rank-ladder">${realms.map(r=>`<span class="${r===p.realm?'on':''}">${r}</span>`).join('')}</div></article>
  </div>
  <div class="daily-stone-card"><div><span class="eyebrow">💎 LINH THẠCH HẰNG NGÀY</span><h3>Kho linh thạch: <b id="stoneCount">${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</b></h3><p>Mỗi ngày nhận <b>100 linh thạch</b> để sử dụng tại Tàng Bảo Các.</p></div><button class="btn primary" id="claimStoneBtn" ${p.canClaimStones?'':'disabled'}>${p.canClaimStones?'💎 Nhận 100 linh thạch':'✓ Đã nhận hôm nay'}</button></div>
- <p id="trainMsg" class="train-msg">Càng lên cao càng khó tu luyện: số lượt và linh lực nhận được mỗi ngày giảm theo cảnh giới.</p>`;
+ <p id="trainMsg" class="train-msg">Lượt tu luyện hôm nay: <b>${trainCount}/${maxDaily}</b>. ${trainCount>=maxDaily?'Đã mở chế độ tích lũy linh lực theo thời gian trực tuyến.':'Sau khi hết lượt, linh lực sẽ được tính theo thời gian online trên web.'}</p>`;
  $('#trainBtn').onclick=async()=>{const b=$('#trainBtn');b.disabled=true;b.textContent='☁ Đang vận công...';try{const d=await api('/api/cultivation/train',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=`+${d.gain} linh lực → ${d.stage} · Lượt hôm nay ${d.trainCount}/${d.maxDaily}. ${d.progress.next?`Còn ${d.progress.remaining} linh lực để tiến vào ${d.progress.next}.`:'Đã đạt cảnh giới tối cao.'}`;await loadProfile();await loadLeaderboard();}catch(e){$('#trainMsg').textContent=e.message;}finally{b.disabled=false;b.textContent='⚔ Vận công';}};
  $('#claimStoneBtn').onclick=async()=>{const b=$('#claimStoneBtn');b.disabled=true;try{const d=await api('/api/spirit-stones/claim',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=`💎 ${d.amount} linh thạch đã nhập kho. Có thể dùng tại Tàng Bảo Các.`;await loadProfile();await loadTreasure();}catch(e){$('#trainMsg').textContent=e.message;b.disabled=false;}};
 }
@@ -119,14 +136,23 @@ async function loadQuests(){
  try{
   const d=await api('/api/quests',{headers:authHeaders()});
   const area=$('#questsArea'); if(!area)return;
-  area.innerHTML=`<div class="quest-grid">${d.rows.map(q=>`<article class="quest-card ${q.claimed?'claimed':''}"><div class="quest-seal">✦</div><div><span class="eyebrow">NHIỆM VỤ ĐƯỜNG</span><h3>${esc(q.name)}</h3><p>${esc(q.description)}</p><div class="quest-progress"><i style="width:${Math.min(100,Math.round(q.progress/q.requirement_value*100))}%"></i></div><small>Tiến độ: ${q.progress}/${q.requirement_value} · Thưởng: 💎 ${Number(q.reward_stones).toLocaleString('vi-VN')}</small></div><button class="btn small primary quest-claim" data-id="${q.id}" ${q.claimed||!q.completed?'disabled':''}>${q.claimed?'✓ Đã nhận':q.completed?'Nhận thưởng':'Chưa hoàn thành'}</button></article>`).join('')}</div><p id="questMsg" class="train-msg">Hoàn thành nhiệm vụ mỗi ngày để nhận thêm linh thạch.</p>`;
-  document.querySelectorAll('.quest-claim').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/quests/'+b.dataset.id+'/claim',{method:'POST',headers:authHeaders(),body:'{}'});$('#questMsg').textContent=`💎 Nhận ${x.reward} linh thạch. Kho hiện có ${Number(x.spiritStones).toLocaleString('vi-VN')} linh thạch.`;await loadProfile();await loadQuests();}catch(e){$('#questMsg').textContent=e.message;b.disabled=false;}});
+  area.innerHTML=`<div class="quest-grid">${d.rows.map(q=>`<article class="quest-card ${q.claimed?'claimed':''}"><div class="quest-seal">✦</div><div><span class="eyebrow">NHIỆM VỤ ĐƯỜNG</span><h3>${esc(q.name)}</h3><p>${esc(q.description)}</p><div class="quest-progress"><i style="width:${Math.min(100,Math.round(q.progress/q.requirement_value*100))}%"></i></div><small>Tiến độ: ${q.progress}/${q.requirement_value} · Thưởng: 🎁 ${q.rewardItem?`${esc(q.rewardItem.name)} ×${q.rewardItem.quantity}`:'Không có'}</small></div><button class="btn small primary quest-claim" data-id="${q.id}" ${q.claimed||!q.completed?'disabled':''}>${q.claimed?'✓ Đã nhận':q.completed?'Nhận thưởng':'Chưa hoàn thành'}</button></article>`).join('')}</div><p id="questMsg" class="train-msg">Hoàn thành nhiệm vụ để nhận vật phẩm trực tiếp vào Tu Di Giới.</p>`;
+  document.querySelectorAll('.quest-claim').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/quests/'+b.dataset.id+'/claim',{method:'POST',headers:authHeaders(),body:'{}'});$('#questMsg').textContent=x.rewardItem?`🎁 Nhận ${x.rewardItem.name} ×${x.rewardItem.quantity}. Vật phẩm đã vào Tu Di Giới.`:'Đã nhận thưởng.';await loadProfile();await loadQuests();await loadTuDi();}catch(e){$('#questMsg').textContent='❌ '+e.message;b.disabled=false;}});
  }catch(e){const area=$('#questsArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
 async function loadSect(){
  try{const d=await api('/api/sect');$('#sectArea').innerHTML=`<div class="sect-banner"><div class="sect-seal">寒</div><div><span class="eyebrow">${esc(d.han)}</span><h3>${esc(d.name)}</h3><p>“${esc(d.motto)}”</p><div class="sect-count">${d.count} đạo hữu đã ghi danh</div></div></div><div class="positions-grid">${d.positions.map(x=>`<div class="position-card"><span>☯</span><b>${esc(x[0])}</b><small>${esc(x[1])}</small></div>`).join('')}</div>`;}
  catch{}
+}
+
+async function loadCodex(){
+ try{
+  const [r,b]=await Promise.all([api('/api/linh-can-bang',{headers:authHeaders()}),api('/api/linh-thu-bang',{headers:authHeaders()})]);
+  const cr=$('#linhCanBangArea'), br=$('#linhThuBangArea');
+  if(cr)cr.innerHTML=r.rows.map(x=>`<article class="codex-card"><span class="codex-icon">🌿</span><div><span class="eyebrow">${esc(x.rarity)}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>Phụ trợ: ${esc(x.support)}</small></div></article>`).join('');
+  if(br)br.innerHTML=b.rows.map(x=>`<article class="codex-card"><span class="codex-icon">🐉</span><div><span class="eyebrow">${esc(x.rarity)}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>Thuộc tính: ${esc(x.attributes)}</small></div></article>`).join('');
+ }catch(e){}
 }
 
 async function loadLeaderboard(){

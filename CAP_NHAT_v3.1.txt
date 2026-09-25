@@ -1,0 +1,19 @@
+HÀN THIÊN MÔN v3.1
+Cập nhật từ v3.0
+
+THAY ĐỔI:
+1. Tàng Bảo Các: đổi linh lực nhận vật phẩm; vật phẩm mua thành công vào Tu Di Giới.
+2. Giới hạn vận công theo cảnh giới:
+   Luyện Khí 10 lượt/ngày; Trúc Cơ 9; Kim Đan 8; Nguyên Anh 7; Hóa Thần 6;
+   Luyện Hư 5; Hợp Thể 4; Đại Thừa 3; Độ Kiếp 2.
+3. Khi hết lượt vận công, mở chế độ linh lực trực tuyến:
+   máy chủ tính theo thời gian online thực tế, không dựa vào bộ đếm phía trình duyệt.
+   Tốc độ cơ bản 1 linh lực/phút + 1 theo mỗi bậc cảnh giới, tối đa 600 linh lực online/ngày.
+4. Nhiệm Vụ Đường: phần thưởng chuyển sang vật phẩm và tự vào Tu Di Giới.
+5. Thêm Linh Căn Bảng và Linh Thú Bảng, có độ hiếm, mô tả chức năng và phụ trợ/thuộc tính.
+6. Giữ database hiện tại; server tự bổ sung cột cần thiết.
+
+DEPLOY:
+- Không tạo PostgreSQL mới.
+- Upload/commit các file ở thư mục gốc.
+- Render: Manual Deploy -> Deploy latest commit.
