@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.9 — MỞ BÍ CẢNH + LỰA CHỌN THEO CẢNH GIỚI
+
+- Khu vực Bí Cảnh có nút mở và danh sách Cửu Đại Bí Cảnh.
+- Chín Bí Cảnh đối xứng với chín cảnh giới: Luyện Khí, Trúc Cơ, Kim Đan, Nguyên Anh, Hóa Thần, Luyện Hư, Hợp Thể, Đại Thừa, Độ Kiếp.
+- Tự chọn Bí Cảnh tương ứng với cảnh giới hiện tại.
+- Có thể chọn Bí Cảnh thấp hơn; Bí Cảnh cao hơn bị khóa theo server.
+- Khi chọn một cảnh giới trong danh sách, giao diện cuộn và làm nổi bật Bí Cảnh tương ứng.
+- Giữ nguyên cơ chế đóng góp linh thạch nhiều thành viên, khởi động 60 phút, nguy hiểm/debuff và cơ chế cảnh giới cao phá Bí Cảnh.
