@@ -105,6 +105,7 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
+    UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0), realm_tier=COALESCE(realm_tier,1);
 
     CREATE TABLE IF NOT EXISTS treasure_items (
       id SERIAL PRIMARY KEY,
@@ -390,30 +391,56 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
   const client=await pool.connect();
   try {
     const itemId=Number(req.body?.itemId);
-    if(!Number.isInteger(itemId))return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
+    if(!Number.isInteger(itemId) || itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
     await client.query('BEGIN');
-    const itemR=await client.query('SELECT * FROM treasure_items WHERE id=$1 FOR UPDATE',[itemId]);
+
+    const itemR=await client.query('SELECT id,name,category,price,spirit_gain,min_realm FROM treasure_items WHERE id=$1 FOR SHARE',[itemId]);
     if(!itemR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy vật phẩm.'});}
     const item=itemR.rows[0];
-    const pR=await client.query('SELECT * FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id]);
+
+    const pR=await client.query('SELECT spirit_power,COALESCE(spirit_stones,0)::int AS spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id]);
+    if(!pR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ đệ tử.'});}
     const p=pR.rows[0];
-    const stage=stageFor(p.spirit_power);
-    if(stage.realmIndex < item.min_realm){await client.query('ROLLBACK');return res.status(403).json({error:`Cần đạt ${RANKS[item.min_realm].name} mới có thể mua vật phẩm này.`});}
-    if(p.spirit_stones < item.price){await client.query('ROLLBACK');return res.status(400).json({error:`Linh thạch không đủ. Cần ${item.price}, hiện có ${p.spirit_stones}.`});}
-    await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2, updated_at=NOW() WHERE user_id=$1',[req.session.user_id,item.price]);
+    const stage=stageFor(Number(p.spirit_power)||0);
+
+    if(stage.realmIndex < Number(item.min_realm)){
+      await client.query('ROLLBACK');
+      return res.status(403).json({error:`Vật phẩm này yêu cầu ${RANKS[Number(item.min_realm)].name}. Bạn hiện ở ${stage.stage}.`});
+    }
+    if(Number(p.spirit_stones) < Number(item.price)){
+      await client.query('ROLLBACK');
+      return res.status(400).json({error:`Linh thạch không đủ. Cần ${Number(item.price).toLocaleString('vi-VN')} 💎, hiện có ${Number(p.spirit_stones).toLocaleString('vi-VN')} 💎.`});
+    }
+
+    const newStones=Number(p.spirit_stones)-Number(item.price);
+    let newSpirit=Number(p.spirit_power)||0;
+    if(Number(item.spirit_gain)>0)newSpirit+=Number(item.spirit_gain);
+    const ns=stageFor(newSpirit);
+
+    await client.query(
+      `UPDATE profiles SET spirit_stones=$2, spirit_power=$3, experience=experience+$4, rank=$5, realm_tier=$6, updated_at=NOW() WHERE user_id=$1`,
+      [req.session.user_id,newStones,newSpirit,Number(item.spirit_gain)||0,ns.realm,ns.tier]
+    );
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW())
       ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[req.session.user_id,itemId]);
-    let newSpirit=p.spirit_power;
-    if(item.spirit_gain>0){
-      newSpirit+=item.spirit_gain;
-      const ns=stageFor(newSpirit);
-      await client.query('UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,newSpirit,item.spirit_gain,ns.realm,ns.tier]);
-    }
+
+    // Ghi nhận tiến độ nhiệm vụ mua vật phẩm trong cùng transaction.
+    const today="(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date";
+    await client.query(`INSERT INTO daily_activity(user_id,activity_date,buy_count,train_count,stone_claim_count)
+      VALUES($1,${today},1,0,0)
+      ON CONFLICT(user_id) DO UPDATE SET
+        buy_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.buy_count+1 ELSE 1 END,
+        train_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.train_count ELSE 0 END,
+        stone_claim_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.stone_claim_count ELSE 0 END,
+        activity_date=${today}`,[req.session.user_id]);
+
     await client.query('COMMIT');
-    await addDailyActivity(req.session.user_id,'buy_count',1);
-    res.json({ok:true,item:item.name,spiritStones:p.spirit_stones-item.price,spirit:newSpirit,stage:stageFor(newSpirit).stage});
-  } catch(e){try{await client.query('ROLLBACK');}catch{};res.status(500).json({error:'Không thể mua vật phẩm lúc này.'});}
-  finally{client.release();}
+    res.json({ok:true,item:item.name,spiritStones:newStones,spirit:newSpirit,stage:ns.stage,quantityAdded:1});
+  } catch(e){
+    try{await client.query('ROLLBACK')}catch{}
+    console.error('Treasure purchase error:',e);
+    res.status(500).json({error:'Không thể mua vật phẩm lúc này. Vui lòng thử lại.'});
+  } finally{client.release();}
 });
 
 app.get('/api/inventory',auth,async(req,res)=>{
