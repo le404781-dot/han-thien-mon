@@ -108,6 +108,15 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root TEXT;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_beast TEXT;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS storage_capacity INTEGER NOT NULL DEFAULT 30;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gacha_claimed BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root_rarity TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_beast_rarity TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_attack INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_defense INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_speed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_spirit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_skill TEXT;
+
     UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0), realm_tier=COALESCE(realm_tier,1);
 
     CREATE TABLE IF NOT EXISTS treasure_items (
@@ -233,28 +242,79 @@ function hashPassword(password, salt) { return crypto.scryptSync(password, salt,
 function safeUser(user) { return { id:user.id, username:user.username, displayName:user.display_name, createdAt:user.created_at }; }
 
 
-const SPIRIT_ROOTS = [
-  'Thiên Linh Căn','Kim Linh Căn','Mộc Linh Căn','Thủy Linh Căn','Hỏa Linh Căn','Thổ Linh Căn',
-  'Băng Linh Căn','Lôi Linh Căn','Phong Linh Căn','Âm Dương Linh Căn','Ngũ Hành Linh Căn','Biến Dị Lôi Hỏa Linh Căn'
+const ROOT_POOL = [
+  ['Kim Linh Căn','Phàm',16,1.00],['Mộc Linh Căn','Phàm',16,1.00],['Thủy Linh Căn','Phàm',16,1.00],['Hỏa Linh Căn','Phàm',16,1.00],['Thổ Linh Căn','Phàm',16,1.00],
+  ['Băng Linh Căn','Hạ Phẩm',7,1.08],['Phong Linh Căn','Hạ Phẩm',6,1.08],['Lôi Linh Căn','Trung Phẩm',5,1.18],
+  ['Âm Linh Căn','Trung Phẩm',4,1.20],['Dương Linh Căn','Trung Phẩm',4,1.20],['Ngũ Hành Linh Căn','Thượng Phẩm',3,1.35],
+  ['Âm Dương Linh Căn','Hiếm',2,1.55],['Thiên Linh Căn','Sử Thi',1,1.90],['Biến Dị Lôi Hỏa Linh Căn','Thần Thoại',0.3,2.20]
 ];
-const SPIRIT_BEASTS = [
-  'Hàn Ngọc Hồ','Thanh Vân Hạc','Lôi Ảnh Lang','Xích Viêm Hổ','Huyền Quy','Bạch Vũ Ưng',
-  'Cửu U Miêu','Kim Giáp Tê','Tử Điện Điêu','Thanh Mộc Linh Lộc','Huyền Băng Ly','Xích Kim Viên',
-  'Phong Linh Hồ','U Minh Lang','Bích Nhãn Xà','Vân Hải Kình'
+const ROOT_NAMES = ['Kim Linh Căn','Mộc Linh Căn','Thủy Linh Căn','Hỏa Linh Căn','Thổ Linh Căn','Băng Linh Căn','Lôi Linh Căn','Phong Linh Căn','Âm Dương Linh Căn','Ngũ Hành Linh Căn','Biến Dị Lôi Hỏa Linh Căn'];
+const BEAST_POOL = [
+  ['Hàn Ngọc Hồ','Phàm',12,1.00],['Thanh Vân Hạc','Phàm',11,1.00],['Bạch Vũ Ưng','Hạ Phẩm',9,1.10],['Kim Giáp Tê','Hạ Phẩm',8,1.12],
+  ['Tử Điện Điêu','Trung Phẩm',7,1.22],['Thanh Mộc Linh Lộc','Trung Phẩm',7,1.20],['Lôi Ảnh Lang','Trung Phẩm',6,1.25],
+  ['Phong Linh Hồ','Thượng Phẩm',5,1.40],['Xích Viêm Hổ','Thượng Phẩm',5,1.45],['Huyền Băng Ly','Thượng Phẩm',4,1.50],
+  ['Xích Kim Viên','Hiếm',3,1.70],['Huyền Quy','Hiếm',3,1.75],['U Minh Lang','Sử Thi',2,2.00],
+  ['Cửu U Miêu','Sử Thi',1.5,2.10],['Bích Nhãn Xà','Sử Thi',1,2.15],['Vân Hải Kình','Thần Thoại',0.3,2.70]
 ];
-function randomFrom(list){ return list[crypto.randomInt(0,list.length)]; }
-function randomCultivationGifts(){ return {root:randomFrom(SPIRIT_ROOTS),beast:randomFrom(SPIRIT_BEASTS)}; }
+const BEAST_NAMES=['Bạch Vũ Ưng','Kim Giáp Tê','Tử Điện Điêu','Thanh Mộc Linh Lộc','Huyền Băng Ly','Xích Kim Viên','Phong Linh Hồ','U Minh Lang','Bích Nhãn Xà'];
+function weightedPick(pool){
+  const total=pool.reduce((n,x)=>n+Number(x[2]),0); let r=(crypto.randomInt(0,1000000)/1000000)*total;
+  for(const x of pool){r-=Number(x[2]); if(r<=0)return x;} return pool[pool.length-1];
+}
+function randomCultivationGifts(){
+  const r=weightedPick(ROOT_POOL), b=weightedPick(BEAST_POOL);
+  const rootName=r[0]==='Thiên Linh Căn' ? r[0] : r[0];
+  const beastName=b[0];
+  const rarity=b[1];
+  const mult=Number(b[3]);
+  const base=()=>Math.round(50*mult);
+  const attrs={
+    attack:base()+crypto.randomInt(0,31), defense:Math.round(base()*0.9)+crypto.randomInt(0,26),
+    speed:Math.round(base()*0.8)+crypto.randomInt(0,21), spirit:Math.round(base()*0.7)+crypto.randomInt(0,21),
+    skill:`${rarity} · ${beastName} — Thiên phú ${rarity==='Thần Thoại'?'Thần Thông':rarity==='Sử Thi'?'Bản Mệnh':'Linh Uy'}`
+  };
+  return {root:rootName,rootRarity:r[1],rootMult:Number(r[3]),beast:beastName,beastRarity:rarity,beastAttrs:attrs};
+}
+function rarityBonus(rarity){
+  return ({'Phàm':0,'Hạ Phẩm':0.03,'Trung Phẩm':0.08,'Thượng Phẩm':0.15,'Hiếm':0.25,'Sử Thi':0.40,'Thần Thoại':0.60}[rarity]||0);
+}
+function inferRootRarity(name){
+  if(!name)return null;
+  if(name.includes('Biến Dị'))return 'Sử Thi';
+  if(name.includes('Thiên'))return 'Hiếm';
+  if(name.includes('Âm Dương')||name.includes('Ngũ Hành')||name.includes('Băng')||name.includes('Lôi'))return 'Thượng Phẩm';
+  return 'Trung Phẩm';
+}
+function inferBeastRarity(name){
+  if(!name)return null;
+  if(['Vân Hải Kình'].includes(name))return 'Thần Thoại';
+  if(['Cửu U Miêu','Huyền Quy'].includes(name))return 'Sử Thi';
+  if(['Xích Viêm Hổ','Huyền Băng Ly','Xích Kim Viên'].includes(name))return 'Thượng Phẩm';
+  return 'Trung Phẩm';
+}
 
 async function ensureProfile(userId) {
   await query('INSERT INTO profiles(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING', [userId]);
-  const p=(await query('SELECT spirit_power,spirit_root,spirit_beast FROM profiles WHERE user_id=$1',[userId])).rows[0];
-  const gift=randomCultivationGifts();
-  const root=p.spirit_root || gift.root;
-  const beast=p.spirit_beast || gift.beast;
+  const p=(await query('SELECT spirit_power,spirit_root,spirit_beast,gacha_claimed FROM profiles WHERE user_id=$1',[userId])).rows[0];
   const stage=stageFor(Number(p.spirit_power)||0);
-  await query(`UPDATE profiles SET rank=$2, realm_tier=$3, spirit_root=COALESCE(spirit_root,$4), spirit_beast=COALESCE(spirit_beast,$5), storage_capacity=COALESCE(storage_capacity,30), updated_at=NOW() WHERE user_id=$1`,
-    [userId, stage.realm, stage.tier, root, beast]);
+  // Existing accounts from v2.8 already have a roll; lock it. New accounts get one roll only.
+  const claimed = Boolean(p.gacha_claimed) || Boolean(p.spirit_root) || Boolean(p.spirit_beast);
+  const rootRarity=p.spirit_root ? inferRootRarity(p.spirit_root) : null;
+  const beastRarity=p.spirit_beast ? inferBeastRarity(p.spirit_beast) : null;
+  const hasOldBeast=Boolean(p.spirit_beast);
+  await query(`UPDATE profiles SET rank=$2, realm_tier=$3, storage_capacity=COALESCE(storage_capacity,30),
+    gacha_claimed=$4,
+    spirit_root_rarity=COALESCE(spirit_root_rarity,$5),
+    spirit_beast_rarity=COALESCE(spirit_beast_rarity,$6),
+    beast_attack=CASE WHEN $7 THEN GREATEST(beast_attack,50) ELSE beast_attack END,
+    beast_defense=CASE WHEN $7 THEN GREATEST(beast_defense,45) ELSE beast_defense END,
+    beast_speed=CASE WHEN $7 THEN GREATEST(beast_speed,40) ELSE beast_speed END,
+    beast_spirit=CASE WHEN $7 THEN GREATEST(beast_spirit,35) ELSE beast_spirit END,
+    beast_skill=CASE WHEN $7 AND (beast_skill IS NULL OR beast_skill='') THEN 'Linh Uy' ELSE beast_skill END,
+    updated_at=NOW() WHERE user_id=$1`,
+    [userId, stage.realm, stage.tier, claimed, rootRarity, beastRarity, hasOldBeast]);
 }
+
 async function ensureAchievements(userId, spirit) {
   await query(`INSERT INTO achievements(user_id,title,description,points) VALUES($1,'Nhập môn Hàn Thiên','Đã ghi danh và bước qua sơn môn.',10) ON CONFLICT (user_id,title) DO NOTHING`, [userId]);
   const milestones = [
@@ -340,7 +400,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const stage=stageFor(p.spirit_power);
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
-    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,spiritBeast:p.spirit_beast,storageCapacity:Number(p.storage_capacity)||30}});
+    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30}});
   } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
 });
 
@@ -363,13 +423,13 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     if(!a.rows.length) await query('INSERT INTO daily_activity(user_id,activity_date,train_count,buy_count,stone_claim_count) VALUES($1,$2,0,0,0)',[req.session.user_id,today]);
     else if(String(a.rows[0].activity_date).slice(0,10)!==today) await query('UPDATE daily_activity SET activity_date=$2,train_count=0,buy_count=0,stone_claim_count=0 WHERE user_id=$1',[req.session.user_id,today]);
     else trainCount=Number(a.rows[0].train_count)||0;
-    const prof=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const prof=(await query('SELECT spirit_power,spirit_root_rarity FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
     const currentStage=stageFor(Number(prof.spirit_power)||0);
     const maxDaily=Math.max(3,10-currentStage.realmIndex);
     if(trainCount>=maxDaily)return res.status(429).json({error:`Hôm nay đã vận công ${trainCount}/${maxDaily} lần. Cảnh giới càng cao càng khó tu luyện; hãy quay lại ngày mai.`,trainCount,maxDaily});
     const baseMax=Math.max(28,72-currentStage.realmIndex*5-currentStage.tier*2);
     const baseMin=Math.max(12,Math.floor(baseMax*0.55));
-    const gain=crypto.randomInt(baseMin,baseMax+1);
+    const rawGain=crypto.randomInt(baseMin,baseMax+1); const gain=Math.max(1,Math.round(rawGain*(1+rarityBonus(prof.spirit_root_rarity))));
     const r=await query('UPDATE profiles SET spirit_power=spirit_power+$2, experience=experience+$2, updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,experience',[req.session.user_id,gain]);
     const spirit=r.rows[0].spirit_power;
     const stage=stageFor(spirit);
@@ -389,7 +449,7 @@ app.get('/api/treasure',auth,async(req,res)=>{
     const items=(await query(`SELECT ti.*,COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
       ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
-    res.json({spiritStones:p.spirit_stones,realm:stage.realm,tier:stage.tier,items});
+    res.json({spiritPower:Number(p.spirit_power)||0,spiritStones:Number(p.spirit_stones)||0,realm:stage.realm,tier:stage.tier,items});
   } catch(e){res.status(500).json({error:'Không thể mở Tàng Bảo Các.'});}
 });
 
@@ -444,9 +504,9 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
       await client.query('ROLLBACK');
       return res.status(403).json({error:`Vật phẩm này yêu cầu ${RANKS[Number(item.min_realm)].name}. Bạn hiện ở ${stage.stage}.`});
     }
-    if(Number(p.spirit_stones) < Number(item.price)){
+    if(Number(p.spirit_power) < Number(item.price)){
       await client.query('ROLLBACK');
-      return res.status(400).json({error:`Linh thạch không đủ. Cần ${Number(item.price).toLocaleString('vi-VN')} 💎, hiện có ${Number(p.spirit_stones).toLocaleString('vi-VN')} 💎.`});
+      return res.status(400).json({error:`Linh lực không đủ. Cần ${Number(item.price).toLocaleString('vi-VN')} linh lực, hiện có ${Number(p.spirit_power).toLocaleString('vi-VN')}.`});
     }
 
     const capR=await client.query(`SELECT COALESCE(storage_capacity,30)::int AS capacity,
@@ -459,14 +519,13 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
       return res.status(400).json({error:`Tụ Di Giới đã đầy (${used}/${capacity}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
     }
 
-    const newStones=Number(p.spirit_stones)-Number(item.price);
-    let newSpirit=Number(p.spirit_power)||0;
+    let newSpirit=(Number(p.spirit_power)||0)-Number(item.price);
     if(Number(item.spirit_gain)>0)newSpirit+=Number(item.spirit_gain);
     const ns=stageFor(newSpirit);
 
     await client.query(
-      `UPDATE profiles SET spirit_stones=$2, spirit_power=$3, experience=experience+$4, rank=$5, realm_tier=$6, updated_at=NOW() WHERE user_id=$1`,
-      [req.session.user_id,newStones,newSpirit,Number(item.spirit_gain)||0,ns.realm,ns.tier]
+      `UPDATE profiles SET spirit_power=$2, experience=experience+$3, rank=$4, realm_tier=$5, updated_at=NOW() WHERE user_id=$1`,
+      [req.session.user_id,newSpirit,Number(item.spirit_gain)||0,ns.realm,ns.tier]
     );
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW())
       ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[req.session.user_id,itemId]);
@@ -482,7 +541,7 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
         activity_date=${today}`,[req.session.user_id]);
 
     await client.query('COMMIT');
-    res.json({ok:true,item:item.name,spiritStones:newStones,spirit:newSpirit,stage:ns.stage,quantityAdded:1});
+    res.json({ok:true,item:item.name,spirit:newSpirit,spentSpirit:Number(item.price),stage:ns.stage,quantityAdded:1});
   } catch(e){
     try{await client.query('ROLLBACK')}catch{}
     console.error('Treasure purchase error:',e);
@@ -503,12 +562,27 @@ app.get('/api/tu-di-gioi',auth,async(req,res)=>{
 });
 
 app.post('/api/random-gifts',auth,async(req,res)=>{
+  const client=await pool.connect();
   try{
-    await ensureProfile(req.session.user_id);
+    await client.query('BEGIN');
+    const p=(await client.query(`SELECT gacha_claimed,spirit_root FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
+    if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ đệ tử.'});}
+    if(p.gacha_claimed || p.spirit_root){
+      await client.query('ROLLBACK');
+      return res.status(409).json({error:'Duyên Ngẫu Nhiên chỉ được sử dụng 1 lần duy nhất.'});
+    }
     const gift=randomCultivationGifts();
-    const r=await query(`UPDATE profiles SET spirit_root=$2,spirit_beast=$3,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_root,spirit_beast`,[req.session.user_id,gift.root,gift.beast]);
-    res.json({ok:true,spiritRoot:r.rows[0].spirit_root,spiritBeast:r.rows[0].spirit_beast});
-  }catch(e){res.status(500).json({error:'Không thể ngẫu nhiên linh căn và linh thú.'});}
+    const a=gift.beastAttrs;
+    const r=await client.query(`UPDATE profiles SET spirit_root=$2,spirit_root_rarity=$3,spirit_beast=$4,spirit_beast_rarity=$5,
+      beast_attack=$6,beast_defense=$7,beast_speed=$8,beast_spirit=$9,beast_skill=$10,gacha_claimed=TRUE,updated_at=NOW()
+      WHERE user_id=$1 RETURNING spirit_root,spirit_root_rarity,spirit_beast,spirit_beast_rarity,beast_attack,beast_defense,beast_speed,beast_spirit,beast_skill`,
+      [req.session.user_id,gift.root,gift.rootRarity,gift.beast,gift.beastRarity,a.attack,a.defense,a.speed,a.spirit,a.skill]);
+    await client.query('COMMIT');
+    res.json({ok:true,once:true,spiritRoot:r.rows[0].spirit_root,rootRarity:r.rows[0].spirit_root_rarity,
+      spiritBeast:r.rows[0].spirit_beast,beastRarity:r.rows[0].spirit_beast_rarity,beastAttributes:{
+        attack:r.rows[0].beast_attack,defense:r.rows[0].beast_defense,speed:r.rows[0].beast_speed,spirit:r.rows[0].beast_spirit,skill:r.rows[0].beast_skill}});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('Gacha error:',e);res.status(500).json({error:'Không thể ngẫu nhiên linh căn và linh thú.'});}
+  finally{client.release();}
 });
 
 app.get('/api/inventory',auth,async(req,res)=>{

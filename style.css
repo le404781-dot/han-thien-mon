@@ -42,3 +42,7 @@
 .inventory-card{display:flex;gap:12px;padding:18px;border:1px solid rgba(120,95,55,.22);border-radius:16px;background:rgba(255,250,238,.72)}
 .inventory-card .item-seal{font-size:24px}
 .inventory-card h3{margin:4px 0 7px}.inventory-card p{margin:0 0 8px;color:#6b6255}
+
+.spirit-companion-panel{margin-top:18px;padding:20px;border:1px solid rgba(74,60,38,.18);border-radius:16px;background:rgba(255,252,242,.72);box-shadow:0 8px 28px rgba(42,35,22,.06)}
+.spirit-companion-panel .attribute-grid{margin-top:14px}
+.random-gifts-panel{margin-top:18px}
