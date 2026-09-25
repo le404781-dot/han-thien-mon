@@ -57,6 +57,16 @@ async function ensureRuntimeSchema() {
       buy_count INTEGER NOT NULL DEFAULT 0,
       stone_claim_count INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS realm_breakthrough_rewards (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      realm_index INTEGER NOT NULL,
+      realm_name TEXT NOT NULL,
+      amount INTEGER NOT NULL CHECK(amount > 0),
+      granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id, realm_index)
+    );
+    CREATE INDEX IF NOT EXISTS idx_realm_breakthrough_rewards_user ON realm_breakthrough_rewards(user_id, realm_index);
     CREATE TABLE IF NOT EXISTS owned_spirit_beasts (
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -123,6 +133,29 @@ function stageFor(spirit) {
   return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1]};
 }
 function rankFor(spirit) { return RANKS[realmIndexFor(spirit)]; }
+
+// Thưởng đột phá cảnh giới: mỗi lần bước sang một đại cảnh giới mới,
+// môn nhân nhận đúng số linh thạch tương ứng với chi phí khởi động bí cảnh của cảnh giới đó.
+// Dùng bảng unique để không thể nhận lặp do reload, retry hoặc nhiều request đồng thời.
+async function grantRealmBreakthroughRewards(client, userId, oldRealmIndex, newRealmIndex) {
+  const from = Number(oldRealmIndex);
+  const to = Number(newRealmIndex);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return [];
+  const rewards = [];
+  for (let ri = Math.max(1, from + 1); ri <= Math.min(to, RANKS.length - 1); ri++) {
+    const realm = RANKS[ri];
+    const costR = await client.query('SELECT activation_cost FROM secret_realms WHERE required_realm_index=$1 LIMIT 1',[ri]);
+    const amount = Number(costR.rows[0]?.activation_cost) || 0;
+    if (amount <= 0) continue;
+    const ins = await client.query(`INSERT INTO realm_breakthrough_rewards(user_id,realm_index,realm_name,amount)
+      VALUES($1,$2,$3,$4) ON CONFLICT(user_id,realm_index) DO NOTHING RETURNING amount`,[userId,ri,realm.name,amount]);
+    if (ins.rows.length) {
+      await client.query('UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1',[userId,amount]);
+      rewards.push({realmIndex:ri,realmName:realm.name,amount});
+    }
+  }
+  return rewards;
+}
 const POSITION_RULES = [
   {name:'Ngoại môn đệ tử', min:0, max:0},
   {name:'Nội môn đệ tử', min:1, max:2},
@@ -402,6 +435,40 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_challenge_opponent_status ON challenge_requests(opponent_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_challenger_status ON challenge_requests(challenger_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_history ON challenge_requests(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS discipleship_requests (
+      id BIGSERIAL PRIMARY KEY,
+      disciple_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mentor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected','cancelled')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      UNIQUE(disciple_id, mentor_id, status)
+    );
+    CREATE INDEX IF NOT EXISTS idx_discipleship_requests_mentor ON discipleship_requests(mentor_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_discipleship_requests_disciple ON discipleship_requests(disciple_id,status,created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS mentor_disciples (
+      id BIGSERIAL PRIMARY KEY,
+      mentor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      disciple_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK(mentor_id <> disciple_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mentor_disciples_mentor ON mentor_disciples(mentor_id,created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS disciple_challenge_permissions (
+      id BIGSERIAL PRIMARY KEY,
+      disciple_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      challenger_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mentor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','used')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      used_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_disciple_perm_mentor ON disciple_challenge_permissions(mentor_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_disciple_perm_lookup ON disciple_challenge_permissions(disciple_id,challenger_id,status,created_at DESC);
 
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_percent INTEGER NOT NULL DEFAULT 0;
@@ -1020,6 +1087,7 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     const rawGain=crypto.randomInt(baseMin,baseMax+1); const gain=Math.max(1,Math.round(rawGain*(1+rarityBonus(prof.spirit_root_rarity))));
     const r=await client.query('UPDATE profiles SET spirit_power=spirit_power+$2, experience=experience+$2, updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,experience',[userId,gain]);
     const spirit=r.rows[0].spirit_power; const stage=stageFor(spirit);
+    const breakthroughRewards=await grantRealmBreakthroughRewards(client,userId,currentStage.realmIndex,stage.realmIndex);
     await client.query('UPDATE profiles SET rank=$2, realm_tier=$3 WHERE user_id=$1',[userId,stage.realm,stage.tier]);
     await client.query(`INSERT INTO daily_activity(user_id,activity_date,train_count,buy_count,stone_claim_count) VALUES($1,$2,1,0,0)
       ON CONFLICT(user_id) DO UPDATE SET activity_date=$2,train_count=CASE WHEN daily_activity.activity_date=$2 THEN daily_activity.train_count+1 ELSE 1 END,
@@ -1027,7 +1095,8 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     await logActivityEvent(client,userId,'train');
     await client.query('COMMIT');
     await ensureAchievements(userId,spirit);
-    res.json({gain,spirit,experience:r.rows[0].experience,progress:progressFor(spirit),rank:stage.realm,stage:stage.stage,trainCount:trainCount+1,maxDaily});
+    const stoneReward=breakthroughRewards.reduce((sum,x)=>sum+Number(x.amount||0),0);
+    res.json({gain,spirit,experience:r.rows[0].experience,progress:progressFor(spirit),rank:stage.realm,stage:stage.stage,trainCount:trainCount+1,maxDaily,breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${stage.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
   } catch(e){try{await client.query('ROLLBACK')}catch{};console.error(e);res.status(500).json({error:'Không thể vận công lúc này.'});} finally{client.release();}
 });
 
@@ -1057,9 +1126,11 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       const rate=1+st.realmIndex;
       const gain=Math.max(0,Math.min(minutes*rate,dailyCap-earned));
       let spirit=Number(p.spirit_power)||0;
+      let breakthroughRewards=[];
       if(gain>0){
         spirit+=gain; earned+=gain;
         const ns=stageFor(spirit);
+        breakthroughRewards=await grantRealmBreakthroughRewards(client,req.session.user_id,st.realmIndex,ns.realmIndex);
         await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,last_online_at=NOW(),online_spirit_date=$6,online_spirit_earned=$7,updated_at=NOW() WHERE user_id=$1`,
           [req.session.user_id,spirit,gain,ns.realm,ns.tier,today,earned]);
       } else {
@@ -1067,7 +1138,8 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       }
       await client.query('COMMIT');
       const ns=stageFor(spirit);
-      res.json({mode:'online',active:true,gain,onlineEarned:earned,dailyCap,rate,spirit,stage:ns.stage,nextTickSeconds:60});
+      const stoneReward=breakthroughRewards.reduce((sum,x)=>sum+Number(x.amount||0),0);
+      res.json({mode:'online',active:true,gain,onlineEarned:earned,dailyCap,rate,spirit,stage:ns.stage,nextTickSeconds:60,breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
   }catch(e){console.error('online cultivation:',e);res.status(500).json({error:'Không thể cập nhật linh lực trực tuyến.'});}
 });
@@ -1901,6 +1973,144 @@ async function applyChallengeWin(client,userId,mode,odds){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SƯ ĐỒ · Bảo hộ + nhận đệ tử
+// ─────────────────────────────────────────────────────────────────────────────
+async function activeMentor(client,userId){
+  return (await client.query(`SELECT md.mentor_id,u.display_name AS mentor_name,p.rank,p.spirit_power
+    FROM mentor_disciples md JOIN users u ON u.id=md.mentor_id JOIN profiles p ON p.user_id=md.mentor_id
+    WHERE md.disciple_id=$1`,[userId])).rows[0]||null;
+}
+async function mentorCanTakeMore(client,mentorId){
+  const p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[mentorId])).rows[0];
+  if(!p)return {ok:false,error:'Không tìm thấy hồ sơ sư phụ.'};
+  const st=stageFor(Number(p.spirit_power)||0);
+  if(st.realmIndex<5)return {ok:false,error:'Chỉ từ Luyện Hư mới được nhận đệ tử.'};
+  const c=Number((await client.query('SELECT COUNT(*)::int AS c FROM mentor_disciples WHERE mentor_id=$1',[mentorId])).rows[0].c)||0;
+  if(c>=2)return {ok:false,error:'Sư phụ đã đủ tối đa 2 đệ tử.'};
+  return {ok:true,stage:st,count:c};
+}
+async function consumeDiscipleChallengePermission(client,challengerId,targetId,consume=true){
+  const mentor=(await client.query(`SELECT md.mentor_id,mp.spirit_power AS mentor_spirit,mu.display_name AS mentor_name
+    FROM mentor_disciples md JOIN profiles mp ON mp.user_id=md.mentor_id JOIN users mu ON mu.id=md.mentor_id
+    WHERE md.disciple_id=$1`,[targetId])).rows[0];
+  if(!mentor)return {allowed:true};
+  const attacker=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1',[challengerId])).rows[0];
+  if(!attacker)return {allowed:false,error:'Không tìm thấy hồ sơ người khiêu chiến.'};
+  const aStage=stageFor(Number(attacker.spirit_power)||0), mStage=stageFor(Number(mentor.mentor_spirit)||0);
+  if(aStage.realmIndex>=mStage.realmIndex)return {allowed:true,mentor};
+  const perm=(await client.query(`SELECT id FROM disciple_challenge_permissions
+    WHERE disciple_id=$1 AND challenger_id=$2 AND mentor_id=$3 AND status='approved'
+    ORDER BY responded_at DESC NULLS LAST,id DESC LIMIT 1 FOR UPDATE`,[targetId,challengerId,mentor.mentor_id])).rows[0];
+  if(!perm){
+    return {allowed:false,mentor,protected:true,error:`${mentor.mentor_name} đang bảo hộ đệ tử. Bạn phải gửi truyền tin xin sư phụ chấp thuận trước khi khiêu chiến.`};
+  }
+  if(consume) await client.query(`UPDATE disciple_challenge_permissions SET status='used',used_at=NOW() WHERE id=$1`,[perm.id]);
+  return {allowed:true,mentor,permissionUsed:consume};
+}
+
+app.get('/api/disciples',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id;
+    const [mentor,disciples,incoming,outgoing,permissions,users]=await Promise.all([
+      query(`SELECT md.mentor_id,u.display_name AS mentor_name,p.rank,p.spirit_power,p.realm_tier FROM mentor_disciples md JOIN users u ON u.id=md.mentor_id JOIN profiles p ON p.user_id=md.mentor_id WHERE md.disciple_id=$1`,[uid]),
+      query(`SELECT md.disciple_id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title FROM mentor_disciples md JOIN users u ON u.id=md.disciple_id JOIN profiles p ON p.user_id=md.disciple_id WHERE md.mentor_id=$1 ORDER BY md.created_at`,[uid]),
+      query(`SELECT dr.id,dr.disciple_id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier FROM discipleship_requests dr JOIN users u ON u.id=dr.disciple_id JOIN profiles p ON p.user_id=u.id WHERE dr.mentor_id=$1 AND dr.status='pending' ORDER BY dr.created_at DESC`,[uid]),
+      query(`SELECT dr.id,dr.mentor_id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier FROM discipleship_requests dr JOIN users u ON u.id=dr.mentor_id JOIN profiles p ON p.user_id=u.id WHERE dr.disciple_id=$1 AND dr.status='pending' ORDER BY dr.created_at DESC`,[uid]),
+      query(`SELECT cp.id,cp.disciple_id,cp.challenger_id,cp.mentor_id,cp.status,cp.created_at,du.display_name AS disciple_name,cu.display_name AS challenger_name FROM disciple_challenge_permissions cp JOIN users du ON du.id=cp.disciple_id JOIN users cu ON cu.id=cp.challenger_id WHERE cp.mentor_id=$1 AND cp.status='pending' ORDER BY cp.created_at DESC`,[uid]),
+      query(`SELECT u.id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY p.spirit_power DESC,u.id`,[uid])
+    ]);
+    const me=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[uid])).rows[0];
+    const st=stageFor(Number(me?.spirit_power)||0);
+    const mentorCandidates=users.rows.map(x=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex}));
+    res.json({eligible:st.realmIndex>=5,stage:st,mentor:mentor.rows[0]||null,disciples:disciples.rows,incoming:incoming.rows,outgoing:outgoing.rows,permissions:permissions.rows,users:mentorCandidates});
+  }catch(e){console.error('disciples load:',e);res.status(500).json({error:'Không thể mở Sư Đồ.'});}
+});
+
+app.post('/api/disciples/request',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id,mentorId=Number(req.body?.mentorId);
+    if(!Number.isInteger(mentorId)||mentorId<1||mentorId===uid)return res.status(400).json({error:'Sư phụ không hợp lệ.'});
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      if((await client.query('SELECT 1 FROM mentor_disciples WHERE disciple_id=$1',[uid])).rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã có sư phụ.'});}
+      const cap=await mentorCanTakeMore(client,mentorId);
+      if(!cap.ok){await client.query('ROLLBACK');return res.status(400).json({error:cap.error});}
+      const exists=(await client.query('SELECT id FROM users WHERE id=$1',[mentorId])).rows[0];
+      if(!exists){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân.'});}
+      await client.query(`UPDATE discipleship_requests SET status='cancelled',responded_at=NOW() WHERE disciple_id=$1 AND status='pending'`,[uid]);
+      const r=await client.query(`INSERT INTO discipleship_requests(disciple_id,mentor_id,status) VALUES($1,$2,'pending') RETURNING id`,[uid,mentorId]);
+      await client.query('COMMIT');res.status(201).json({ok:true,id:r.rows[0].id,message:'Đã gửi truyền tin bái sư. Chờ sư phụ chấp thuận.'});
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+  }catch(e){console.error('disciples request:',e);res.status(500).json({error:'Không thể gửi lời bái sư.'});}
+});
+
+app.post('/api/disciples/respond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,id=Number(req.body?.requestId),action=String(req.body?.action||'');
+    if(!Number.isInteger(id)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu không hợp lệ.'});
+    await client.query('BEGIN');
+    const r=(await client.query(`SELECT * FROM discipleship_requests WHERE id=$1 AND mentor_id=$2 AND status='pending' FOR UPDATE`,[id,uid])).rows[0];
+    if(!r){await client.query('ROLLBACK');return res.status(404).json({error:'Lời bái sư không còn hiệu lực.'});}
+    if(action==='reject'){await client.query(`UPDATE discipleship_requests SET status='rejected',responded_at=NOW() WHERE id=$1`,[id]);await client.query('COMMIT');return res.json({ok:true,message:'Đã từ chối lời bái sư.'});}
+    const cap=await mentorCanTakeMore(client,uid);
+    if(!cap.ok){await client.query('ROLLBACK');return res.status(400).json({error:cap.error});}
+    if((await client.query('SELECT 1 FROM mentor_disciples WHERE disciple_id=$1',[r.disciple_id])).rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Môn nhân này đã có sư phụ.'});}
+    await client.query(`INSERT INTO mentor_disciples(mentor_id,disciple_id) VALUES($1,$2)`,[uid,r.disciple_id]);
+    await client.query(`UPDATE discipleship_requests SET status='accepted',responded_at=NOW() WHERE id=$1`,[id]);
+    await client.query(`UPDATE discipleship_requests SET status='cancelled',responded_at=NOW() WHERE disciple_id=$1 AND id<>$2 AND status='pending'`,[r.disciple_id,id]);
+    await client.query('COMMIT');res.json({ok:true,message:'Đã nhận môn nhân làm đệ tử. Đệ tử nhận bảo hộ của sư phụ.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('disciples respond:',e);res.status(500).json({error:'Không thể xử lý lời bái sư.'});}finally{client.release();}
+});
+
+app.post('/api/disciples/permission',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id,discipleId=Number(req.body?.discipleId),mentorId=Number(req.body?.mentorId);
+    if(!Number.isInteger(discipleId)||!Number.isInteger(mentorId))return res.status(400).json({error:'Thông tin xin phép không hợp lệ.'});
+    const ok=(await query('SELECT 1 FROM mentor_disciples WHERE mentor_id=$1 AND disciple_id=$2',[mentorId,discipleId])).rows[0];
+    if(!ok)return res.status(404).json({error:'Không tìm thấy quan hệ sư đồ.'});
+    const existing=(await query(`SELECT id FROM disciple_challenge_permissions WHERE disciple_id=$1 AND challenger_id=$2 AND mentor_id=$3 AND status='pending'`,[discipleId,uid,mentorId])).rows[0];
+    if(existing)return res.status(409).json({error:'Bạn đã gửi truyền tin xin phép, đang chờ sư phụ phê chuẩn.'});
+    const r=await query(`INSERT INTO disciple_challenge_permissions(disciple_id,challenger_id,mentor_id,status) VALUES($1,$2,$3,'pending') RETURNING id`,[discipleId,uid,mentorId]);
+    res.status(201).json({ok:true,id:r.rows[0].id,message:'Đã gửi truyền tin xin sư phụ chấp thuận.'});
+  }catch(e){console.error('disciples permission:',e);res.status(500).json({error:'Không thể gửi truyền tin xin phép.'});}
+});
+
+app.post('/api/disciples/permission/respond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,id=Number(req.body?.requestId),action=String(req.body?.action||'');
+    if(!Number.isInteger(id)||!['approve','reject'].includes(action))return res.status(400).json({error:'Yêu cầu không hợp lệ.'});
+    await client.query('BEGIN');
+    const r=(await client.query(`SELECT * FROM disciple_challenge_permissions WHERE id=$1 AND mentor_id=$2 AND status='pending' FOR UPDATE`,[id,uid])).rows[0];
+    if(!r){await client.query('ROLLBACK');return res.status(404).json({error:'Truyền tin không còn hiệu lực.'});}
+    await client.query(`UPDATE disciple_challenge_permissions SET status=$2,responded_at=NOW() WHERE id=$1`,[id,action==='approve'?'approved':'rejected']);
+    await client.query('COMMIT');res.json({ok:true,message:action==='approve'?'Đã chấp thuận khiêu chiến đối với đệ tử.':'Đã từ chối khiêu chiến đối với đệ tử.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể phê chuẩn truyền tin.'});}finally{client.release();}
+});
+
+app.post('/api/disciples/gift',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,target=Number(req.body?.discipleId),itemId=Number(req.body?.itemId),qty=Math.floor(Number(req.body?.quantity)||0);
+    if(!Number.isInteger(target)||!Number.isInteger(itemId)||qty<1)return res.status(400).json({error:'Thông tin tặng vật phẩm không hợp lệ.'});
+    await client.query('BEGIN');
+    const relation=(await client.query(`SELECT 1 FROM mentor_disciples WHERE mentor_id=$1 AND disciple_id=$2`,[uid,target])).rows[0];
+    if(!relation){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ có thể tặng vật phẩm cho đệ tử trực thuộc.'});}
+    const sender=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,itemId])).rows[0];
+    if(!sender||Number(sender.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Sư phụ không đủ số lượng vật phẩm.'});}
+    const cap=(await client.query(`SELECT storage_capacity,COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned,COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used FROM profiles WHERE user_id=$1 FOR UPDATE`,[target,itemId])).rows[0];
+    if(!cap){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy đệ tử.'});}
+    if(Number(cap.used)>=Number(cap.storage_capacity)&&Number(cap.owned)<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới của đệ tử đã đầy.'});}
+    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,itemId,qty]);
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[target,itemId,qty]);
+    const item=(await client.query('SELECT name FROM treasure_items WHERE id=$1',[itemId])).rows[0];
+    await client.query('COMMIT');res.json({ok:true,message:`Đã ban tặng ${item?.name||'vật phẩm'} ×${qty} cho đệ tử.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('disciple gift:',e);res.status(500).json({error:'Không thể tặng vật phẩm.'});}finally{client.release();}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BẰNG HỮU · Kết giao + chat riêng
 // ─────────────────────────────────────────────────────────────────────────────
 app.get('/api/challenges',auth,async(req,res)=>{
@@ -1932,6 +2142,8 @@ app.post('/api/challenges/offline',auth,async(req,res)=>{
     const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[uid,target])).rows;
     const me=rows.find(x=>Number(x.id)===uid), opp=rows.find(x=>Number(x.id)===target);
     if(!me||!opp){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy đối thủ.'});}
+    const protection=await consumeDiscipleChallengePermission(client,uid,target);
+    if(!protection.allowed){await client.query('ROLLBACK');return res.status(403).json({error:protection.error,protected:true,mentorId:protection.mentor?.mentor_id,mentorName:protection.mentor?.mentor_name,discipleId:target});}
     const odds=challengeOdds(me,opp);
     const roll=Math.random();
     const win=roll<odds.chance;
@@ -1946,18 +2158,24 @@ app.post('/api/challenges/offline',auth,async(req,res)=>{
 });
 
 app.post('/api/challenges/online/request',auth,async(req,res)=>{
+  const client=await pool.connect();
   try{
     const uid=req.session.user_id,target=Number(req.body?.userId);
     if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
-    const exists=(await query('SELECT id FROM users WHERE id=$1',[target])).rows[0];
-    if(!exists)return res.status(404).json({error:'Không tìm thấy môn nhân.'});
-    const pending=(await query(`SELECT id FROM challenge_requests WHERE challenger_id=$1 AND opponent_id=$2 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
-    if(pending)return res.status(409).json({error:'Bạn đã mở lôi đài và đang chờ đối phương đồng thuận.'});
-    const incoming=(await query(`SELECT id FROM challenge_requests WHERE challenger_id=$2 AND opponent_id=$1 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
-    if(incoming)return res.status(409).json({error:'Đối phương đã mở lôi đài với bạn. Hãy vào Khiêu Chiến để đồng thuận.'});
-    const r=await query(`INSERT INTO challenge_requests(challenger_id,opponent_id,mode,status) VALUES($1,$2,'online','pending') RETURNING id,created_at`,[uid,target]);
+    await client.query('BEGIN');
+    const exists=(await client.query('SELECT id FROM users WHERE id=$1',[target])).rows[0];
+    if(!exists){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân.'});}
+    const protection=await consumeDiscipleChallengePermission(client,uid,target,false);
+    if(!protection.allowed){await client.query('ROLLBACK');return res.status(403).json({error:protection.error,protected:true,mentorId:protection.mentor?.mentor_id,mentorName:protection.mentor?.mentor_name,discipleId:target});}
+    const pending=(await client.query(`SELECT id FROM challenge_requests WHERE challenger_id=$1 AND opponent_id=$2 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
+    if(pending){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã mở lôi đài và đang chờ đối phương đồng thuận.'});}
+    const incoming=(await client.query(`SELECT id FROM challenge_requests WHERE challenger_id=$2 AND opponent_id=$1 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
+    if(incoming){await client.query('ROLLBACK');return res.status(409).json({error:'Đối phương đã mở lôi đài với bạn. Hãy vào Khiêu Chiến để đồng thuận.'});}
+    const r=await client.query(`INSERT INTO challenge_requests(challenger_id,opponent_id,mode,status) VALUES($1,$2,'online','pending') RETURNING id,created_at`,[uid,target]);
+    await client.query('COMMIT');
     res.status(201).json({ok:true,...r.rows[0],message:'Đã mở lôi đài. Chờ đối phương đồng thuận.'});
-  }catch(e){console.error('online challenge request:',e);res.status(500).json({error:'Không thể mở lôi đài.'});}
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge request:',e);res.status(500).json({error:'Không thể mở lôi đài.'});}
+  finally{client.release();}
 });
 
 app.post('/api/challenges/online/respond',auth,async(req,res)=>{
@@ -1977,6 +2195,8 @@ app.post('/api/challenges/online/respond',auth,async(req,res)=>{
     const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[ids[0],ids[1]])).rows;
     const challenger=rows.find(x=>Number(x.id)===Number(reqRow.challenger_id)), opponent=rows.find(x=>Number(x.id)===Number(reqRow.opponent_id));
     if(!challenger||!opponent){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ chiến đấu.'});}
+    const protection=await consumeDiscipleChallengePermission(client,Number(reqRow.challenger_id),Number(reqRow.opponent_id),true);
+    if(!protection.allowed){await client.query('ROLLBACK');return res.status(403).json({error:protection.error,protected:true,mentorId:protection.mentor?.mentor_id,mentorName:protection.mentor?.mentor_name,discipleId:Number(reqRow.opponent_id)});}
     const odds=challengeOdds(challenger,opponent);
     const win=Math.random()<odds.chance;
     const winnerId=win?challenger.id:opponent.id, loserId=win?opponent.id:challenger.id;

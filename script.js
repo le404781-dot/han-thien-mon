@@ -196,7 +196,7 @@ async function onlineCultivationTick(){
   try{
     const d=await api('/api/cultivation/online',{method:'POST',headers:authHeaders(),body:'{}'});
     if(d.mode==='online' && d.gain>0){
-      const msg=$('#trainMsg'); if(msg)msg.textContent=`☁ Trực tuyến: +${d.gain} linh lực. Tích lũy online hôm nay ${d.onlineEarned}/${d.dailyCap}. Tốc độ ${d.rate} linh lực/phút.`;
+      const msg=$('#trainMsg'); if(msg)msg.textContent=d.message||`☁ Trực tuyến: +${d.gain} linh lực. Tích lũy online hôm nay ${d.onlineEarned}/${d.dailyCap}. Tốc độ ${d.rate} linh lực/phút.`;
       await loadProfile();
     }
   }catch{}
@@ -216,7 +216,7 @@ function renderCultivation(p){
  </div>
  <div class="daily-stone-card"><div><span class="eyebrow">💎 LINH THẠCH HẰNG NGÀY</span><h3>Kho linh thạch: <b id="stoneCount">${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</b></h3><p>Mỗi ngày nhận <b>100 linh thạch</b> để sử dụng tại Tàng Bảo Các.</p></div><button class="btn primary" id="claimStoneBtn" ${p.canClaimStones?'':'disabled'}>${p.canClaimStones?'💎 Nhận 100 linh thạch':'✓ Đã nhận hôm nay'}</button></div>
  <p id="trainMsg" class="train-msg">Lượt tu luyện hôm nay: <b>${trainCount}/${maxDaily}</b>. ${trainCount>=maxDaily?'Đã mở chế độ tích lũy linh lực theo thời gian trực tuyến.':'Sau khi hết lượt, linh lực sẽ được tính theo thời gian online trên web.'}</p>`;
- $('#trainBtn').onclick=async()=>{const b=$('#trainBtn');b.disabled=true;b.textContent='☁ Đang vận công...';try{const d=await api('/api/cultivation/train',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=`+${d.gain} linh lực → ${d.stage} · Lượt hôm nay ${d.trainCount}/${d.maxDaily}. ${d.progress.next?`Còn ${d.progress.remaining} linh lực để tiến vào ${d.progress.next}.`:'Đã đạt cảnh giới tối cao.'}`;await loadProfile();await loadLeaderboard();}catch(e){$('#trainMsg').textContent=e.message;}finally{const latest=Number(currentProfile?.trainCount||0)>=Number(currentProfile?.maxDaily||10);b.disabled=latest;b.textContent=latest?'☁ Đã đủ lượt':'⚔ Vận công';}};
+ $('#trainBtn').onclick=async()=>{const b=$('#trainBtn');b.disabled=true;b.textContent='☁ Đang vận công...';try{const d=await api('/api/cultivation/train',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=d.message||`+${d.gain} linh lực → ${d.stage} · Lượt hôm nay ${d.trainCount}/${d.maxDaily}. ${d.progress.next?`Còn ${d.progress.remaining} linh lực để tiến vào ${d.progress.next}.`:'Đã đạt cảnh giới tối cao.'}`;await loadProfile();await loadLeaderboard();}catch(e){$('#trainMsg').textContent=e.message;}finally{const latest=Number(currentProfile?.trainCount||0)>=Number(currentProfile?.maxDaily||10);b.disabled=latest;b.textContent=latest?'☁ Đã đủ lượt':'⚔ Vận công';}};
  $('#claimStoneBtn').onclick=async()=>{const b=$('#claimStoneBtn');b.disabled=true;try{const d=await api('/api/spirit-stones/claim',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=`💎 ${d.amount} linh thạch đã nhập kho. Có thể dùng tại Tàng Bảo Các.`;await loadProfile();await loadTreasure();}catch(e){$('#trainMsg').textContent=e.message;b.disabled=false;}};
 }
 async function loadAchievements(){

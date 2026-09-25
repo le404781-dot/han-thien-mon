@@ -1,0 +1,30 @@
+HÀN THIÊN MÔN v3.6.17 — SƯ ĐỒ · BẢO HỘ · BAN TẶNG
+
+1. Sư phụ:
+- Từ cảnh giới Luyện Hư (cảnh giới index 5) mới được mở chức năng nhận đệ tử.
+- Mỗi sư phụ tối đa 2 đệ tử.
+- Đệ tử gửi lời bái sư; sư phụ chấp thuận mới hình thành quan hệ sư đồ.
+
+2. Đệ tử:
+- Mỗi môn nhân chỉ có tối đa 1 sư phụ.
+- Đệ tử được hiển thị trạng thái bảo hộ.
+- Sư phụ có thể ban tặng vật phẩm từ kho inventory bằng giao dịch transaction.
+- Kiểm tra Tu Di Giới của đệ tử trước khi nhận vật phẩm.
+
+3. Bảo hộ khiêu chiến:
+- Nếu người khiêu chiến có cảnh giới thấp hơn sư phụ của mục tiêu, cả Online và Offline đều bị chặn.
+- Người khiêu chiến có thể gửi truyền tin xin sư phụ chấp thuận.
+- Sư phụ có thể chấp thuận/từ chối.
+- Quyền chấp thuận được dùng cho một lần khiêu chiến và sau đó chuyển sang used.
+- Nếu người khiêu chiến cùng hoặc cao hơn cảnh giới sư phụ, quy tắc bảo hộ này không chặn.
+
+4. Database tự tạo:
+- discipleship_requests
+- mentor_disciples
+- disciple_challenge_permissions
+
+5. Giao diện:
+- Thêm mục 👑 Sư Đồ vào menu.
+- Hiển thị sư phụ, đệ tử, lời bái sư, yêu cầu phá bảo hộ.
+- Có chọn vật phẩm + số lượng để sư phụ tặng trực tiếp cho đệ tử.
+- Khi mục tiêu được bảo hộ, Khiêu Chiến hiển thị nút 📨 Xin phép.

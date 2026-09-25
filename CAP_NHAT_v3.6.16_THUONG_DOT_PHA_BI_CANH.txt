@@ -1,0 +1,10 @@
+HÀN THIÊN MÔN v3.6.16
+
+- Mỗi lần môn nhân đột phá sang MỘT ĐẠI CẢNH GIỚI mới sẽ nhận 1 khoản linh thạch tương ứng với chi phí khởi động Bí Cảnh của cảnh giới đó.
+- Mức thưởng lấy trực tiếp từ secret_realms.activation_cost:
+  Trúc Cơ 1.200; Kim Đan 2.500; Nguyên Anh 5.000; Hóa Thần 9.000; Luyện Hư 16.000; Hợp Thể 28.000; Đại Thừa 45.000; Độ Kiếp 80.000 linh thạch.
+- Không nhận thưởng khi chỉ tăng tầng trong cùng đại cảnh giới.
+- Không thể nhận trùng nhờ bảng realm_breakthrough_rewards với UNIQUE(user_id, realm_index).
+- Áp dụng cho cả Vận Công thủ công và linh lực tích lũy online.
+- Sau đột phá giao diện hiển thị thông báo số linh thạch nhận được để dùng mở Bí Cảnh.
+- Không xóa dữ liệu PostgreSQL hiện tại.
