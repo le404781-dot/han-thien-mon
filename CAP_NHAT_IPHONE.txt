@@ -1,0 +1,20 @@
+HAN THIEN MON v2.2 - CAP NHAT
+
+Quan trong:
+- Cac file cua website nam NGAY O THU MUC GOI NAY, khong nam trong thu muc con.
+- Giu nguyen DATABASE_URL hien tai cua Render.
+- Khong tao database moi neu database hien tai dang hoat dong.
+
+Tinh nang da co trong ma nguon:
+1. Gioi han tu luyen hang ngay; lam nhiem vu tong mon de mo them luot.
+2. Bi canh nhan linh thach va linh luc.
+3. Linh thach de mua phap bao, dan duoc; ho tro khieu chien.
+4. Canh gioi Nhat Tang -> Cuu Tang.
+5. Linh Thu Cac.
+6. Quyen han tang dan theo canh gioi.
+7. Chat tong, bang thanh tich, ho so de tu.
+
+Tren GitHub:
+- Thay cac file index.html, style.css, script.js, server.js, package.json, render.yaml.
+- Commit thay doi.
+- Render se tu dong deploy lai neu Auto Deploy dang bat.
