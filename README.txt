@@ -1,17 +1,22 @@
-HÀN THIÊN MÔN – BẢN POSTGRESQL
+HÀN THIÊN MÔN — BẢN MỞ RỘNG
 
-Bản này đã chuyển database từ SQLite sang PostgreSQL để phù hợp triển khai cloud lâu dài.
+Node.js + Express + PostgreSQL.
 
-LOCAL:
-1. Cài Node.js.
-2. Cài PostgreSQL và tạo DATABASE_URL.
-3. npm install
-4. DATABASE_URL="postgresql://..." npm start
+Tính năng:
+- Đăng ký / đăng nhập / đăng xuất
+- Hồ sơ đệ tử
+- Cảnh giới tu luyện + linh lực + vận công
+- Môn phái Hàn Thiên Môn
+- Chat tổng lưu trong PostgreSQL
+- Ký ức và môn sử
+- Bảng thành tích + huy hiệu
+- Giao diện tiên hiệp, responsive cho iPhone
 
-RENDER:
-1. Đưa toàn bộ thư mục lên GitHub.
-2. Trong Render chọn New -> Blueprint và chọn repository.
-3. Render đọc render.yaml, tạo Web Service + PostgreSQL.
-4. Chờ deploy xong, mở URL .onrender.com.
+Render:
+Build Command: npm install
+Start Command: npm start
+Environment:
+DATABASE_URL=<Internal Database URL của PostgreSQL>
+NODE_ENV=production
 
-Lưu ý: Không đưa mật khẩu database vào mã nguồn. DATABASE_URL phải nằm trong Environment Variables/Blueprint của Render.
+Lưu ý: không đưa DATABASE_URL lên GitHub hoặc chia sẻ công khai.
