@@ -27,7 +27,56 @@ function renderMembers(list=members){
 }
 function renderGallery(){ $('#galleryGrid').innerHTML=memories.map(m=>`<article class="memory"><div class="pic">${esc(m.icon)}</div><div class="caption">${esc(m.title)}<small>${esc(m.description)}</small></div></article>`).join(''); }
 function renderTimeline(){ $('#timelineList').innerHTML=timeline.map(e=>`<article class="event"><i class="dot"></i><span class="date">${esc(e.year)}</span><h3>${esc(e.title)}</h3><p>${esc(e.description)}</p></article>`).join(''); }
-function openMember(i){const m=members[i];if(!m)return;$('#modalContent').innerHTML=`<div class="modal-avatar">${esc(m.emoji)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${m.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div>`;$('#memberModal').showModal();}
+function openMember(i){
+ const m=members[i];if(!m)return;
+ const isSelf=currentUser&&Number(m.id)===Number(currentUser.id);
+ $('#modalContent').innerHTML=`<div class="modal-avatar">${esc(m.emoji)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${(m.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${!getToken()||isSelf?'':`<div class="friend-actions" id="memberFriendActions"><button class="btn small primary" id="memberFriendBtn">🤝 Đang kiểm tra...</button><button class="btn small ghost hidden" id="memberChatBtn">💬 Chat riêng</button></div><p id="memberFriendMsg" class="train-msg"></p>`}</div>`;
+ const friendsHost=$('#memberModal').showModal();
+ if(getToken()&&!isSelf) refreshMemberFriendState(Number(m.id));
+}
+
+async function refreshMemberFriendState(targetId){
+ const btn=$('#memberFriendBtn'), chat=$('#memberChatBtn'), msg=$('#memberFriendMsg');
+ if(!btn)return;
+ try{
+  const d=await api('/api/friends',{headers:authHeaders()});
+  const f=(d.friends||[]).find(x=>Number(x.id)===targetId);
+  const incoming=(d.incoming||[]).find(x=>Number(x.requester_id)===targetId);
+  const outgoing=(d.outgoing||[]).find(x=>Number(x.addressee_id)===targetId);
+  if(f){btn.textContent='✓ Đã là bằng hữu';btn.classList.add('ghost');btn.onclick=()=>openFriendChat(targetId,f.display_name);chat.classList.remove('hidden');chat.onclick=()=>openFriendChat(targetId,f.display_name);}
+  else if(incoming){btn.textContent='🤝 Chấp nhận kết giao';btn.onclick=async()=>{btn.disabled=true;try{await api('/api/friends/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:incoming.id,action:'accept'})});msg.textContent='✓ Hai người đã kết thành bằng hữu.';await refreshMemberFriendState(targetId);await loadFriends();}catch(e){msg.textContent='❌ '+e.message;btn.disabled=false;}}}
+  else if(outgoing){btn.textContent='⌛ Đã gửi lời mời';btn.disabled=true;}
+  else{btn.textContent='🤝 Kết làm bằng hữu';btn.onclick=async()=>{btn.disabled=true;try{const x=await api('/api/friends/request',{method:'POST',headers:authHeaders(),body:JSON.stringify({userId:targetId})});msg.textContent='✓ '+x.message;btn.textContent='⌛ Chờ đối phương chấp nhận';}catch(e){msg.textContent='❌ '+e.message;btn.disabled=false;}}}
+ }catch(e){btn.textContent='🤝 Kết làm bằng hữu';btn.disabled=false;msg.textContent='❌ '+e.message;}
+}
+
+async function loadFriends(){
+ const area=$('#friendsArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/friends',{headers:authHeaders()});
+  const incoming=d.incoming||[], outgoing=d.outgoing||[], friends=d.friends||[];
+  area.innerHTML=`<div class="friends-head"><div><span class="eyebrow">🤝 BẰNG HỮU · 交友</span><h3>Ô bằng hữu</h3><small>Kết giao với môn nhân và mở chat riêng.</small></div><span class="tag">${friends.length} bằng hữu</span></div>
+  ${incoming.length?`<div class="friend-subtitle">📨 Lời mời đến</div><div class="friend-list">${incoming.map(x=>`<article class="friend-card"><span class="friend-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank||x.title||'Đệ tử')}</small></div><button class="btn small primary friend-accept" data-id="${x.id}">Chấp nhận</button><button class="btn small ghost friend-reject" data-id="${x.id}">Từ chối</button></article>`).join('')}</div>`:''}
+  ${outgoing.length?`<div class="friend-subtitle">⌛ Đã gửi</div><div class="friend-list">${outgoing.map(x=>`<article class="friend-card"><span class="friend-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><b>${esc(x.display_name)}</b><small>Đang chờ chấp nhận</small></div></article>`).join('')}</div>`:''}
+  <div class="friend-subtitle">☯ Danh sách bằng hữu</div><div class="friend-list">${friends.length?friends.map(x=>`<article class="friend-card"><span class="friend-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank||x.title||'Đệ tử')} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary friend-chat" data-id="${x.id}" data-name="${esc(x.display_name)}">💬 Chat</button><button class="btn small ghost friend-remove" data-id="${x.id}">Hủy bạn</button></article>`).join(''):`<div class="empty-state compact"><p>Chưa có bằng hữu. Hãy mở Danh sách môn nhân để kết giao.</p></div>`}</div><p id="friendsMsg" class="train-msg"></p>`;
+  document.querySelectorAll('.friend-accept').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/api/friends/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:Number(b.dataset.id),action:'accept'})});await loadFriends();}catch(e){$('#friendsMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  document.querySelectorAll('.friend-reject').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/api/friends/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:Number(b.dataset.id),action:'reject'})});await loadFriends();}catch(e){$('#friendsMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  document.querySelectorAll('.friend-chat').forEach(b=>b.onclick=()=>openFriendChat(Number(b.dataset.id),b.dataset.name));
+  document.querySelectorAll('.friend-remove').forEach(b=>b.onclick=async()=>{if(!confirm('Hủy kết bằng hữu với người này?'))return;b.disabled=true;try{await api('/api/friends/remove',{method:'POST',headers:authHeaders(),body:JSON.stringify({userId:Number(b.dataset.id)})});await loadFriends();}catch(e){const x=$('#friendsMsg');if(x)x.textContent='❌ '+e.message;b.disabled=false;}});
+ }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
+}
+
+async function openFriendChat(userId,name){
+ const modal=$('#friendChatModal'); if(!modal)return;
+ $('#friendChatContent').innerHTML=`<div class="auth-title">💬 ${esc(name)}</div><div class="auth-sub">Chat riêng giữa hai bằng hữu</div><div class="private-chat-window" id="privateChatWindow"><div class="chat-empty">Đang tải truyền âm...</div></div><form id="privateChatForm" class="chat-form"><input id="privateChatInput" maxlength="1000" autocomplete="off" placeholder="Truyền âm riêng..." required><button class="btn primary">Gửi</button></form><p id="privateChatMsg" class="train-msg"></p>`;
+ modal.showModal();
+ const render=rows=>{const w=$('#privateChatWindow');w.innerHTML=rows.length?rows.map(x=>`<article class="chat-msg ${Number(x.sender_id)===Number(currentUser?.id)?'mine':''}"><span class="chat-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><div class="chat-meta"><b>${esc(x.display_name)}</b><time>${new Date(x.created_at).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'})}</time></div><p>${esc(x.message)}</p></div></article>`).join(''):`<div class="chat-empty">Hai người chưa có cuộc trò chuyện nào.</div>`;w.scrollTop=w.scrollHeight;};
+ const load=async()=>{try{const d=await api('/api/friends/'+userId+'/messages',{headers:authHeaders()});render(d.rows||[]);}catch(e){$('#privateChatMsg').textContent='❌ '+e.message;}};
+ await load();
+ $('#privateChatForm').onsubmit=async e=>{e.preventDefault();const input=$('#privateChatInput'),msg=$('#privateChatMsg');try{await api('/api/friends/'+userId+'/messages',{method:'POST',headers:authHeaders(),body:JSON.stringify({message:input.value})});input.value='';await load();}catch(err){msg.textContent='❌ '+err.message;}};
+ clearInterval(window.privateChatTimer);window.privateChatTimer=setInterval(()=>{if(modal.open)load();},4000);
+}
+
 
 function accountUI(user){
  if(user){currentUser=user;$('#userBadge').textContent='☯ '+user.displayName;$('#userBadge').classList.remove('hidden');$('#accountBtn').textContent='Hồ sơ';}
@@ -47,7 +96,7 @@ function renderGuestAreas(){
 }
 
 async function loadProfile(){
- try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);if(Number(currentProfile.trainCount||0)>=Number(currentProfile.maxDaily||10))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadQuests();}
+ try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();if(Number(currentProfile.trainCount||0)>=Number(currentProfile.maxDaily||10))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadQuests();}
  catch(e){if(e.message.includes('đăng nhập')){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}}
 }
 function renderProfile(p){
@@ -55,6 +104,9 @@ function renderProfile(p){
  <article class="profile-card profile-main"><div class="profile-avatar">${esc(p.avatar)}</div><div class="profile-copy"><span class="eyebrow">${esc(p.position||'Ngoại môn đệ tử')}</span><h3>${esc(p.display_name)}</h3><p class="profile-title">${esc(p.stage)} · ${esc(p.title)}</p><p class="muted">@${esc(p.username)} · Gia nhập ${fmtDate(p.created_at)}</p><div class="tags"><span class="tag">🌿 Linh căn: ${esc(p.spiritRoot||'Chưa định')} · ${esc(p.rootRarity||'—')}</span><span class="tag">🐉 Linh thú: ${esc(p.spiritBeast||'Chưa định')} · ${esc(p.beastRarity||'—')}</span></div><p>${esc(p.bio||'Chưa viết lời tựa cho đạo tâm của mình.')}</p><div class="tags"><span class="tag">${esc(p.sect)}</span><span class="tag">${esc(p.hobby||'Đang tu hành')}</span></div></div><button class="btn small edit-profile" id="editProfileBtn">Sửa hồ sơ</button></article>
  <article class="profile-card profile-stats"><div><span>Linh lực</span><b>${Number(p.spirit_power).toLocaleString('vi-VN')}</b></div><div><span>Linh thạch</span><b class="stone-value">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</b></div><div><span>Thành tích</span><b>${p.achievement_points}</b></div></article></div><div class="achievement-panel"><div class="attribute-head"><span class="eyebrow">🏆 THÀNH TÍCH</span><h3>Huy hiệu tu hành</h3></div><div id="achievementList" class="achievement-list"><div class="empty-state compact"><p>Đang tải thành tích...</p></div></div></div><div class="attribute-panel"><div class="attribute-head"><span class="eyebrow">☯ THUỘC TÍNH ĐỆ TỬ</span><h3>Bảng thuộc tính</h3><small>Thuộc tính tăng theo linh lực, cảnh giới và tầng.</small></div><div class="attribute-grid">${[['Công lực','⚔',p.attributes?.congLuc],['Phòng thủ','🛡',p.attributes?.phongThu],['Thân pháp','💨',p.attributes?.thanPhap],['Ngộ tính','☯',p.attributes?.ngoTinh],['Khí vận','✦',p.attributes?.khiVan]].map(x=>`<div class="attribute-item"><span>${x[1]}</span><div><b>${x[0]}</b><strong>${Number(x[2]||0).toLocaleString('vi-VN')}</strong></div></div>`).join('')}</div></div><div class="random-gifts-panel"><div><span class="eyebrow">🎲 DUYÊN NGẪU NHIÊN · 1 LẦN</span><h3>Gieo duyên Linh Căn & Linh Thú</h3><p>Mỗi đệ tử chỉ được gieo duyên <b>1 lần duy nhất</b>. Độ hiếm quyết định sức mạnh và hiệu quả phụ trợ.</p></div><button class="btn small primary" id="randomGiftsBtn" ${p.gachaClaimed?'disabled':''}>${p.gachaClaimed?'✓ Đã gieo duyên':'🎲 Gieo duyên'}</button><div id="randomGiftsMsg" class="train-msg"></div></div>
  <div class="spirit-companion-panel"><div class="attribute-head"><span class="eyebrow">🐉 THUỘC TÍNH LINH THÚ · PHỤ TRỢ</span><h3>${esc(p.spiritBeast||'Chưa có linh thú')}</h3><small>Linh thú hỗ trợ chiến lực và tu luyện theo độ hiếm.</small></div><div class="attribute-grid">${[['Công kích','⚔',p.beastAttributes?.attack],['Phòng ngự','🛡',p.beastAttributes?.defense],['Thân pháp','💨',p.beastAttributes?.speed],['Linh lực','☯',p.beastAttributes?.spirit],['Thiên phú','✦',p.beastAttributes?.skill||'—']].map(x=>`<div class="attribute-item"><span>${x[1]}</span><div><b>${x[0]}</b><strong>${typeof x[2]==='number'?Number(x[2]).toLocaleString('vi-VN'):esc(x[2])}</strong></div></div>`).join('')}</div><p class="muted">Phụ trợ linh căn: +${Number(p.supportBonus||0)}% hiệu quả tu luyện cơ bản.</p></div>`;
+ const friendsHost=$('#friendsArea');
+ if(!friendsHost){ const host=document.createElement('div'); host.id='friendsArea'; host.className='friends-panel'; $('#profileArea').appendChild(host); }
+ loadFriends();
  $('#editProfileBtn').onclick=openProfileEditor;
  $('#randomGiftsBtn').onclick=async()=>{const b=$('#randomGiftsBtn');const msg=$('#randomGiftsMsg');b.disabled=true;try{const x=await api('/api/random-gifts',{method:'POST',headers:authHeaders(),body:'{}'});msg.textContent=`🎲 ${x.spiritRoot} [${x.rootRarity}] · 🐉 ${x.spiritBeast} [${x.beastRarity}] · ${x.beastAttributes.skill}`;await loadProfile();}catch(e){msg.textContent='❌ '+e.message;}};
 
@@ -235,8 +287,8 @@ function renderAuth(mode){
 }
 async function logout(){try{await api('/api/logout',{method:'POST',headers:authHeaders()});}catch{}finally{localStorage.removeItem(tokenKey);currentProfile=null;accountUI(null);$('#accountModal').close();renderGuestAreas();}}
 
-$('#modalClose').onclick=()=>$('#memberModal').close();$('#accountClose').onclick=()=>$('#accountModal').close();
-$('#memberModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.close()};$('#accountModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.close()};
+$('#modalClose').onclick=()=>$('#memberModal').close();$('#accountClose').onclick=()=>$('#accountModal').close();$('#friendChatClose').onclick=()=>$('#friendChatModal').close();
+$('#memberModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.close()};$('#accountModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.close()};$('#friendChatModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.close()};
 $('#searchInput').oninput=e=>{const q=e.target.value.toLowerCase().trim();renderMembers(members.filter(m=>[m.name,m.nick,m.role,...m.tags].join(' ').toLowerCase().includes(q)));};
 $('#accountBtn').onclick=openAccount;$('#joinBtn').onclick=()=>getToken()?accountSummary():renderAuth('register');
 $('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');const dark=document.body.classList.contains('dark');$('#themeBtn').textContent=dark?'☀':'☾';localStorage.setItem('theme',dark?'dark':'light');};

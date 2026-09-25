@@ -76,3 +76,10 @@
  .market-card{grid-template-columns:1fr}
  .market-card .btn,.market-card .market-cancel,.market-card .market-trade-reject,.market-card .market-trade-cancel{grid-column:auto;width:100%}
 }
+
+
+/* Bằng hữu + chat riêng */
+.friends-panel{margin-top:18px;padding:20px;border:1px solid var(--line);background:var(--surface);box-shadow:0 10px 28px rgba(38,50,44,.05)}
+.friends-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:12px}.friends-head h3{margin:3px 0 4px;font:700 1.25rem 'Noto Serif SC';color:var(--jade)}.friends-head small,.friend-card small{color:var(--muted);font-size:.7rem}
+.friend-subtitle{font-size:.72rem;font-weight:800;color:var(--red);margin:16px 0 8px}.friend-list{display:grid;gap:8px}.friend-card{display:grid;grid-template-columns:42px minmax(0,1fr) auto auto;gap:9px;align-items:center;padding:10px 12px;border:1px solid var(--line);background:var(--bg)}.friend-avatar{width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--line);background:var(--surface);font-size:1.4rem}.friend-card b,.friend-card small{display:block}.friend-card b{font-size:.78rem}.friend-card .btn{white-space:nowrap}.friend-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.private-chat-window{height:390px;overflow:auto;padding:16px;border:1px solid var(--line);background:var(--bg);margin:14px 0}.private-chat-window .chat-empty{padding:120px 20px 0}.hidden{display:none!important}
+@media(max-width:620px){.friend-card{grid-template-columns:38px 1fr;}.friend-card .btn{grid-column:auto}.friends-head{flex-direction:column}.private-chat-window{height:330px}}

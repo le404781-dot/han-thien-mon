@@ -199,6 +199,30 @@ async function initDb() {
       message TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id BIGSERIAL PRIMARY KEY,
+      requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      addressee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      UNIQUE(requester_id, addressee_id),
+      CHECK(requester_id <> addressee_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_friend_requests_addressee_status ON friend_requests(addressee_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_friend_requests_requester_status ON friend_requests(requester_id,status,created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS private_messages (
+      id BIGSERIAL PRIMARY KEY,
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      read_at TIMESTAMPTZ,
+      CHECK(sender_id <> recipient_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_private_messages_conversation ON private_messages(sender_id,recipient_id,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_private_messages_recipient ON private_messages(recipient_id,id DESC);
     CREATE TABLE IF NOT EXISTS sect_quests (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -271,17 +295,15 @@ async function initDb() {
   }
 
   const ti = await query('SELECT COUNT(*)::int AS c FROM treasure_items');
-  if (!ti.rows[0].c) {
-    const items = [
-      ['Tụ Linh Đan','Đan dược','Tăng ngay 150 linh lực, thích hợp cho đệ tử mới nhập môn.',80,150,0],
-      ['Hàn Tuyết Đan','Đan dược','Tăng ngay 500 linh lực, ngưng tụ hàn khí trong đan điền.',220,500,1],
-      ['Kim Đan Ngọc Lộ','Đan dược','Tăng ngay 1200 linh lực, chỉ mở bán từ Kim Đan.',450,1200,2],
-      ['Hàn Thiên Kiếm','Pháp bảo','Pháp bảo trấn môn, lưu vào kho bảo vật của đệ tử.',700,0,2],
-      ['Ngọc Bội Hộ Tâm','Pháp bảo','Ngọc bội hộ thân, một món pháp bảo quý trong Tàng Bảo Các.',1000,0,3],
-      ['Cửu U Tiên Ấn','Pháp bảo','Ấn tín cổ xưa dành cho đại đạo giả.',2500,0,5]
-    ];
-    for (const item of items) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6)',item);
-  }
+  const items = [
+    ['Tụ Linh Đan','Đan dược','Tăng ngay 150 linh lực, thích hợp cho đệ tử mới nhập môn.',80,150,0],
+    ['Hàn Tuyết Đan','Đan dược','Tăng ngay 500 linh lực, ngưng tụ hàn khí trong đan điền.',220,500,1],
+    ['Kim Đan Ngọc Lộ','Đan dược','Tăng ngay 1200 linh lực, chỉ mở bán từ Kim Đan.',450,1200,2],
+    ['Hàn Thiên Kiếm','Pháp bảo','Pháp bảo trấn môn, lưu vào kho bảo vật của đệ tử.',700,0,2],
+    ['Ngọc Bội Hộ Tâm','Pháp bảo','Ngọc bội hộ thân, một món pháp bảo quý trong Tàng Bảo Các.',1000,0,3],
+    ['Cửu U Tiên Ấn','Pháp bảo','Ấn tín cổ xưa dành cho đại đạo giả.',2500,0,5]
+  ];
+  for (const item of items) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO NOTHING',item);
   const enhanceItems = [
     ['Linh Phù Cường Hóa','Vật phẩm tăng cường','Linh phù dùng để cường hóa pháp bảo, tăng 3% hiệu quả trong lần cường hóa tiếp theo.',0,0,0],
     ['Tinh Thạch Cường Hóa','Vật phẩm tăng cường','Tinh thạch hiếm, tăng 8% hiệu quả cường hóa pháp bảo.',0,0,2],
@@ -684,9 +706,14 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
     }
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,
       [req.session.user_id,price]);
-    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW())
+    const invWrite=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at)
+      SELECT $1,ti.id,1,NOW() FROM treasure_items ti WHERE ti.id=$2
       ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,
       [req.session.user_id,itemId]);
+    if(invWrite.rowCount!==1){
+      await client.query('ROLLBACK');
+      return res.status(404).json({error:'Vật phẩm không còn tồn tại trong Tàng Bảo Các. Hãy tải lại trang rồi thử lại.'});
+    }
     const today="(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date";
     await client.query(`INSERT INTO daily_activity(user_id,activity_date,buy_count,train_count,stone_claim_count)
       VALUES($1,${today},1,0,0)
@@ -1083,6 +1110,106 @@ app.post('/api/chat',auth,async(req,res)=>{
     const r=await query('INSERT INTO chat_messages(user_id,message) VALUES($1,$2) RETURNING id,created_at',[req.session.user_id,message]);
     res.status(201).json({ok:true,...r.rows[0]});
   } catch(e){res.status(500).json({error:'Không thể gửi tin nhắn.'});}
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BẰNG HỮU · Kết giao + chat riêng
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/friends',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id;
+    const [friends,pendingIn,pendingOut]=await Promise.all([
+      query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier
+             FROM friend_requests fr
+             JOIN users u ON u.id=CASE WHEN fr.requester_id=$1 THEN fr.addressee_id ELSE fr.requester_id END
+             JOIN profiles p ON p.user_id=u.id
+             WHERE (fr.requester_id=$1 OR fr.addressee_id=$1) AND fr.status='accepted'
+             ORDER BY u.display_name,u.id`,[uid]),
+      query(`SELECT fr.id,fr.requester_id,u.display_name,u.username,p.avatar,p.title,p.rank,p.realm_tier,fr.created_at
+             FROM friend_requests fr JOIN users u ON u.id=fr.requester_id JOIN profiles p ON p.user_id=u.id
+             WHERE fr.addressee_id=$1 AND fr.status='pending' ORDER BY fr.created_at DESC`,[uid]),
+      query(`SELECT fr.id,fr.addressee_id,u.display_name,u.username,p.avatar,p.title,p.rank,p.realm_tier,fr.created_at
+             FROM friend_requests fr JOIN users u ON u.id=fr.addressee_id JOIN profiles p ON p.user_id=u.id
+             WHERE fr.requester_id=$1 AND fr.status='pending' ORDER BY fr.created_at DESC`,[uid])
+    ]);
+    res.json({friends:friends.rows,incoming:pendingIn.rows,outgoing:pendingOut.rows});
+  }catch(e){console.error('friends:',e);res.status(500).json({error:'Không thể tải ô bằng hữu.'});}
+});
+
+app.post('/api/friends/request',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id, target=Number(req.body?.userId);
+    if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đạo hữu không hợp lệ.'});
+    const exists=(await query('SELECT id FROM users WHERE id=$1',[target])).rows[0];
+    if(!exists)return res.status(404).json({error:'Không tìm thấy môn nhân.'});
+    const old=(await query(`SELECT id,requester_id,addressee_id,status FROM friend_requests
+      WHERE (requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)
+      ORDER BY id DESC LIMIT 1`,[uid,target])).rows[0];
+    if(old?.status==='accepted')return res.status(409).json({error:'Hai người đã là bằng hữu.'});
+    if(old?.status==='pending'){
+      if(Number(old.requester_id)===target)return res.status(409).json({error:'Đạo hữu này đã gửi lời mời cho bạn. Hãy mở ô bằng hữu để chấp nhận.'});
+      return res.status(409).json({error:'Đã gửi lời mời kết bằng hữu.'});
+    }
+    if(old?.status==='rejected') await query('DELETE FROM friend_requests WHERE id=$1',[old.id]);
+    const r=await query(`INSERT INTO friend_requests(requester_id,addressee_id,status) VALUES($1,$2,'pending') RETURNING id,created_at`,[uid,target]);
+    res.status(201).json({ok:true,...r.rows[0],message:'Đã gửi lời mời kết bằng hữu.'});
+  }catch(e){console.error('friend request:',e);res.status(500).json({error:'Không thể gửi lời mời bằng hữu.'});}
+});
+
+app.post('/api/friends/respond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id, requestId=Number(req.body?.requestId), action=String(req.body?.action||'');
+    if(!Number.isInteger(requestId)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu không hợp lệ.'});
+    await client.query('BEGIN');
+    const r=(await client.query(`SELECT * FROM friend_requests WHERE id=$1 AND addressee_id=$2 AND status='pending' FOR UPDATE`,[requestId,uid])).rows[0];
+    if(!r){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời bằng hữu không còn hiệu lực.'});}
+    await client.query(`UPDATE friend_requests SET status=$2,responded_at=NOW() WHERE id=$1`,[requestId,action==='accept'?'accepted':'rejected']);
+    await client.query('COMMIT');
+    res.json({ok:true,status:action==='accept'?'accepted':'rejected'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('friend respond:',e);res.status(500).json({error:'Không thể xử lý lời mời bằng hữu.'});}
+  finally{client.release();}
+});
+
+app.post('/api/friends/remove',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id,target=Number(req.body?.userId);
+    if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đạo hữu không hợp lệ.'});
+    const r=await query(`DELETE FROM friend_requests WHERE status='accepted' AND ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) RETURNING id`,[uid,target]);
+    if(!r.rows.length)return res.status(404).json({error:'Hai người chưa phải bằng hữu.'});
+    res.json({ok:true});
+  }catch(e){console.error('friend remove:',e);res.status(500).json({error:'Không thể hủy kết bằng hữu.'});}
+});
+
+async function areFriends(a,b){
+  const r=await query(`SELECT 1 FROM friend_requests WHERE status='accepted' AND ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) LIMIT 1`,[a,b]);
+  return r.rows.length>0;
+}
+
+app.get('/api/friends/:userId/messages',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id,target=Number(req.params.userId);
+    if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đạo hữu không hợp lệ.'});
+    if(!(await areFriends(uid,target)))return res.status(403).json({error:'Chỉ có thể chat riêng với bằng hữu đã kết giao.'});
+    const r=await query(`SELECT pm.id,pm.sender_id,pm.recipient_id,pm.message,pm.created_at,u.display_name,p.avatar,p.rank
+      FROM private_messages pm JOIN users u ON u.id=pm.sender_id JOIN profiles p ON p.user_id=u.id
+      WHERE (pm.sender_id=$1 AND pm.recipient_id=$2) OR (pm.sender_id=$2 AND pm.recipient_id=$1)
+      ORDER BY pm.id DESC LIMIT 100`,[uid,target]);
+    await query(`UPDATE private_messages SET read_at=NOW() WHERE recipient_id=$1 AND sender_id=$2 AND read_at IS NULL`,[uid,target]);
+    res.json({rows:r.rows.reverse()});
+  }catch(e){console.error('private chat load:',e);res.status(500).json({error:'Không thể tải chat riêng.'});}
+});
+
+app.post('/api/friends/:userId/messages',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id,target=Number(req.params.userId),message=String(req.body?.message||'').trim().slice(0,1000);
+    if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đạo hữu không hợp lệ.'});
+    if(!message)return res.status(400).json({error:'Tin nhắn không được để trống.'});
+    if(!(await areFriends(uid,target)))return res.status(403).json({error:'Chỉ có thể chat riêng với bằng hữu đã kết giao.'});
+    const r=await query(`INSERT INTO private_messages(sender_id,recipient_id,message) VALUES($1,$2,$3) RETURNING id,created_at`,[uid,target,message]);
+    res.status(201).json({ok:true,...r.rows[0]});
+  }catch(e){console.error('private chat send:',e);res.status(500).json({error:'Không thể gửi tin nhắn riêng.'});}
 });
 
 app.post('/api/members',auth,async(req,res)=>{
