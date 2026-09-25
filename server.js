@@ -303,6 +303,11 @@ app.post('/api/login',async(req,res)=>{
 app.get('/api/me',auth,async(req,res)=>res.json({user:{id:req.session.user_id,username:req.session.username,displayName:req.session.display_name,createdAt:req.session.created_at}}));
 app.post('/api/logout',auth,async(req,res)=>{await query('DELETE FROM sessions WHERE token=$1',[req.token]);res.json({ok:true});});
 
+function attributesFor(spirit){
+  const st=stageFor(Number(spirit)||0); const s=Number(spirit)||0;
+  return {congLuc:10+st.realmIndex*35+st.tier*8+Math.floor(s/250),phongThu:10+st.realmIndex*28+st.tier*7+Math.floor(s/300),thanPhap:10+st.realmIndex*22+st.tier*6+Math.floor(s/400),ngoTinh:8+st.realmIndex*5+st.tier*2+Math.floor(s/700),khiVan:5+st.realmIndex*2+Math.floor(st.tier/3)};
+}
+
 app.get('/api/profile',auth,async(req,res)=>{
   try {
     await ensureProfile(req.session.user_id);
@@ -315,7 +320,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const stage=stageFor(p.spirit_power);
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
-    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,canClaimStones:last!==today,progress:progressFor(p.spirit_power)}});
+    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power)}});
   } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
 });
 
@@ -332,15 +337,27 @@ app.patch('/api/profile',auth,async(req,res)=>{
 app.post('/api/cultivation/train',auth,async(req,res)=>{
   try {
     await ensureProfile(req.session.user_id);
-    const gain = crypto.randomInt(35, 81);
+    const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
+    const a=await query('SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1',[req.session.user_id]);
+    let trainCount=0;
+    if(!a.rows.length) await query('INSERT INTO daily_activity(user_id,activity_date,train_count,buy_count,stone_claim_count) VALUES($1,$2,0,0,0)',[req.session.user_id,today]);
+    else if(String(a.rows[0].activity_date).slice(0,10)!==today) await query('UPDATE daily_activity SET activity_date=$2,train_count=0,buy_count=0,stone_claim_count=0 WHERE user_id=$1',[req.session.user_id,today]);
+    else trainCount=Number(a.rows[0].train_count)||0;
+    const prof=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const currentStage=stageFor(Number(prof.spirit_power)||0);
+    const maxDaily=Math.max(3,10-currentStage.realmIndex);
+    if(trainCount>=maxDaily)return res.status(429).json({error:`Hôm nay đã vận công ${trainCount}/${maxDaily} lần. Cảnh giới càng cao càng khó tu luyện; hãy quay lại ngày mai.`,trainCount,maxDaily});
+    const baseMax=Math.max(28,72-currentStage.realmIndex*5-currentStage.tier*2);
+    const baseMin=Math.max(12,Math.floor(baseMax*0.55));
+    const gain=crypto.randomInt(baseMin,baseMax+1);
     const r=await query('UPDATE profiles SET spirit_power=spirit_power+$2, experience=experience+$2, updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,experience',[req.session.user_id,gain]);
     const spirit=r.rows[0].spirit_power;
     const stage=stageFor(spirit);
     await query('UPDATE profiles SET rank=$2, realm_tier=$3 WHERE user_id=$1',[req.session.user_id,stage.realm,stage.tier]);
     await ensureAchievements(req.session.user_id,spirit);
     await addDailyActivity(req.session.user_id,'train_count',1);
-    res.json({gain,spirit,experience:r.rows[0].experience,progress:progressFor(spirit),rank:stage.realm,stage:stage.stage});
-  } catch(e){res.status(500).json({error:'Không thể vận công lúc này.'});}
+    res.json({gain,spirit,experience:r.rows[0].experience,progress:progressFor(spirit),rank:stage.realm,stage:stage.stage,trainCount:trainCount+1,maxDaily});
+  } catch(e){console.error(e);res.status(500).json({error:'Không thể vận công lúc này.'});}
 });
 
 
@@ -394,7 +411,7 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
     if(!Number.isInteger(itemId) || itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
     await client.query('BEGIN');
 
-    const itemR=await client.query('SELECT id,name,category,price,spirit_gain,min_realm FROM treasure_items WHERE id=$1 FOR SHARE',[itemId]);
+    const itemR=await client.query('SELECT id,name,category,price,spirit_gain,min_realm FROM treasure_items WHERE id=$1 FOR UPDATE',[itemId]);
     if(!itemR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy vật phẩm.'});}
     const item=itemR.rows[0];
 
