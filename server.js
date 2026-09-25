@@ -19,6 +19,71 @@ const pool = new Pool({
 
 async function query(text, params = []) { return pool.query(text, params); }
 
+// Runtime schema guard: Render/PostgreSQL deployments can keep an older schema
+// even after a newer app is deployed. Repair the columns used by profile,
+// cultivation and equipment before serving those endpoints.
+async function ensureRuntimeSchema() {
+  await query(`
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS storage_capacity INTEGER NOT NULL DEFAULT 30;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gacha_claimed BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_beast TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root_rarity TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_beast_rarity TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_attack INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_defense INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_speed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_spirit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_skill TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS beast_realm_tier INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_until TIMESTAMPTZ;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS daily_activity (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      activity_date DATE NOT NULL,
+      train_count INTEGER NOT NULL DEFAULT 0,
+      buy_count INTEGER NOT NULL DEFAULT 0,
+      stone_claim_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS owned_spirit_beasts (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
+      acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,beast_id)
+    );
+    CREATE TABLE IF NOT EXISTS owned_spirit_roots (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      root_id INTEGER NOT NULL REFERENCES spirit_roots_catalog(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
+      acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,root_id)
+    );
+  `);
+  await query(`
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+  `);
+}
+
 // Cửu Đại Cảnh Giới — mỗi cảnh giới có 9 tầng.
 const SPIRIT_TO_STONE_RATE = 100; // 100 linh lực = 1 linh thạch
 const RANKS = [
@@ -751,6 +816,7 @@ function attributesFor(spirit){
 
 app.get('/api/profile',auth,async(req,res)=>{
   try {
+    await ensureRuntimeSchema();
     await ensureProfile(req.session.user_id);
     const r=await query(`SELECT u.id,u.username,u.display_name,u.created_at,p.*,
       COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
@@ -782,7 +848,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
     res.json({profile:{...p,secretRealmDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower},equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
-  } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
+  } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
 app.patch('/api/profile',auth,async(req,res)=>{
@@ -800,6 +866,7 @@ app.patch('/api/profile',auth,async(req,res)=>{
 });
 
 app.post('/api/cultivation/train',auth,async(req,res)=>{
+  await ensureRuntimeSchema();
   const client=await pool.connect();
   try {
     await client.query('BEGIN');

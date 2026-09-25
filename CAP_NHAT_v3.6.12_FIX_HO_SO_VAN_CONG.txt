@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.12 – FIX HỒ SƠ + VẬN CÔNG
+
+- Sửa lỗi /api/profile khiến khu vực Vận Công hiển thị “Không thể mở Vận Công – Không thể tải hồ sơ”.
+- Thêm runtime schema guard: tự bổ sung các cột profiles, daily_activity, owned_spirit_beasts, owned_spirit_roots và power_bonus/ability cần cho hồ sơ, chiến lực, trang bị.
+- /api/profile tự kiểm tra schema trước khi đọc dữ liệu.
+- Ghi log lỗi thật phía server với nhãn “profile load” để dễ chẩn đoán nếu PostgreSQL phát sinh lỗi mới.
+- /api/cultivation/train cũng tự kiểm tra schema trước khi giao dịch.
+- Không xóa dữ liệu người dùng và không tạo database mới.
