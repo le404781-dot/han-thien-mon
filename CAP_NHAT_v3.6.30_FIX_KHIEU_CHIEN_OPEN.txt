@@ -1,0 +1,10 @@
+HÀN THIÊN MÔN v3.6.30
+
+FIX MỞ KHIÊU CHIẾN
+- Sửa lỗi PostgreSQL errorMissingColumn khi GET /api/challenges.
+- Nguyên nhân: truy vấn active battle lấy avatar từ alias users (cu.avatar/ou.avatar), trong khi avatar nằm ở profiles (cp.avatar/op.avatar).
+- Bổ sung migration an toàn cho các cột challenge_requests cũ có thể thiếu.
+- Không xóa dữ liệu cũ.
+- Giữ nguyên thanh máu, đánh theo lượt, tuyệt chiêu và sát thương theo chênh lệch cảnh giới.
+
+Syntax: server.js OK.

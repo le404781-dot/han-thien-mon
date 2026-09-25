@@ -2864,6 +2864,17 @@ async function ensureChallengeSchema(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
   `);
   await query(`
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS winner_id INTEGER;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS loser_id INTEGER;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_damage NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_damage NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS success_chance NUMERIC(8,4) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS reward_spirit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS reward_item_id INTEGER;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS reward_quantity INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS penalty_text TEXT NOT NULL DEFAULT '';
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_max_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
@@ -2893,8 +2904,8 @@ app.get('/api/challenges',auth,async(req,res)=>{
              LEFT JOIN treasure_items ri ON ri.id=cr.reward_item_id
              WHERE cr.challenger_id=$1 OR cr.opponent_id=$1 ORDER BY cr.id DESC LIMIT 30`,[uid]),
       query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.status,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,
-                    cu.display_name AS challenger_name,cu.avatar AS challenger_avatar,cp.rank AS challenger_rank,cp.spirit_power AS challenger_spirit,
-                    ou.display_name AS opponent_name,ou.avatar AS opponent_avatar,op.rank AS opponent_rank,op.spirit_power AS opponent_spirit
+                    cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,cp.spirit_power AS challenger_spirit,
+                    ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,op.spirit_power AS opponent_spirit
              FROM challenge_requests cr
              JOIN users cu ON cu.id=cr.challenger_id JOIN profiles cp ON cp.user_id=cu.id
              JOIN users ou ON ou.id=cr.opponent_id JOIN profiles op ON op.user_id=ou.id
