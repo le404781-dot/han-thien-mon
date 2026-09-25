@@ -55,3 +55,24 @@
 .codex-card small{opacity:.8}
 
 .enhance-panel{margin:16px 0;padding:18px;border:1px solid rgba(120,95,55,.25);border-radius:16px;background:rgba(255,250,238,.72);display:flex;align-items:center;gap:18px;flex-wrap:wrap}.enhance-panel>div:first-child{flex:1;min-width:230px}.ranked-codex{position:relative;padding-left:52px}.codex-rank{position:absolute;left:16px;top:18px;font:800 1rem 'Noto Serif SC';color:var(--jade)}.owners{display:block;margin-top:7px;opacity:.78;line-height:1.45}.quest-card small{line-height:1.5}
+
+
+/* Phường Thị */
+.market-panels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.market-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:12px}
+.market-form select,.market-form input{width:100%;min-height:42px;padding:10px 12px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;border-radius:10px}
+.market-form button{grid-column:1/-1}
+.market-section{margin-top:18px}
+.market-listings{display:grid;gap:10px}
+.market-card{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:16px;border:1px solid var(--line);background:var(--surface);box-shadow:0 8px 24px rgba(38,50,44,.05)}
+.market-card h3{margin:3px 0 5px;font:700 1rem 'Noto Serif SC';color:var(--jade)}
+.market-card p,.market-card small{color:var(--muted);font-size:.7rem;line-height:1.5}
+.market-card .btn{white-space:nowrap}
+.market-card .market-cancel,.market-card .market-trade-reject,.market-card .market-trade-cancel{grid-column:2}
+@media(max-width:760px){
+ .market-panels{grid-template-columns:1fr}
+ .market-form{grid-template-columns:1fr}
+ .market-form button{grid-column:auto}
+ .market-card{grid-template-columns:1fr}
+ .market-card .btn,.market-card .market-cancel,.market-card .market-trade-reject,.market-card .market-trade-cancel{grid-column:auto;width:100%}
+}

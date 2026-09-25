@@ -1,0 +1,40 @@
+HÀN THIÊN MÔN v3.6 — TÀNG BẢO CÁC 2.0 · TU DI GIỚI 2.0 · PHƯỜNG THỊ
+
+1. TÀNG BẢO CÁC 2.0
+- Viết lại luồng mua vật phẩm bằng linh lực theo transaction BEGIN/COMMIT/ROLLBACK.
+- Khóa hồ sơ và vật phẩm khi giao dịch để tránh mua trùng/âm linh lực khi nhiều thao tác đồng thời.
+- Kiểm tra cảnh giới, linh lực và dung lượng Tu Di Giới trước khi ghi dữ liệu.
+- Sau khi mua thành công, vật phẩm được đưa trực tiếp vào kho.
+- Giao diện cũ được thay bằng giao diện Tàng Bảo Các 2.0.
+
+2. TU DI GIỚI 2.0
+- Viết lại API kho vật phẩm.
+- Hiển thị số ô đang dùng / tổng dung lượng.
+- Có thể dùng trực tiếp các đan dược có spirit_gain > 0; vật phẩm được trừ nguyên tử trong transaction.
+- Có chức năng nâng dung lượng +5 ô bằng 100 linh thạch, tối đa 100 ô.
+- Vật phẩm nhận từ Tàng Bảo Các, Nhiệm Vụ Đường và Phường Thị đều vào cùng kho.
+
+3. PHƯỜNG THỊ 1.0
+- Thành viên có thể đăng bán vật phẩm lấy linh thạch.
+- Khi đăng bán, vật phẩm được tạm giữ khỏi kho người bán để tránh bán vượt số lượng.
+- Người khác mua: trừ linh thạch người mua, cộng linh thạch người bán và chuyển vật phẩm trong cùng transaction.
+- Người bán có thể hủy tin; vật phẩm được trả lại kho.
+- Thành viên có thể gửi đề nghị trao đổi vật phẩm trực tiếp với thành viên khác.
+- Vật phẩm đề nghị được tạm giữ khi tạo giao dịch.
+- Người nhận có thể chấp nhận/từ chối; chấp nhận chỉ thành công khi đủ vật phẩm và còn chỗ trong Tu Di Giới.
+- Từ chối/hủy sẽ hoàn lại vật phẩm đã tạm giữ.
+
+4. DATABASE TỰ ĐỘNG
+Server tự tạo các bảng:
+- market_listings
+- market_trades
+kèm index phục vụ truy vấn Phường Thị.
+
+5. TƯƠNG THÍCH
+- API cũ /api/treasure, /api/treasure/buy và /api/tu-di-gioi được giữ alias chuyển tiếp để tránh lỗi khi trình duyệt còn cache bản cũ.
+- Giao diện mới chỉ sử dụng /api/treasury, /api/storage và /api/market.
+
+6. KIỂM TRA
+- server.js: node --check OK.
+- script.js: node --check OK.
+- Chưa chạy test giao dịch PostgreSQL trực tiếp vì môi trường đóng gói không có DATABASE_URL/database production của người dùng.

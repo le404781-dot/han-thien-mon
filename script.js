@@ -1,5 +1,5 @@
 let members=[], memories=[], timeline=[];
-let currentProfile=null;
+let currentProfile=null, currentUser=null;
 const $=s=>document.querySelector(s);
 const tokenKey='han_thien_token';
 const getToken=()=>localStorage.getItem(tokenKey);
@@ -30,12 +30,12 @@ function renderTimeline(){ $('#timelineList').innerHTML=timeline.map(e=>`<articl
 function openMember(i){const m=members[i];if(!m)return;$('#modalContent').innerHTML=`<div class="modal-avatar">${esc(m.emoji)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${m.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div>`;$('#memberModal').showModal();}
 
 function accountUI(user){
- if(user){$('#userBadge').textContent='☯ '+user.displayName;$('#userBadge').classList.remove('hidden');$('#accountBtn').textContent='Hồ sơ';}
- else{$('#userBadge').classList.add('hidden');$('#accountBtn').textContent='☯ Đăng nhập';}
+ if(user){currentUser=user;$('#userBadge').textContent='☯ '+user.displayName;$('#userBadge').classList.remove('hidden');$('#accountBtn').textContent='Hồ sơ';}
+ else{currentUser=null;$('#userBadge').classList.add('hidden');$('#accountBtn').textContent='☯ Đăng nhập';}
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadTuDi();await loadQuests();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadTuDi();await loadMarket();await loadQuests();}
  catch{localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}
 }
 function renderGuestAreas(){
@@ -102,40 +102,81 @@ async function loadAchievements(){
 
 async function loadTreasure(){
  try{
-  const d=await api('/api/treasure',{headers:authHeaders()});
+  const d=await api('/api/treasury',{headers:authHeaders()});
   const area=$('#treasureArea'); if(!area)return;
-  area.innerHTML=`<div class="treasure-wallet"><span>☯ Linh lực hiện có</span><strong>${Number(d.spiritPower).toLocaleString('vi-VN')}</strong><small>${esc(d.realm)} · ${d.tier}/9 · Thanh toán bằng linh lực</small></div>
-  <div class="stone-exchange"><div><span class="eyebrow">⚙ QUY TẮC TÀNG BẢO CÁC</span><h3>Đổi linh lực → Nhận bảo vật</h3><p>Mỗi vật phẩm là một lần đổi linh lực để nhận bảo vật. Linh lực sẽ được trừ khi giao dịch thành công; vật phẩm lập tức vào Tu Di Giới.</p></div><span class="tag">☯ Dùng Linh lực</span></div>
-  <div class="enhance-panel"><div><span class="eyebrow">🎲 CƯỜNG HÓA · 增強</span><h3>Quay vật phẩm tăng cường</h3><p>Dùng <b>300 linh lực</b> cho mỗi lượt quay. Vật phẩm nhận được sẽ tự động vào Tu Di Giới.</p></div><button id="enhanceRollBtn" class="btn primary">🎲 Quay 300 linh lực</button><div id="enhanceMsg" class="train-msg"></div></div>
+  const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp'];
+  area.innerHTML=`<div class="treasure-wallet"><span>☯ Linh lực hiện có</span><strong>${Number(d.spiritPower).toLocaleString('vi-VN')}</strong><small>${esc(d.realm)} · Tầng ${d.tier}/9 · Vật phẩm mua sẽ vào Tu Di Giới</small></div>
+  <div class="stone-exchange"><div><span class="eyebrow">🏯 TÀNG BẢO CÁC 2.0</span><h3>Mua bảo vật bằng linh lực</h3><p>Giao dịch được khóa an toàn trong máy chủ. Nếu mua thành công, linh lực và vật phẩm được cập nhật cùng một lần.</p></div><span class="tag">☯ An toàn giao dịch</span></div>
   <div class="treasure-grid">${d.items.map(i=>{
     const spirit=Number(d.spiritPower||0), price=Number(i.price||0);
-    const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp'];
-    const currentIndex=realmNames.indexOf(d.realm);
-    const isLocked=currentIndex<Number(i.min_realm);
-    const canBuy=!isLocked&&spirit>=price;
-    const buttonText=isLocked?'🔒 Cần '+esc(realmNames[Number(i.min_realm)]):canBuy?'☯ Đổi linh lực nhận vật phẩm':'Thiếu '+Number(Math.max(0,price-spirit)).toLocaleString('vi-VN')+' linh lực';
-    return `<article class="treasure-card ${isLocked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đã sở hữu: ${Number(i.quantity||0)} · Giá: ☯ ${price.toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${isLocked||!canBuy?'disabled':''}>${buttonText}</button></article>`;
-  }).join('')}</div><div id="treasureMsg" class="train-msg"></div>`;
-  $('#enhanceRollBtn').onclick=async()=>{const b=$('#enhanceRollBtn');const msg=$('#enhanceMsg');b.disabled=true;try{const x=await api('/api/enhance/roll',{method:'POST',headers:authHeaders(),body:'{}'});msg.textContent=`🎁 Nhận ${x.item} · ${x.description} · Còn ${Number(x.spirit).toLocaleString('vi-VN')} linh lực.`;await loadProfile();await loadTuDi();}catch(e){msg.textContent='❌ '+e.message;}finally{b.disabled=false;}};
+    const locked=Number(d.tier)-1<Number(i.min_realm);
+    const can=!locked&&spirit>=price;
+    const text=locked?'🔒 Cần '+esc(realmNames[Number(i.min_realm)]||'cảnh giới cao hơn'):can?'☯ Mua vật phẩm':'Thiếu '+Number(Math.max(0,price-spirit)).toLocaleString('vi-VN')+' linh lực';
+    return `<article class="treasure-card ${locked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đang có: ${Number(i.quantity||0)} · Giá: ☯ ${price.toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${locked||!can?'disabled':''}>${text}</button></article>`;
+  }).join('')}</div><p id="treasureMsg" class="train-msg"></p>`;
   document.querySelectorAll('.buy-item').forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     try{
-      const x=await api('/api/treasure/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id)})});
-      $('#treasureMsg').textContent=`✅ Đã mua ${x.item}. Trừ ${Number(x.spentSpirit||0).toLocaleString('vi-VN')} linh lực. Còn ${Number(x.spirit).toLocaleString('vi-VN')} linh lực.`;
-      await loadProfile();await loadTreasure();await loadTuDi();
+      const x=await api('/api/treasury/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id)})});
+      $('#treasureMsg').textContent=`✅ Đã mua ${x.item}. Trừ ${Number(x.spentSpirit||0).toLocaleString('vi-VN')} linh lực.`;
+      await Promise.all([loadProfile(),loadTreasure(),loadTuDi()]);
     }catch(e){$('#treasureMsg').textContent='❌ '+e.message;b.disabled=false;}
   });
  }catch(e){const area=$('#treasureArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
+
 async function loadTuDi(){
  try{
-  const d=await api('/api/tu-di-gioi',{headers:authHeaders()});
+  const d=await api('/api/storage',{headers:authHeaders()});
   const area=$('#sumeruArea'); if(!area)return;
   const rows=d.rows||[];
-  area.innerHTML=`<div class="treasure-wallet"><span>◈ Tu Di Giới · 🔓 Đã mở khóa</span><strong>${d.used}/${d.capacity}</strong><small>🌿 ${esc(d.spiritRoot||'—')} · 🐉 ${esc(d.spiritBeast||'—')}</small></div>
-  <div class="inventory-grid">${rows.length?rows.map(i=>`<article class="inventory-card"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><b>Số lượng: ${Number(i.quantity||0)}</b></div></article>`).join(''):`<div class="empty-state compact"><h3>Tu Di Giới đang trống</h3><p>Vật phẩm và đan dược mua thành công tại Tàng Bảo Các sẽ tự động được cất vào đây.</p></div>`}</div>`;
+  area.innerHTML=`<div class="treasure-wallet"><span>◈ TU DI GIỚI 2.0 · Kho cá nhân</span><strong>${d.used}/${d.capacity}</strong><small>🌿 ${esc(d.spiritRoot||'—')} · 🐉 ${esc(d.spiritBeast||'—')}</small></div>
+  <div class="enhance-panel"><div><span class="eyebrow">📦 QUẢN LÝ KHO</span><h3>Dùng vật phẩm & mở rộng dung lượng</h3><p>Đan dược có linh lực có thể sử dụng trực tiếp. Nâng 5 ô bằng 100 linh thạch, tối đa 100 ô.</p></div><div class="hero-actions"><button id="storageUpgradeBtn" class="btn primary">＋5 ô · 100 linh thạch</button></div><div id="storageMsg" class="train-msg"></div></div>
+  <div class="inventory-grid">${rows.length?rows.map(i=>{
+    const usable=Number(i.spirit_gain||0)>0;
+    return `<article class="inventory-card"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><b>Số lượng: ${Number(i.quantity||0)}</b>${usable?`<button class="btn small primary use-item" data-id="${i.id}">Dùng 1 · +${Number(i.spirit_gain).toLocaleString('vi-VN')} linh lực</button>`:''}</div></article>`;
+  }).join(''):`<div class="empty-state compact"><h3>Tu Di Giới đang trống</h3><p>Vật phẩm mua tại Tàng Bảo Các, nhận từ Nhiệm Vụ Đường hoặc giao dịch ở Phường Thị sẽ được lưu tại đây.</p></div>`}</div>`;
+  $('#storageUpgradeBtn').onclick=async()=>{
+    const b=$('#storageUpgradeBtn');b.disabled=true;
+    try{const x=await api('/api/storage/upgrade',{method:'POST',headers:authHeaders(),body:'{}'});$('#storageMsg').textContent=`✅ Tu Di Giới đã tăng lên ${x.capacity} ô. Còn ${Number(x.spiritStones).toLocaleString('vi-VN')} linh thạch.`;await loadTuDi();await loadProfile();}
+    catch(e){$('#storageMsg').textContent='❌ '+e.message;}finally{b.disabled=false;}
+  };
+  document.querySelectorAll('.use-item').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;
+    try{const x=await api('/api/storage/use',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:1})});$('#storageMsg').textContent=`✨ Đã dùng ${x.item}, +${Number(x.gained).toLocaleString('vi-VN')} linh lực.`;await loadProfile();await loadTuDi();}
+    catch(e){$('#storageMsg').textContent='❌ '+e.message;b.disabled=false;}
+  });
  }catch(e){const area=$('#sumeruArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
+
+async function loadMarket(){
+ try{
+  const d=await api('/api/market',{headers:authHeaders()});
+  const area=$('#marketArea');if(!area)return;
+  const inv=d.inventory||[], catalog=d.catalog||[], users=d.users||[], listings=d.listings||[], trades=d.trades||[];
+  area.innerHTML=`<div class="stone-exchange"><div><span class="eyebrow">🏮 PHƯỜNG THỊ · 坊市</span><h3>Mua bán & trao đổi giữa môn nhân</h3><p>Vật phẩm đưa lên chợ được tạm giữ an toàn. Bán dùng <b>linh thạch</b>; trao đổi là đổi vật phẩm trực tiếp.</p></div><span class="tag">⚖ Giao dịch 2 chiều</span></div>
+  <div class="market-panels">
+   <div class="enhance-panel"><span class="eyebrow">🏷 ĐĂNG BÁN</span><h3>Đưa vật phẩm ra Phường Thị</h3>
+    <div class="market-form"><select id="marketSellItem">${inv.map(i=>`<option value="${i.id}">${esc(i.name)} · đang có ${i.quantity}</option>`).join('')}</select><input id="marketSellQty" type="number" min="1" value="1" placeholder="Số lượng"><input id="marketSellPrice" type="number" min="1" value="10" placeholder="Giá linh thạch"><button id="marketSellBtn" class="btn primary">Đăng bán</button></div>
+   </div>
+   <div class="enhance-panel"><span class="eyebrow">🤝 TRAO ĐỔI</span><h3>Gửi đề nghị đổi vật phẩm</h3>
+    <div class="market-form"><select id="marketTradeUser">${users.map(u=>`<option value="${u.id}">${esc(u.display_name)}</option>`).join('')}</select><select id="marketOfferItem">${inv.map(i=>`<option value="${i.id}">${esc(i.name)} · ${i.quantity}</option>`).join('')}</select><input id="marketOfferQty" type="number" min="1" value="1"><select id="marketWantItem">${catalog.map(i=>`<option value="${i.id}">${esc(i.name)}</option>`).join('')}</select><input id="marketWantQty" type="number" min="1" value="1"><button id="marketTradeBtn" class="btn primary">Gửi đề nghị</button></div>
+   </div>
+  </div>
+  <div class="market-section"><div class="section-head"><div><span class="eyebrow">🛒 SÀN GIAO DỊCH</span><h3>Vật phẩm đang được bán</h3></div></div><div class="market-listings">${listings.length?listings.map(l=>`<article class="market-card"><div><span class="eyebrow">${esc(l.category)} · ${esc(l.seller_name)}</span><h3>${esc(l.item_name)} ×${l.quantity}</h3><p>${esc(l.description)}</p><small>Giá cả lô: ☯ ${Number(l.price_stones).toLocaleString('vi-VN')} linh thạch</small></div><button class="btn small primary market-buy" data-id="${l.id}">Mua</button>${Number(l.seller_id)===Number(currentUser?.id)?`<button class="btn small ghost market-cancel" data-id="${l.id}">Hủy</button>`:''}</article>`).join(''):`<div class="empty-state compact"><p>Chưa có vật phẩm nào được rao bán.</p></div>`}</div></div>
+  <div class="market-section"><div class="section-head"><div><span class="eyebrow">🤝 ĐỀ NGHỊ TRAO ĐỔI</span><h3>Đang chờ xử lý</h3></div></div><div class="market-listings">${trades.length?trades.map(t=>{const incoming=Number(t.recipient_id)===Number(currentUser?.id);return `<article class="market-card"><div><span class="eyebrow">${incoming?'Từ':'Gửi tới'} ${esc(incoming?t.proposer_name:t.recipient_name)}</span><h3>${esc(t.offer_item_name)} ×${t.offer_quantity} ⇄ ${esc(t.want_item_name)} ×${t.want_quantity}</h3><small>${incoming?'Bạn có thể chấp nhận nếu đủ vật phẩm yêu cầu.':'Vật phẩm đề nghị đang được giữ trong giao dịch.'}</small></div>${incoming?`<button class="btn small primary market-trade-accept" data-id="${t.id}">Chấp nhận</button><button class="btn small ghost market-trade-reject" data-id="${t.id}">Từ chối</button>`:`<button class="btn small ghost market-trade-cancel" data-id="${t.id}">Hủy đề nghị</button>`}</article>`}).join(''):`<div class="empty-state compact"><p>Không có đề nghị trao đổi đang chờ.</p></div>`}</div></div>
+  <p id="marketMsg" class="train-msg"></p>`;
+  $('#marketSellBtn').onclick=async()=>{try{await api('/api/market/list',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number($('#marketSellItem').value),quantity:Number($('#marketSellQty').value),priceStones:Number($('#marketSellPrice').value)})});$('#marketMsg').textContent='✅ Đã đăng bán. Vật phẩm đã được giữ an toàn trên sàn.';await loadMarket();await loadTuDi();}catch(e){$('#marketMsg').textContent='❌ '+e.message;}};
+  $('#marketTradeBtn').onclick=async()=>{try{await api('/api/market/trade',{method:'POST',headers:authHeaders(),body:JSON.stringify({recipientId:Number($('#marketTradeUser').value),offerItemId:Number($('#marketOfferItem').value),offerQuantity:Number($('#marketOfferQty').value),wantItemId:Number($('#marketWantItem').value),wantQuantity:Number($('#marketWantQty').value)})});$('#marketMsg').textContent='🤝 Đã gửi đề nghị trao đổi.';await loadMarket();await loadTuDi();}catch(e){$('#marketMsg').textContent='❌ '+e.message;}};
+  document.querySelectorAll('.market-buy').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/market/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({listingId:Number(b.dataset.id)})});$('#marketMsg').textContent=`✅ Đã mua ${x.item} ×${x.quantity}. Trừ ${Number(x.price).toLocaleString('vi-VN')} linh thạch.`;await loadMarket();await loadTuDi();await loadProfile();}catch(e){$('#marketMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  document.querySelectorAll('.market-cancel').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/api/market/cancel',{method:'POST',headers:authHeaders(),body:JSON.stringify({listingId:Number(b.dataset.id)})});await loadMarket();await loadTuDi();}catch(e){$('#marketMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  const respond=async(id,action)=>{try{await api('/api/market/trade/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({tradeId:Number(id),action})});$('#marketMsg').textContent='✅ Đã xử lý đề nghị trao đổi.';await loadMarket();await loadTuDi();}catch(e){$('#marketMsg').textContent='❌ '+e.message;}};
+  document.querySelectorAll('.market-trade-accept').forEach(b=>b.onclick=()=>respond(b.dataset.id,'accept'));
+  document.querySelectorAll('.market-trade-reject').forEach(b=>b.onclick=()=>respond(b.dataset.id,'reject'));
+  document.querySelectorAll('.market-trade-cancel').forEach(b=>b.onclick=()=>respond(b.dataset.id,'cancel'));
+ }catch(e){const area=$('#marketArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
+}
+
 async function loadQuests(){
  try{
   const d=await api('/api/quests',{headers:authHeaders()});
@@ -185,7 +226,7 @@ function renderAuth(mode){
  const register=mode==='register';
  $('#accountContent').innerHTML=`<div class="auth-title">寒天門</div><div class="auth-sub">Ghi danh môn nhân · Dữ liệu được lưu trong PostgreSQL</div><div class="tabs"><button class="tab ${!register?'active':''}" data-mode="login">Đăng nhập</button><button class="tab ${register?'active':''}" data-mode="register">Đăng ký</button></div><form id="authForm" class="auth-form"><div class="field ${register?'':'hidden'}"><label>Danh xưng</label><input id="displayName" maxlength="40" ${register?'required':''} placeholder="Tên hiển thị"></div><div class="field"><label>Tên tài khoản</label><input id="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="tu_tien_01"></div><div class="field"><label>Mật khẩu</label><input id="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Ít nhất 6 ký tự"></div><button class="btn primary" type="submit">${register?'Ghi danh vào sơn môn':'Nhập môn'}</button><div id="authMsg" class="auth-msg"></div></form>`;
  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>renderAuth(b.dataset.mode));
- $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadData();}}catch(err){msg.textContent=err.message;}};
+ $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadTuDi();await loadMarket();await loadData();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }
 async function logout(){try{await api('/api/logout',{method:'POST',headers:authHeaders()});}catch{}finally{localStorage.removeItem(tokenKey);currentProfile=null;accountUI(null);$('#accountModal').close();renderGuestAreas();}}

@@ -154,6 +154,31 @@ async function initDb() {
       UNIQUE(user_id,item_id)
     );
 
+    CREATE TABLE IF NOT EXISTS market_listings (
+      id BIGSERIAL PRIMARY KEY,
+      seller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL CHECK(quantity > 0),
+      price_stones INTEGER NOT NULL CHECK(price_stones > 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_market_listings_active ON market_listings(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS market_trades (
+      id BIGSERIAL PRIMARY KEY,
+      proposer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      offer_item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
+      offer_quantity INTEGER NOT NULL CHECK(offer_quantity > 0),
+      want_item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
+      want_quantity INTEGER NOT NULL CHECK(want_quantity > 0),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected','cancelled')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_market_trades_recipient_status ON market_trades(recipient_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_market_trades_proposer_status ON market_trades(proposer_id,status,created_at DESC);
+
     CREATE TABLE IF NOT EXISTS achievements (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -594,134 +619,275 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
 });
 
 
-app.get('/api/treasure',auth,async(req,res)=>{
-  try {
+// ─────────────────────────────────────────────────────────────────────────────
+// TÀNG BẢO CÁC 2.0 · mua vật phẩm bằng linh lực
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/treasury',auth,async(req,res)=>{
+  try{
     await ensureProfile(req.session.user_id);
-    const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
-    const stage=stageFor(p.spirit_power);
-    const items=(await query(`SELECT ti.*,COALESCE(i.quantity,0)::int AS quantity
-      FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
+    const p=(await query(`SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
+    const stage=stageFor(Number(p?.spirit_power)||0);
+    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,
+      COALESCE(i.quantity,0)::int AS quantity
+      FROM treasure_items ti
+      LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
       ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
-    res.json({spiritPower:Number(p.spirit_power)||0,spiritStones:Number(p.spirit_stones)||0,realm:stage.realm,tier:stage.tier,items});
-  } catch(e){res.status(500).json({error:'Không thể mở Tàng Bảo Các.'});}
+    res.json({spiritPower:Number(p?.spirit_power)||0,spiritStones:Number(p?.spirit_stones)||0,
+      storageCapacity:Number(p?.storage_capacity)||30,realm:stage.realm,tier:stage.tier,items});
+  }catch(e){console.error('treasury:',e);res.status(500).json({error:'Không thể mở Tàng Bảo Các mới.'});}
 });
 
-app.post('/api/spirit-stones/claim',auth,async(req,res)=>{
+app.post('/api/treasury/buy',auth,async(req,res)=>{
   const client=await pool.connect();
-  try {
-    const amount=100, userId=req.session.user_id;
-    await client.query('BEGIN');
-    const r=await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,last_stone_claim=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,updated_at=NOW()
-      WHERE user_id=$1 AND (last_stone_claim IS NULL OR last_stone_claim < (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)
-      RETURNING spirit_stones,last_stone_claim`,[userId,amount]);
-    if(!r.rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Hôm nay bạn đã nhận 100 linh thạch. Mai hãy quay lại nhận tiếp.'});}
-    await client.query(`INSERT INTO daily_activity(user_id,activity_date,train_count,buy_count,stone_claim_count) VALUES($1,(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,0,0,1)
-      ON CONFLICT(user_id) DO UPDATE SET activity_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
-      train_count=CASE WHEN daily_activity.activity_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date THEN daily_activity.train_count ELSE 0 END,
-      buy_count=CASE WHEN daily_activity.activity_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date THEN daily_activity.buy_count ELSE 0 END,
-      stone_claim_count=CASE WHEN daily_activity.activity_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date THEN daily_activity.stone_claim_count+1 ELSE 1 END`,[userId]);
-    await logActivityEvent(client,userId,'stone_claim');
-    await client.query('COMMIT');
-    res.json({ok:true,amount,spiritStones:r.rows[0].spirit_stones,next:'Ngày mai'});
-  } catch(e){try{await client.query('ROLLBACK')}catch{};console.error('stone claim:',e);res.status(500).json({error:'Không thể nhận linh thạch hằng ngày.'});} finally{client.release();}
-});
-
-app.post('/api/treasure/buy-stones',auth,async(req,res)=>{
-  const client=await pool.connect();
-  try {
-    const amount=100, spiritCost=500;
-    await client.query('BEGIN');
-    const r=await client.query(`UPDATE profiles SET spirit_power=spirit_power-$2,spirit_stones=spirit_stones+$3,updated_at=NOW() WHERE user_id=$1 AND spirit_power>=$2 RETURNING spirit_power,spirit_stones`,[req.session.user_id,spiritCost,amount]);
-    if(!r.rows.length){await client.query('ROLLBACK');return res.status(400).json({error:'Cần 500 linh lực để đổi lấy 100 linh thạch.'});}
-    const stage=stageFor(r.rows[0].spirit_power);
-    await client.query('UPDATE profiles SET rank=$2,realm_tier=$3 WHERE user_id=$1',[req.session.user_id,stage.realm,stage.tier]);
-    await client.query('COMMIT');
-    res.json({ok:true,amount,spirit:r.rows[0].spirit_power,spiritStones:r.rows[0].spirit_stones,stage:stage.stage});
-  } catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể đổi linh lực lấy linh thạch.'});}
-  finally{client.release();}
-});
-
-app.post('/api/treasure/buy',auth,async(req,res)=>{
-  const client=await pool.connect();
-  try {
+  try{
     const itemId=Number(req.body?.itemId);
-    if(!Number.isInteger(itemId) || itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
+    if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
     await client.query('BEGIN');
-
-    const itemR=await client.query('SELECT id,name,category,price,spirit_gain,min_realm FROM treasure_items WHERE id=$1 FOR UPDATE',[itemId]);
+    const itemR=await client.query(`SELECT id,name,category,description,price,spirit_gain,min_realm
+      FROM treasure_items WHERE id=$1 FOR UPDATE`,[itemId]);
     if(!itemR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy vật phẩm.'});}
     const item=itemR.rows[0];
-
-    const pR=await client.query('SELECT spirit_power,COALESCE(spirit_stones,0)::int AS spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id]);
+    const pR=await client.query(`SELECT spirit_power,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
     if(!pR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ đệ tử.'});}
-    const p=pR.rows[0];
-    const stage=stageFor(Number(p.spirit_power)||0);
-
-    if(stage.realmIndex < Number(item.min_realm)){
+    const p=pR.rows[0], stage=stageFor(Number(p.spirit_power)||0);
+    if(stage.realmIndex<Number(item.min_realm)){
       await client.query('ROLLBACK');
-      return res.status(403).json({error:`Vật phẩm này yêu cầu ${RANKS[Number(item.min_realm)].name}. Bạn hiện ở ${stage.stage}.`});
+      return res.status(403).json({error:`Vật phẩm yêu cầu ${RANKS[Number(item.min_realm)]?.name||'cảnh giới cao hơn'}. Bạn hiện ở ${stage.stage}.`});
     }
-    if(Number(p.spirit_power) < Number(item.price)){
+    const price=Math.max(0,Number(item.price)||0);
+    if(Number(p.spirit_power)<price){
       await client.query('ROLLBACK');
-      return res.status(400).json({error:`Linh lực không đủ. Cần ${Number(item.price).toLocaleString('vi-VN')} linh lực, hiện có ${Number(p.spirit_power).toLocaleString('vi-VN')}.`});
+      return res.status(400).json({error:`Linh lực không đủ. Cần ${price.toLocaleString('vi-VN')} linh lực.`});
     }
-
-    const capR=await client.query(`SELECT COALESCE(storage_capacity,30)::int AS capacity,
+    const capR=await client.query(`SELECT
+      COALESCE(storage_capacity,30)::int AS capacity,
       COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used_slots,
       COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned_qty
       FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id,itemId]);
-    const capacity=Math.max(1,Number(capR.rows[0]?.capacity)||30);
-    const usedSlots=Number(capR.rows[0]?.used_slots)||0;
-    const ownedQty=Number(capR.rows[0]?.owned_qty)||0;
-    // Tu Di Giới tính theo số ô vật phẩm, không tính từng đơn vị.
-    // Có thể mua thêm vật phẩm đã có sẵn ngay cả khi các ô khác đã đầy.
-    if(usedSlots>=capacity && ownedQty<=0){
+    const cap=Math.max(1,Number(capR.rows[0].capacity)||30);
+    const used=Number(capR.rows[0].used_slots)||0, owned=Number(capR.rows[0].owned_qty)||0;
+    if(used>=cap&&owned<=0){
       await client.query('ROLLBACK');
-      return res.status(400).json({error:`Tu Di Giới đã đầy (${usedSlots}/${capacity}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
+      return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
     }
-
-    let newSpirit=(Number(p.spirit_power)||0)-Number(item.price);
-    if(Number(item.spirit_gain)>0)newSpirit+=Number(item.spirit_gain);
+    const newSpirit=(Number(p.spirit_power)||0)-price+(Number(item.spirit_gain)||0);
     const ns=stageFor(newSpirit);
-
-    await client.query(
-      `UPDATE profiles SET spirit_power=$2, experience=experience+$3, rank=$4, realm_tier=$5, updated_at=NOW() WHERE user_id=$1`,
-      [req.session.user_id,newSpirit,Number(item.spirit_gain)||0,ns.realm,ns.tier]
-    );
+    await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,updated_at=NOW() WHERE user_id=$1`,
+      [req.session.user_id,newSpirit,Number(item.spirit_gain)||0,ns.realm,ns.tier]);
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW())
-      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[req.session.user_id,itemId]);
-
-    // Ghi nhận tiến độ nhiệm vụ mua vật phẩm trong cùng transaction.
+      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,
+      [req.session.user_id,itemId]);
     const today="(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date";
     await client.query(`INSERT INTO daily_activity(user_id,activity_date,buy_count,train_count,stone_claim_count)
       VALUES($1,${today},1,0,0)
       ON CONFLICT(user_id) DO UPDATE SET
-        buy_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.buy_count+1 ELSE 1 END,
-        train_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.train_count ELSE 0 END,
-        stone_claim_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.stone_claim_count ELSE 0 END,
-        activity_date=${today}`,[req.session.user_id]);
+      buy_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.buy_count+1 ELSE 1 END,
+      train_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.train_count ELSE 0 END,
+      stone_claim_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.stone_claim_count ELSE 0 END,
+      activity_date=${today}`,[req.session.user_id]);
     await logActivityEvent(client,req.session.user_id,'buy');
-
     await client.query('COMMIT');
-    res.json({ok:true,item:item.name,spirit:newSpirit,spentSpirit:Number(item.price),stage:ns.stage,quantityAdded:1});
-  } catch(e){
+    res.json({ok:true,item:item.name,quantityAdded:1,spirit:newSpirit,spentSpirit:price,stage:ns.stage});
+  }catch(e){
     try{await client.query('ROLLBACK')}catch{}
-    console.error('Treasure purchase error:',e);
-    res.status(500).json({error:'Không thể mua vật phẩm lúc này. Vui lòng thử lại.'});
-  } finally{client.release();}
+    console.error('treasury buy:',e);res.status(500).json({error:'Giao dịch Tàng Bảo Các thất bại. Vui lòng thử lại.'});
+  }finally{client.release();}
 });
 
-app.get('/api/tu-di-gioi',auth,async(req,res)=>{
+// ─────────────────────────────────────────────────────────────────────────────
+// TU DI GIỚI 2.0 · kho vật phẩm, dùng vật phẩm và nâng dung lượng
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/storage',auth,async(req,res)=>{
   try{
     await ensureProfile(req.session.user_id);
-    const p=(await query('SELECT storage_capacity,spirit_root,spirit_beast FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
-    const r=await query(`SELECT ti.id,ti.name,ti.category,ti.description,i.quantity
+    const p=(await query(`SELECT storage_capacity,spirit_root,spirit_beast,spirit_power FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
+    const r=await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.spirit_gain,i.quantity
       FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
-      WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC`,[req.session.user_id]);
-    const count=r.rows.filter(x=>Number(x.quantity||0)>0).length;
-    res.json({rows:r.rows,used:count,capacity:Number(p.storage_capacity)||30,unlocked:true,spiritRoot:p.spirit_root,spiritBeast:p.spirit_beast});
-  }catch(e){res.status(500).json({error:'Không thể mở Tu Di Giới.'});}
+      WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC,ti.id`,[req.session.user_id]);
+    const used=r.rows.length, capacity=Math.max(1,Number(p?.storage_capacity)||30);
+    res.json({rows:r.rows,used,capacity,spiritRoot:p?.spirit_root||null,spiritBeast:p?.spirit_beast||null,spiritPower:Number(p?.spirit_power)||0});
+  }catch(e){console.error('storage:',e);res.status(500).json({error:'Không thể mở Tu Di Giới mới.'});}
 });
+
+app.post('/api/storage/use',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const itemId=Number(req.body?.itemId);
+    const qty=Math.max(1,Math.min(99,Number(req.body?.quantity)||1));
+    if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
+    await client.query('BEGIN');
+    const r=await client.query(`SELECT ti.id,ti.name,ti.description,ti.spirit_gain,i.quantity
+      FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+      WHERE i.user_id=$1 AND ti.id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
+    if(!r.rows.length||Number(r.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng vật phẩm trong Tu Di Giới không đủ.'});}
+    const item=r.rows[0], gain=Number(item.spirit_gain)||0;
+    if(gain<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Vật phẩm này không thể sử dụng trực tiếp.'});}
+    const nr=await client.query(`UPDATE profiles SET spirit_power=spirit_power+$2,experience=experience+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,
+      [req.session.user_id,gain*qty]);
+    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,
+      [req.session.user_id,itemId,qty]);
+    await client.query('COMMIT');
+    res.json({ok:true,item:item.name,quantityUsed:qty,gained:gain*qty,spirit:Number(nr.rows[0].spirit_power)});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('storage use:',e);res.status(500).json({error:'Không thể sử dụng vật phẩm.'});}
+  finally{client.release();}
+});
+
+app.post('/api/storage/upgrade',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const r=await client.query(`SELECT storage_capacity,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
+    if(!r.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ.'});}
+    const cap=Number(r.rows[0].storage_capacity)||30, stones=Number(r.rows[0].spirit_stones)||0;
+    const cost=100, add=5;
+    if(cap>=100){await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới đã đạt dung lượng tối đa 100 ô.'});}
+    if(stones<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost} linh thạch để mở thêm ${add} ô.`});}
+    const nr=await client.query(`UPDATE profiles SET storage_capacity=LEAST(100,storage_capacity+$2),spirit_stones=spirit_stones-$3,updated_at=NOW() WHERE user_id=$1 RETURNING storage_capacity,spirit_stones`,
+      [req.session.user_id,add,cost]);
+    await client.query('COMMIT');
+    res.json({ok:true,capacity:Number(nr.rows[0].storage_capacity),spiritStones:Number(nr.rows[0].spirit_stones)});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('storage upgrade:',e);res.status(500).json({error:'Không thể nâng dung lượng Tu Di Giới.'});}
+  finally{client.release();}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHƯỜNG THỊ 1.0 · mua bán và trao đổi vật phẩm giữa các môn nhân
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/market',auth,async(req,res)=>{
+  try{
+    const listings=(await query(`SELECT ml.id,ml.seller_id,ml.item_id,ml.quantity,ml.price_stones,ml.created_at,
+      u.display_name AS seller_name,ti.name AS item_name,ti.category,ti.description
+      FROM market_listings ml JOIN users u ON u.id=ml.seller_id JOIN treasure_items ti ON ti.id=ml.item_id
+      ORDER BY ml.created_at DESC LIMIT 100`)).rows;
+    const users=(await query(`SELECT u.id,u.display_name FROM users u WHERE u.id<>$1 ORDER BY u.display_name,u.id`,[req.session.user_id])).rows;
+    const trades=(await query(`SELECT mt.id,mt.proposer_id,mt.recipient_id,mt.offer_item_id,mt.offer_quantity,mt.want_item_id,mt.want_quantity,mt.status,mt.created_at,mt.responded_at,
+      pu.display_name AS proposer_name,ru.display_name AS recipient_name,
+      oi.name AS offer_item_name,wi.name AS want_item_name
+      FROM market_trades mt JOIN users pu ON pu.id=mt.proposer_id JOIN users ru ON ru.id=mt.recipient_id
+      JOIN treasure_items oi ON oi.id=mt.offer_item_id JOIN treasure_items wi ON wi.id=mt.want_item_id
+      WHERE (mt.proposer_id=$1 OR mt.recipient_id=$1) AND mt.status='pending'
+      ORDER BY mt.created_at DESC LIMIT 50`,[req.session.user_id])).rows;
+    const inv=(await query(`SELECT ti.id,ti.name,ti.category,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY ti.name`,[req.session.user_id])).rows;
+    const catalog=(await query(`SELECT id,name,category FROM treasure_items ORDER BY name,id`)).rows;
+    res.json({listings,users,trades,inventory:inv,catalog});
+  }catch(e){console.error('market:',e);res.status(500).json({error:'Không thể mở Phường Thị.'});}
+});
+
+app.post('/api/market/list',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const itemId=Number(req.body?.itemId), qty=Math.max(1,Math.floor(Number(req.body?.quantity)||0)), price=Math.max(1,Math.floor(Number(req.body?.priceStones)||0));
+    if(!Number.isInteger(itemId)||qty<1||price<1)return res.status(400).json({error:'Vật phẩm, số lượng hoặc giá bán không hợp lệ.'});
+    await client.query('BEGIN');
+    const ir=await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
+    if(!ir.rows.length||Number(ir.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không có đủ vật phẩm để bán.'});}
+    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[req.session.user_id,itemId,qty]);
+    await client.query(`INSERT INTO market_listings(seller_id,item_id,quantity,price_stones) VALUES($1,$2,$3,$4)`,[req.session.user_id,itemId,qty,price]);
+    await client.query('COMMIT');
+    res.json({ok:true});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('market list:',e);res.status(500).json({error:'Không thể đăng bán vật phẩm.'});}
+  finally{client.release();}
+});
+
+app.post('/api/market/buy',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const listingId=Number(req.body?.listingId);
+    if(!Number.isInteger(listingId)||listingId<1)return res.status(400).json({error:'Tin bán không hợp lệ.'});
+    await client.query('BEGIN');
+    const lr=await client.query(`SELECT ml.*,ti.name AS item_name FROM market_listings ml JOIN treasure_items ti ON ti.id=ml.item_id WHERE ml.id=$1 FOR UPDATE`,[listingId]);
+    if(!lr.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Tin bán không còn tồn tại.'});}
+    const l=lr.rows[0];
+    if(Number(l.seller_id)===Number(req.session.user_id)){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không thể mua vật phẩm của chính mình.'});}
+    const buyer=await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
+    const seller=await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[l.seller_id]);
+    if(!buyer.rows.length||!seller.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ giao dịch.'});}
+    const price=Number(l.price_stones);
+    if(Number(buyer.rows[0].spirit_stones)<price){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${price.toLocaleString('vi-VN')} linh thạch để mua.`});}
+    const capR=await client.query(`SELECT storage_capacity,COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used,COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id,l.item_id]);
+    if(Number(capR.rows[0].used)>=Number(capR.rows[0].storage_capacity)&&Number(capR.rows[0].owned)<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới của người mua đã đầy.'});}
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,price]);
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[l.seller_id,price]);
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[req.session.user_id,l.item_id,l.quantity]);
+    await client.query('DELETE FROM market_listings WHERE id=$1',[listingId]);
+    await client.query('COMMIT');
+    res.json({ok:true,item:l.item_name,quantity:Number(l.quantity),price});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('market buy:',e);res.status(500).json({error:'Không thể mua vật phẩm trên Phường Thị.'});}
+  finally{client.release();}
+});
+
+app.post('/api/market/cancel',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const listingId=Number(req.body?.listingId); await client.query('BEGIN');
+    const l=(await client.query(`SELECT * FROM market_listings WHERE id=$1 AND seller_id=$2 FOR UPDATE`,[listingId,req.session.user_id])).rows[0];
+    if(!l){await client.query('ROLLBACK');return res.status(404).json({error:'Tin bán không tồn tại hoặc không thuộc về bạn.'});}
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[req.session.user_id,l.item_id,l.quantity]);
+    await client.query('DELETE FROM market_listings WHERE id=$1',[listingId]);
+    await client.query('COMMIT');res.json({ok:true});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('market cancel:',e);res.status(500).json({error:'Không thể hủy tin bán.'});}
+  finally{client.release();}
+});
+
+app.post('/api/market/trade',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const recipientId=Number(req.body?.recipientId), offerItemId=Number(req.body?.offerItemId), offerQty=Math.max(1,Math.floor(Number(req.body?.offerQuantity)||0));
+    const wantItemId=Number(req.body?.wantItemId), wantQty=Math.max(1,Math.floor(Number(req.body?.wantQuantity)||0));
+    if(!Number.isInteger(recipientId)||recipientId===Number(req.session.user_id)||!Number.isInteger(offerItemId)||!Number.isInteger(wantItemId)||offerQty<1||wantQty<1)return res.status(400).json({error:'Thông tin trao đổi không hợp lệ.'});
+    await client.query('BEGIN');
+    const u=(await client.query('SELECT id FROM users WHERE id=$1',[recipientId])).rows[0];
+    if(!u){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân nhận trao đổi.'});}
+    const ir=(await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[req.session.user_id,offerItemId])).rows[0];
+    if(!ir||Number(ir.quantity)<offerQty){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không đủ vật phẩm đề nghị trao đổi.'});}
+    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[req.session.user_id,offerItemId,offerQty]);
+    await client.query(`INSERT INTO market_trades(proposer_id,recipient_id,offer_item_id,offer_quantity,want_item_id,want_quantity) VALUES($1,$2,$3,$4,$5,$6)`,[req.session.user_id,recipientId,offerItemId,offerQty,wantItemId,wantQty]);
+    await client.query('COMMIT');res.json({ok:true});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('market trade:',e);res.status(500).json({error:'Không thể tạo đề nghị trao đổi.'});}
+  finally{client.release();}
+});
+
+app.post('/api/market/trade/respond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const tradeId=Number(req.body?.tradeId), action=String(req.body?.action||'').toLowerCase();
+    if(!Number.isInteger(tradeId)||!['accept','reject','cancel'].includes(action))return res.status(400).json({error:'Yêu cầu trao đổi không hợp lệ.'});
+    await client.query('BEGIN');
+    const tr=(await client.query(`SELECT * FROM market_trades WHERE id=$1 FOR UPDATE`,[tradeId])).rows[0];
+    if(!tr){await client.query('ROLLBACK');return res.status(404).json({error:'Đề nghị trao đổi không tồn tại.'});}
+    const uid=Number(req.session.user_id);
+    if(action==='cancel'){
+      if(uid!==Number(tr.proposer_id)){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ người đề nghị mới có thể hủy.'});}
+    }else if(uid!==Number(tr.recipient_id)){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ người nhận mới có thể phản hồi.'});}
+    if(tr.status!=='pending'){await client.query('ROLLBACK');return res.status(409).json({error:'Đề nghị này đã được xử lý.'});}
+    if(action==='reject'||action==='cancel'){
+      await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[tr.proposer_id,tr.offer_item_id,tr.offer_quantity]);
+      await client.query(`UPDATE market_trades SET status=$2,responded_at=NOW() WHERE id=$1`,[tradeId,action==='cancel'?'cancelled':'rejected']);
+      await client.query('COMMIT');return res.json({ok:true,status:action==='cancel'?'cancelled':'rejected'});
+    }
+    if(Number(tr.offer_item_id)===Number(tr.want_item_id)){
+      await client.query('ROLLBACK');return res.status(400).json({error:'Không thể trao đổi cùng một loại vật phẩm.'});
+    }
+    const want=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[tr.recipient_id,tr.want_item_id])).rows[0];
+    if(!want||Number(want.quantity)<Number(tr.want_quantity)){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không đủ vật phẩm để chấp nhận trao đổi.'});}
+    const cap=(await client.query(`SELECT storage_capacity,COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used,COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned FROM profiles WHERE user_id=$1 FOR UPDATE`,[tr.recipient_id,tr.offer_item_id])).rows[0];
+    if(Number(cap.used)>=Number(cap.storage_capacity)&&Number(cap.owned)<=0){
+      await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới của bạn đã đầy, không thể nhận vật phẩm trao đổi.'});
+    }
+    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[tr.recipient_id,tr.want_item_id,tr.want_quantity]);
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[tr.recipient_id,tr.offer_item_id,tr.offer_quantity]);
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[tr.proposer_id,tr.want_item_id,tr.want_quantity]);
+    await client.query(`UPDATE market_trades SET status='accepted',responded_at=NOW() WHERE id=$1`,[tradeId]);
+    await client.query('COMMIT');res.json({ok:true,status:'accepted'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('market trade respond:',e);res.status(500).json({error:'Không thể xử lý trao đổi.'});}
+  finally{client.release();}
+});
+
+// Backward-compatible aliases are intentionally removed from the old UI;
+// these routes are only kept as redirects for clients with a cached page.
+app.get('/api/treasure',auth,async(req,res)=>{ req.url='/api/treasury'; return res.redirect(307,'/api/treasury'); });
+app.post('/api/treasure/buy',auth,async(req,res)=>{ req.url='/api/treasury/buy'; return res.redirect(307,'/api/treasury/buy'); });
+app.get('/api/tu-di-gioi',auth,async(req,res)=>{ req.url='/api/storage'; return res.redirect(307,'/api/storage'); });
 
 app.post('/api/random-gifts',auth,async(req,res)=>{
   const client=await pool.connect();
