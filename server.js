@@ -526,9 +526,13 @@ app.get('/api/profile',auth,async(req,res)=>{
     const activity=(await query('SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1',[p.id])).rows[0];
     const trainCount=String(activity?.activity_date||'').slice(0,10)===today ? Number(activity.train_count)||0 : 0;
     const maxDaily=Math.max(2,10-stage.realmIndex);
+    const inventoryRows=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,i.quantity,i.updated_at,
+      CASE ti.min_realm WHEN 0 THEN 'Phàm phẩm' WHEN 1 THEN 'Hoàng phẩm' WHEN 2 THEN 'Huyền phẩm' WHEN 3 THEN 'Địa phẩm' WHEN 4 THEN 'Thiên phẩm' WHEN 5 THEN 'Linh phẩm' WHEN 6 THEN 'Tiên phẩm' WHEN 7 THEN 'Thánh phẩm' ELSE 'Đế phẩm' END AS grade
+      FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+      WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC,ti.id`,[p.id])).rows;
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
+    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),inventory:inventoryRows,trainCount,maxDaily}});
   } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
 });
 
@@ -625,15 +629,15 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
 app.get('/api/treasury',auth,async(req,res)=>{
   try{
     await ensureProfile(req.session.user_id);
-    const p=(await query(`SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
+    const p=(await query(`SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
     const stage=stageFor(Number(p?.spirit_power)||0);
     const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,
+      CASE ti.min_realm WHEN 0 THEN 'Phàm phẩm' WHEN 1 THEN 'Hoàng phẩm' WHEN 2 THEN 'Huyền phẩm' WHEN 3 THEN 'Địa phẩm' WHEN 4 THEN 'Thiên phẩm' WHEN 5 THEN 'Linh phẩm' WHEN 6 THEN 'Tiên phẩm' WHEN 7 THEN 'Thánh phẩm' ELSE 'Đế phẩm' END AS grade,
       COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti
       LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
       ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
-    res.json({spiritPower:Number(p?.spirit_power)||0,spiritStones:Number(p?.spirit_stones)||0,
-      storageCapacity:Number(p?.storage_capacity)||30,realm:stage.realm,tier:stage.tier,items});
+    res.json({spiritPower:Number(p?.spirit_power)||0,spiritStones:Number(p?.spirit_stones)||0,realm:stage.realm,tier:stage.tier,items});
   }catch(e){console.error('treasury:',e);res.status(500).json({error:'Không thể mở Tàng Bảo Các mới.'});}
 });
 
@@ -647,7 +651,7 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
       FROM treasure_items WHERE id=$1 FOR UPDATE`,[itemId]);
     if(!itemR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy vật phẩm.'});}
     const item=itemR.rows[0];
-    const pR=await client.query(`SELECT spirit_power,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
+    const pR=await client.query(`SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
     if(!pR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ đệ tử.'});}
     const p=pR.rows[0], stage=stageFor(Number(p.spirit_power)||0);
     if(stage.realmIndex<Number(item.min_realm)){
@@ -658,17 +662,6 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
     if(Number(p.spirit_power)<price){
       await client.query('ROLLBACK');
       return res.status(400).json({error:`Linh lực không đủ. Cần ${price.toLocaleString('vi-VN')} linh lực.`});
-    }
-    const capR=await client.query(`SELECT
-      COALESCE(storage_capacity,30)::int AS capacity,
-      COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used_slots,
-      COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned_qty
-      FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id,itemId]);
-    const cap=Math.max(1,Number(capR.rows[0].capacity)||30);
-    const used=Number(capR.rows[0].used_slots)||0, owned=Number(capR.rows[0].owned_qty)||0;
-    if(used>=cap&&owned<=0){
-      await client.query('ROLLBACK');
-      return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
     }
     const newSpirit=(Number(p.spirit_power)||0)-price+(Number(item.spirit_gain)||0);
     const ns=stageFor(newSpirit);
@@ -692,62 +685,6 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
     try{await client.query('ROLLBACK')}catch{}
     console.error('treasury buy:',e);res.status(500).json({error:'Giao dịch Tàng Bảo Các thất bại. Vui lòng thử lại.'});
   }finally{client.release();}
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TU DI GIỚI 2.0 · kho vật phẩm, dùng vật phẩm và nâng dung lượng
-// ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/storage',auth,async(req,res)=>{
-  try{
-    await ensureProfile(req.session.user_id);
-    const p=(await query(`SELECT storage_capacity,spirit_root,spirit_beast,spirit_power FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
-    const r=await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.spirit_gain,i.quantity
-      FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
-      WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC,ti.id`,[req.session.user_id]);
-    const used=r.rows.length, capacity=Math.max(1,Number(p?.storage_capacity)||30);
-    res.json({rows:r.rows,used,capacity,spiritRoot:p?.spirit_root||null,spiritBeast:p?.spirit_beast||null,spiritPower:Number(p?.spirit_power)||0});
-  }catch(e){console.error('storage:',e);res.status(500).json({error:'Không thể mở Tu Di Giới mới.'});}
-});
-
-app.post('/api/storage/use',auth,async(req,res)=>{
-  const client=await pool.connect();
-  try{
-    const itemId=Number(req.body?.itemId);
-    const qty=Math.max(1,Math.min(99,Number(req.body?.quantity)||1));
-    if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
-    await client.query('BEGIN');
-    const r=await client.query(`SELECT ti.id,ti.name,ti.description,ti.spirit_gain,i.quantity
-      FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
-      WHERE i.user_id=$1 AND ti.id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
-    if(!r.rows.length||Number(r.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng vật phẩm trong Tu Di Giới không đủ.'});}
-    const item=r.rows[0], gain=Number(item.spirit_gain)||0;
-    if(gain<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Vật phẩm này không thể sử dụng trực tiếp.'});}
-    const nr=await client.query(`UPDATE profiles SET spirit_power=spirit_power+$2,experience=experience+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,
-      [req.session.user_id,gain*qty]);
-    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,
-      [req.session.user_id,itemId,qty]);
-    await client.query('COMMIT');
-    res.json({ok:true,item:item.name,quantityUsed:qty,gained:gain*qty,spirit:Number(nr.rows[0].spirit_power)});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('storage use:',e);res.status(500).json({error:'Không thể sử dụng vật phẩm.'});}
-  finally{client.release();}
-});
-
-app.post('/api/storage/upgrade',auth,async(req,res)=>{
-  const client=await pool.connect();
-  try{
-    await client.query('BEGIN');
-    const r=await client.query(`SELECT storage_capacity,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
-    if(!r.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ.'});}
-    const cap=Number(r.rows[0].storage_capacity)||30, stones=Number(r.rows[0].spirit_stones)||0;
-    const cost=100, add=5;
-    if(cap>=100){await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới đã đạt dung lượng tối đa 100 ô.'});}
-    if(stones<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost} linh thạch để mở thêm ${add} ô.`});}
-    const nr=await client.query(`UPDATE profiles SET storage_capacity=LEAST(100,storage_capacity+$2),spirit_stones=spirit_stones-$3,updated_at=NOW() WHERE user_id=$1 RETURNING storage_capacity,spirit_stones`,
-      [req.session.user_id,add,cost]);
-    await client.query('COMMIT');
-    res.json({ok:true,capacity:Number(nr.rows[0].storage_capacity),spiritStones:Number(nr.rows[0].spirit_stones)});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('storage upgrade:',e);res.status(500).json({error:'Không thể nâng dung lượng Tu Di Giới.'});}
-  finally{client.release();}
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -804,8 +741,6 @@ app.post('/api/market/buy',auth,async(req,res)=>{
     if(!buyer.rows.length||!seller.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ giao dịch.'});}
     const price=Number(l.price_stones);
     if(Number(buyer.rows[0].spirit_stones)<price){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${price.toLocaleString('vi-VN')} linh thạch để mua.`});}
-    const capR=await client.query(`SELECT storage_capacity,COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used,COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id,l.item_id]);
-    if(Number(capR.rows[0].used)>=Number(capR.rows[0].storage_capacity)&&Number(capR.rows[0].owned)<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới của người mua đã đầy.'});}
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,price]);
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[l.seller_id,price]);
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[req.session.user_id,l.item_id,l.quantity]);
@@ -870,10 +805,6 @@ app.post('/api/market/trade/respond',auth,async(req,res)=>{
     }
     const want=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[tr.recipient_id,tr.want_item_id])).rows[0];
     if(!want||Number(want.quantity)<Number(tr.want_quantity)){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không đủ vật phẩm để chấp nhận trao đổi.'});}
-    const cap=(await client.query(`SELECT storage_capacity,COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used,COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned FROM profiles WHERE user_id=$1 FOR UPDATE`,[tr.recipient_id,tr.offer_item_id])).rows[0];
-    if(Number(cap.used)>=Number(cap.storage_capacity)&&Number(cap.owned)<=0){
-      await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới của bạn đã đầy, không thể nhận vật phẩm trao đổi.'});
-    }
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[tr.recipient_id,tr.want_item_id,tr.want_quantity]);
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[tr.recipient_id,tr.offer_item_id,tr.offer_quantity]);
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[tr.proposer_id,tr.want_item_id,tr.want_quantity]);
@@ -887,7 +818,6 @@ app.post('/api/market/trade/respond',auth,async(req,res)=>{
 // these routes are only kept as redirects for clients with a cached page.
 app.get('/api/treasure',auth,async(req,res)=>{ req.url='/api/treasury'; return res.redirect(307,'/api/treasury'); });
 app.post('/api/treasure/buy',auth,async(req,res)=>{ req.url='/api/treasury/buy'; return res.redirect(307,'/api/treasury/buy'); });
-app.get('/api/tu-di-gioi',auth,async(req,res)=>{ req.url='/api/storage'; return res.redirect(307,'/api/storage'); });
 
 app.post('/api/random-gifts',auth,async(req,res)=>{
   const client=await pool.connect();
@@ -1003,9 +933,6 @@ app.post('/api/enhance/roll',auth,async(req,res)=>{
     const poolItems=[['Linh Phù Cường Hóa',55],['Tinh Thạch Cường Hóa',28],['Huyền Thiết Cường Hóa',12],['Thiên Đạo Cường Hóa Thạch',5]];
     const total=poolItems.reduce((n,x)=>n+x[1],0); let n=crypto.randomInt(1,total+1), chosen=poolItems[0][0]; for(const x of poolItems){n-=x[1];if(n<=0){chosen=x[0];break;}}
     const item=(await client.query('SELECT id,name,description FROM treasure_items WHERE name=$1',[chosen])).rows[0];
-    const used=Number((await client.query('SELECT COUNT(*)::int AS used FROM inventory WHERE user_id=$1 AND quantity>0',[req.session.user_id])).rows[0].used); const cap=Number((await client.query('SELECT storage_capacity FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0].storage_capacity)||30;
-    if(used>=cap){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}).`});}
-    const nr=(await client.query(`UPDATE profiles SET spirit_power=spirit_power-$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,[req.session.user_id,cost])).rows[0];
     const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW() RETURNING quantity`,[req.session.user_id,item.id]);
     await client.query('COMMIT'); res.json({ok:true,item:item.name,description:item.description,quantity:ir.rows[0].quantity,spirit:Number(nr.spirit_power)});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('enhance roll:',e);res.status(500).json({error:'Không thể quay vật phẩm tăng cường.'});}finally{client.release();}

@@ -1,0 +1,30 @@
+HÀN THIÊN MÔN v3.7
+
+1. XÓA TU DI GIỚI
+- Xóa mục Tu Di Giới khỏi giao diện và menu.
+- Không còn gọi /api/storage trong giao diện.
+- Bỏ giới hạn dung lượng kho khỏi luồng mua/bán/trao đổi vật phẩm.
+- Inventory trở thành kho vật phẩm dùng chung và hiển thị trực tiếp trong Bảng thuộc tính.
+
+2. VẬT PHẨM TRONG BẢNG THUỘC TÍNH
+- Hồ sơ đệ tử tải toàn bộ vật phẩm đang sở hữu từ inventory.
+- Hiển thị: tên, số lượng, công dụng, phẩm cấp.
+- Phẩm cấp được xác định theo cảnh giới yêu cầu của vật phẩm.
+- Vật phẩm từ Tàng Bảo Các, Nhiệm Vụ Đường và Phường Thị đều dùng chung inventory.
+
+3. TÀNG BẢO CÁC
+- Mua vật phẩm bằng linh lực trong transaction PostgreSQL.
+- Khóa hồ sơ bằng FOR UPDATE để tránh hai lần mua đồng thời làm sai số dư.
+- Nếu đủ linh lực, không còn bị chặn bởi dung lượng Tu Di Giới.
+- Sau khi mua thành công, vật phẩm được ghi vào inventory cùng transaction với việc trừ linh lực.
+- Hiển thị đúng thông báo:
+  "Vật Phẩm đã được chuyển về bảng thuộc tính - mở bảng để xem"
+
+4. PHƯỜNG THỊ
+- Không còn giới hạn dung lượng kho khi mua/nhận vật phẩm.
+- Vật phẩm giao dịch vẫn được ghi trực tiếp vào inventory.
+
+5. KIỂM TRA
+- server.js: node --check OK.
+- script.js: node --check OK.
+- Chưa chạy giao dịch PostgreSQL production thực tế vì cần DATABASE_URL của máy chủ.
