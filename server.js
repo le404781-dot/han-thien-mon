@@ -140,6 +140,29 @@ async function initDb() {
       message TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS sect_quests (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL,
+      requirement_type TEXT NOT NULL,
+      requirement_value INTEGER NOT NULL DEFAULT 1,
+      reward_stones INTEGER NOT NULL DEFAULT 0 CHECK(reward_stones >= 0),
+      active BOOLEAN NOT NULL DEFAULT TRUE
+    );
+    CREATE TABLE IF NOT EXISTS user_quest_claims (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      quest_id INTEGER NOT NULL REFERENCES sect_quests(id) ON DELETE CASCADE,
+      claim_date DATE NOT NULL,
+      UNIQUE(user_id, quest_id, claim_date)
+    );
+    CREATE TABLE IF NOT EXISTS daily_activity (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      activity_date DATE NOT NULL,
+      train_count INTEGER NOT NULL DEFAULT 0,
+      buy_count INTEGER NOT NULL DEFAULT 0,
+      stone_claim_count INTEGER NOT NULL DEFAULT 0
+    );
   `);
 
   await query('INSERT INTO profiles(user_id) SELECT id FROM users ON CONFLICT (user_id) DO NOTHING');
@@ -177,6 +200,27 @@ async function initDb() {
     ];
     for (const item of items) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6)',item);
   }
+  const qCount = await query('SELECT COUNT(*)::int AS c FROM sect_quests');
+  if (!qCount.rows[0].c) {
+    const quests = [
+      ['Vận công nhập môn','Vận công 1 lần trong ngày.','train',1,40],
+      ['Tu luyện tinh tiến','Vận công 3 lần trong ngày.','train',3,100],
+      ['Thám bảo sơn môn','Mua 1 vật phẩm tại Tàng Bảo Các.','buy',1,60],
+      ['Kho báu Hàn Thiên','Mua 3 vật phẩm tại Tàng Bảo Các.','buy',3,180],
+      ['Nhận lộc thiên đạo','Nhận linh thạch hằng ngày.','stone_claim',1,50]
+    ];
+    for (const q of quests) await query('INSERT INTO sect_quests(name,description,requirement_type,requirement_value,reward_stones) VALUES($1,$2,$3,$4,$5)',q);
+  }
+}
+
+async function touchDailyActivity(userId) {
+  const today = `(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date`;
+  await query(`INSERT INTO daily_activity(user_id,activity_date) VALUES($1,${today})
+    ON CONFLICT(user_id) DO UPDATE SET activity_date=EXCLUDED.activity_date,train_count=CASE WHEN daily_activity.activity_date=EXCLUDED.activity_date THEN daily_activity.train_count ELSE 0 END,buy_count=CASE WHEN daily_activity.activity_date=EXCLUDED.activity_date THEN daily_activity.buy_count ELSE 0 END,stone_claim_count=CASE WHEN daily_activity.activity_date=EXCLUDED.activity_date THEN daily_activity.stone_claim_count ELSE 0 END`,[userId]);
+}
+async function addDailyActivity(userId, field, amount=1) {
+  await touchDailyActivity(userId);
+  await query(`UPDATE daily_activity SET ${field}=${field}+$2 WHERE user_id=$1`,[userId,amount]);
 }
 
 app.use(express.json({ limit: '200kb' }));
@@ -216,12 +260,13 @@ app.get('/api/health',(req,res)=>res.json({ok:true,service:'Hàn Thiên Môn'}))
 app.get('/api/data',async(req,res)=>{
   try {
     const [m,mem,t,u] = await Promise.all([
-      query('SELECT * FROM members ORDER BY id'),
+      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier
+             FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY u.id`),
       query('SELECT icon,title,description FROM memories ORDER BY id'),
       query('SELECT year,title,description FROM timeline ORDER BY id'),
       query('SELECT COUNT(*)::int AS c FROM users')
     ]);
-    res.json({members:m.rows.map(x=>({...x,tags:x.tags.split(',')})),memories:mem.rows,timeline:t.rows,userCount:u.rows[0].c});
+    res.json({members:m.rows.map(x=>({...x,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier}/9 tầng`]})),memories:mem.rows,timeline:t.rows,userCount:u.rows[0].c});
   } catch(e) { res.status(500).json({error:'Không thể tải dữ liệu.'}); }
 });
 
@@ -292,6 +337,7 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     const stage=stageFor(spirit);
     await query('UPDATE profiles SET rank=$2, realm_tier=$3 WHERE user_id=$1',[req.session.user_id,stage.realm,stage.tier]);
     await ensureAchievements(req.session.user_id,spirit);
+    await addDailyActivity(req.session.user_id,'train_count',1);
     res.json({gain,spirit,experience:r.rows[0].experience,progress:progressFor(spirit),rank:stage.realm,stage:stage.stage});
   } catch(e){res.status(500).json({error:'Không thể vận công lúc này.'});}
 });
@@ -320,8 +366,24 @@ app.post('/api/spirit-stones/claim',auth,async(req,res)=>{
         AND (last_stone_claim IS NULL OR last_stone_claim < (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)
       RETURNING spirit_stones,last_stone_claim`,[req.session.user_id,amount]);
     if(!r.rows.length)return res.status(409).json({error:'Hôm nay bạn đã nhận 100 linh thạch. Mai hãy quay lại nhận tiếp.'});
+    await addDailyActivity(req.session.user_id,'stone_claim_count',1);
     res.json({ok:true,amount,spiritStones:r.rows[0].spirit_stones,next:'Ngày mai'});
   } catch(e){res.status(500).json({error:'Không thể nhận linh thạch hằng ngày.'});}
+});
+
+app.post('/api/treasure/buy-stones',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try {
+    const amount=100, spiritCost=500;
+    await client.query('BEGIN');
+    const r=await client.query(`UPDATE profiles SET spirit_power=spirit_power-$2,spirit_stones=spirit_stones+$3,updated_at=NOW() WHERE user_id=$1 AND spirit_power>=$2 RETURNING spirit_power,spirit_stones`,[req.session.user_id,spiritCost,amount]);
+    if(!r.rows.length){await client.query('ROLLBACK');return res.status(400).json({error:'Cần 500 linh lực để đổi lấy 100 linh thạch.'});}
+    const stage=stageFor(r.rows[0].spirit_power);
+    await client.query('UPDATE profiles SET rank=$2,realm_tier=$3 WHERE user_id=$1',[req.session.user_id,stage.realm,stage.tier]);
+    await client.query('COMMIT');
+    res.json({ok:true,amount,spirit:r.rows[0].spirit_power,spiritStones:r.rows[0].spirit_stones,stage:stage.stage});
+  } catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể đổi linh lực lấy linh thạch.'});}
+  finally{client.release();}
 });
 
 app.post('/api/treasure/buy',auth,async(req,res)=>{
@@ -348,6 +410,7 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
       await client.query('UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,newSpirit,item.spirit_gain,ns.realm,ns.tier]);
     }
     await client.query('COMMIT');
+    await addDailyActivity(req.session.user_id,'buy_count',1);
     res.json({ok:true,item:item.name,spiritStones:p.spirit_stones-item.price,spirit:newSpirit,stage:stageFor(newSpirit).stage});
   } catch(e){try{await client.query('ROLLBACK');}catch{};res.status(500).json({error:'Không thể mua vật phẩm lúc này.'});}
   finally{client.release();}
@@ -356,6 +419,41 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
 app.get('/api/inventory',auth,async(req,res)=>{
   try{const r=await query(`SELECT ti.name,ti.category,ti.description,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC`,[req.session.user_id]);res.json({rows:r.rows});}
   catch(e){res.status(500).json({error:'Không thể tải túi vật phẩm.'});}
+});
+
+app.get('/api/quests',auth,async(req,res)=>{
+  try {
+    await touchDailyActivity(req.session.user_id);
+    const r=await query(`SELECT q.*,COALESCE(a.train_count,0)::int AS train_count,COALESCE(a.buy_count,0)::int AS buy_count,COALESCE(a.stone_claim_count,0)::int AS stone_claim_count,
+      EXISTS(SELECT 1 FROM user_quest_claims c WHERE c.user_id=$1 AND c.quest_id=q.id AND c.claim_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS claimed
+      FROM sect_quests q LEFT JOIN daily_activity a ON a.user_id=$1 WHERE q.active=true ORDER BY q.id`,[req.session.user_id]);
+    const rows=r.rows.map(q=>{
+      const progress=q.requirement_type==='train'?q.train_count:q.requirement_type==='buy'?q.buy_count:q.stone_claim_count;
+      return {...q,progress:Math.min(progress,q.requirement_value),completed:progress>=q.requirement_value};
+    });
+    res.json({rows});
+  } catch(e){res.status(500).json({error:'Không thể mở Nhiệm Vụ Đường.'});}
+});
+app.post('/api/quests/:id/claim',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try {
+    const questId=Number(req.params.id);
+    if(!Number.isInteger(questId))return res.status(400).json({error:'Nhiệm vụ không hợp lệ.'});
+    await client.query('BEGIN');
+    const qR=await client.query('SELECT * FROM sect_quests WHERE id=$1 AND active=true FOR UPDATE',[questId]);
+    if(!qR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy nhiệm vụ.'});}
+    const q=qR.rows[0];
+    const aR=await client.query(`SELECT COALESCE(train_count,0)::int AS train_count,COALESCE(buy_count,0)::int AS buy_count,COALESCE(stone_claim_count,0)::int AS stone_claim_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id]);
+    const a=aR.rows[0]||{train_count:0,buy_count:0,stone_claim_count:0};
+    const progress=q.requirement_type==='train'?a.train_count:q.requirement_type==='buy'?a.buy_count:a.stone_claim_count;
+    if(progress<q.requirement_value){await client.query('ROLLBACK');return res.status(400).json({error:`Chưa hoàn thành nhiệm vụ. Tiến độ ${progress}/${q.requirement_value}.`});}
+    const c=await client.query(`INSERT INTO user_quest_claims(user_id,quest_id,claim_date) VALUES($1,$2,(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) ON CONFLICT DO NOTHING RETURNING id`,[req.session.user_id,questId]);
+    if(!c.rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Hôm nay bạn đã nhận thưởng nhiệm vụ này.'});}
+    const p=await client.query('UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones',[req.session.user_id,q.reward_stones]);
+    await client.query('COMMIT');
+    res.json({ok:true,reward:q.reward_stones,spiritStones:p.rows[0].spirit_stones});
+  } catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể nhận thưởng nhiệm vụ.'});}
+  finally{client.release();}
 });
 
 app.get('/api/leaderboard',async(req,res)=>{
