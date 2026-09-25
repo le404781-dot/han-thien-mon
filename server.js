@@ -151,6 +151,8 @@ async function initDb() {
       min_realm INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS spirit_roots_catalog (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -511,6 +513,12 @@ async function initDb() {
     'Tử Điện Điêu':[850,'Tử Điện: +15% sát thương và +10% thân pháp.']
   };
   for (const [name,[power,ability]] of Object.entries(beastPowers)) await query('UPDATE spirit_beasts_catalog SET power_bonus=$2,ability=$3 WHERE name=$1',[name,power,ability]);
+
+  // Equipment integrity: remove stale equipped IDs that are no longer owned.
+  await query(`UPDATE profiles p SET equipped_beast_id=NULL WHERE equipped_beast_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM owned_spirit_beasts o WHERE o.user_id=p.user_id AND o.beast_id=p.equipped_beast_id AND o.quantity>0)`);
+  await query(`UPDATE profiles p SET equipped_root_id=NULL WHERE equipped_root_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM owned_spirit_roots o WHERE o.user_id=p.user_id AND o.root_id=p.equipped_root_id AND o.quantity>0)`);
+  await query(`UPDATE profiles p SET equipped_artifact_id=NULL WHERE equipped_artifact_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM inventory i WHERE i.user_id=p.user_id AND i.item_id=p.equipped_artifact_id AND i.quantity>0)`);
+
   const qCount = await query('SELECT COUNT(*)::int AS c FROM sect_quests');
   if (!qCount.rows[0].c) {
     const quests = [
@@ -1064,6 +1072,8 @@ app.post('/api/market/list',auth,async(req,res)=>{
     await client.query('BEGIN');
     const ir=await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
     if(!ir.rows.length||Number(ir.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không có đủ vật phẩm để bán.'});}
+    const equipped=await client.query(`SELECT equipped_artifact_id FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
+    if(Number(equipped.rows[0]?.equipped_artifact_id)===itemId){await client.query('ROLLBACK');return res.status(400).json({error:'Pháp khí đang trang bị. Hãy tháo trang bị trước khi bán.'});}
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[req.session.user_id,itemId,qty]);
     await client.query(`INSERT INTO market_listings(seller_id,item_id,quantity,price_stones) VALUES($1,$2,$3,$4)`,[req.session.user_id,itemId,qty,price]);
     await client.query('COMMIT');
@@ -1123,6 +1133,8 @@ app.post('/api/market/trade',auth,async(req,res)=>{
     if(!u){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân nhận trao đổi.'});}
     const ir=(await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[req.session.user_id,offerItemId])).rows[0];
     if(!ir||Number(ir.quantity)<offerQty){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không đủ vật phẩm đề nghị trao đổi.'});}
+    const equipped=await client.query(`SELECT equipped_artifact_id FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
+    if(Number(equipped.rows[0]?.equipped_artifact_id)===offerItemId){await client.query('ROLLBACK');return res.status(400).json({error:'Pháp khí đang trang bị. Hãy tháo trang bị trước khi trao đổi.'});}
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[req.session.user_id,offerItemId,offerQty]);
     await client.query(`INSERT INTO market_trades(proposer_id,recipient_id,offer_item_id,offer_quantity,want_item_id,want_quantity) VALUES($1,$2,$3,$4,$5,$6)`,[req.session.user_id,recipientId,offerItemId,offerQty,wantItemId,wantQty]);
     await client.query('COMMIT');res.json({ok:true});
@@ -1311,15 +1323,40 @@ app.post('/api/linh-phap/buy',auth,async(req,res)=>{
 // TRANG BỊ · quản lý Linh Thú, Linh Căn và Pháp Khí sở hữu
 app.get('/api/equipment',auth,async(req,res)=>{
   try{
-    await ensureProfile(req.session.user_id);
+    const userId=req.session.user_id;
+    await ensureProfile(userId);
+    // Heal stale equipment before reading it. This also handles items removed by older migrations.
+    await query(`UPDATE profiles p SET equipped_beast_id=NULL
+      WHERE p.user_id=$1 AND p.equipped_beast_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM owned_spirit_beasts o WHERE o.user_id=p.user_id AND o.beast_id=p.equipped_beast_id AND o.quantity>0)`,[userId]);
+    await query(`UPDATE profiles p SET equipped_root_id=NULL
+      WHERE p.user_id=$1 AND p.equipped_root_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM owned_spirit_roots o WHERE o.user_id=p.user_id AND o.root_id=p.equipped_root_id AND o.quantity>0)`,[userId]);
+    await query(`UPDATE profiles p SET equipped_artifact_id=NULL
+      WHERE p.user_id=$1 AND p.equipped_artifact_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+        WHERE i.user_id=p.user_id AND i.item_id=p.equipped_artifact_id AND i.quantity>0)`,[userId]);
+
     const [p,b,r,a]=await Promise.all([
-      query(`SELECT equipped_beast_id,equipped_root_id,equipped_artifact_id FROM profiles WHERE user_id=$1`,[req.session.user_id]),
-      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.power_bonus DESC,c.id`,[req.session.user_id]),
-      query(`SELECT o.id,o.root_id,o.quantity,c.name,c.rarity,c.description,c.support,c.power_bonus,c.ability FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.power_bonus DESC,c.id`,[req.session.user_id]),
-      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 AND LOWER(ti.category) IN ('pháp bảo','pháp khí') ORDER BY ti.power_bonus DESC,ti.id`,[req.session.user_id])
+      query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,
+        COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0) +
+        COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0) +
+        COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
+        FROM profiles p WHERE p.user_id=$1`,[userId]),
+      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm
+        FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
+        WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.power_bonus DESC,c.id`,[userId]),
+      query(`SELECT o.id,o.root_id,o.quantity,c.name,c.rarity,c.description,c.support,c.power_bonus,c.ability,c.min_realm
+        FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id
+        WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.power_bonus DESC,c.id`,[userId]),
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability
+        FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+        WHERE i.user_id=$1 AND i.quantity>0
+          AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
+        ORDER BY ti.power_bonus DESC,ti.id`,[userId])
     ]);
-    res.json({equipped:p.rows[0]||{},beasts:b.rows,roots:r.rows,artifacts:a.rows});
-  }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị.'});}
+    res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipment_power:0},beasts:b.rows,roots:r.rows,artifacts:a.rows});
+  }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
 app.post('/api/equipment/equip',auth,async(req,res)=>{
   const client=await pool.connect();
@@ -1339,7 +1376,7 @@ app.post('/api/equipment/equip',auth,async(req,res)=>{
       if(ri<Number(x.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`Linh căn yêu cầu ${RANKS[Number(x.min_realm)]?.name||'cảnh giới cao hơn'}.`});}
       name=x.name;power=Number(x.power_bonus)||0;ability=x.ability||'';col='equipped_root_id';
     } else {
-      const x=(await client.query(`SELECT ti.* FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND LOWER(ti.category) IN ('pháp bảo','pháp khí') FOR UPDATE`,[req.session.user_id,id])).rows[0];
+      const x=(await client.query(`SELECT ti.* FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí') FOR UPDATE`,[req.session.user_id,id])).rows[0];
       if(!x){await client.query('ROLLBACK');return res.status(404).json({error:'Pháp khí này không nằm trong Tu Di Giới của bạn.'});}
       if(ri<Number(x.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`Pháp khí yêu cầu ${RANKS[Number(x.min_realm)]?.name||'cảnh giới cao hơn'}.`});}
       name=x.name;power=Number(x.power_bonus)||0;ability=x.ability||'';col='equipped_artifact_id';
