@@ -1,0 +1,25 @@
+HÀN THIÊN MÔN v3.6.23 — TÀNG THƯ CÁC + SỬA LỖI
+
+1. Mở lại đúng Tàng Thư Các
+- Sửa lỗi JavaScript có 2 hàm cùng tên loadCodex(). Hàm xếp hạng Linh Căn/Linh Thú đã ghi đè hàm Tàng Thư Các khiến ô “Đang mở Tàng Thư Các...” không bao giờ được render.
+- Đổi hàm xếp hạng thành loadSpiritRankings().
+- Tàng Thư Các giờ gọi đúng /api/codex và hiển thị công pháp theo cảnh giới.
+
+2. Sửa tương thích PostgreSQL DB cũ
+- Thêm migration runtime cho các cột của cultivation_techniques, user_techniques, mansions, user_mansions.
+- Migration được chạy ngay sau khi tạo schema và trước bước seed dữ liệu để DB cũ không bị thiếu cột.
+
+3. Tàng Thư Các
+- Công pháp được xếp theo cảnh giới rồi phẩm cấp Hạ/Trung/Thượng.
+- Chỉ hiện công pháp không vượt cảnh giới hiện tại.
+- Giới hạn số công pháp học theo cảnh giới.
+- Mua/học bằng linh thạch.
+- Học công pháp cộng chiến lực và hiệu quả vận công theo mô tả.
+
+4. Không thay đổi dữ liệu người chơi
+- Không xóa tài khoản, vật phẩm, linh lực, linh thạch hoặc tiến độ hiện có.
+
+Kiểm tra local:
+- node --check server.js: OK
+- node --check script.js: OK
+- Không thể xác nhận live PostgreSQL/Render trong môi trường này vì không có quyền kết nối DB trực tiếp.

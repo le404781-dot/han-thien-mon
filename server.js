@@ -91,6 +91,26 @@ async function ensureRuntimeSchema() {
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    -- v3.6.23: migrate old PostgreSQL schemas used before Tàng Thư Các / Động Phủ.
+    -- CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_index INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_name TEXT NOT NULL DEFAULT 'Luyện Khí';
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Hạ Phẩm';
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS training_bonus_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE mansions ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Phàm';
+    ALTER TABLE mansions ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE mansions ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE mansions ADD COLUMN IF NOT EXISTS spirit_per_hour INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE mansions ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE user_mansions ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE user_mansions ADD COLUMN IF NOT EXISTS last_tick_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE user_mansions ADD COLUMN IF NOT EXISTS purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
   `);
 }
 
@@ -678,6 +698,9 @@ async function initDb() {
     );
   `);
 
+  // Chạy migration trước seed để DB cũ có đủ cột cho Tàng Thư Các/Động Phủ.
+  await ensureRuntimeSchema();
+
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL`);
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS cycle_key TEXT`);
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS display_name TEXT`);
@@ -1237,19 +1260,19 @@ app.patch('/api/profile',auth,async(req,res)=>{
 // ─────────────────────────────────────────────────────────────────────────────
 app.get('/api/codex',auth,async(req,res)=>{
   try{
-    const client=await pool.connect();
-    try{
-      await client.query('BEGIN');
-      const settled=await settleMansionIncome(client,req.session.user_id);
-      await client.query('COMMIT');
-      const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
-      const st=stageFor(Number(p?.spirit_power)||0);
-      const rows=(await query(`SELECT ct.id,ct.name,ct.realm_index,ct.realm_name,ct.grade,ct.description,ct.price_stones,ct.power_bonus,ct.training_bonus_percent,ct.ability,
-        EXISTS(SELECT 1 FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id) AS learned
-        FROM cultivation_techniques ct WHERE ct.realm_index <= $2 ORDER BY ct.realm_index,ct.price_stones,ct.id`,[req.session.user_id,st.realmIndex])).rows;
-      res.json({rows,stage:st.stage,realmIndex:st.realmIndex,slots:techniqueSlots(st.realmIndex),used:rows.filter(x=>x.learned).length,spiritStones:Number(p?.spirit_stones)||0,mansionSettled:settled.gain||0});
-    }finally{client.release();}
-  }catch(e){console.error('codex load:',e);res.status(500).json({error:'Không thể mở Tàng Thư Các.'});}
+    // Tàng Thư Các chỉ đọc dữ liệu công pháp; không phụ thuộc vào Động Phủ.
+    // Điều này tránh làm hỏng Tàng Thư Các nếu schema Động Phủ của DB cũ chưa được migrate.
+    const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    if(!p)return res.status(404).json({error:'Không tìm thấy hồ sơ.'});
+    const st=stageFor(Number(p.spirit_power)||0);
+    const rows=(await query(`SELECT ct.id,ct.name,ct.realm_index,ct.realm_name,ct.grade,ct.description,ct.price_stones,ct.power_bonus,ct.training_bonus_percent,ct.ability,
+      EXISTS(SELECT 1 FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id) AS learned
+      FROM cultivation_techniques ct
+      WHERE ct.realm_index <= $2
+      ORDER BY ct.realm_index ASC, CASE ct.grade WHEN 'Hạ Phẩm' THEN 1 WHEN 'Trung Phẩm' THEN 2 WHEN 'Thượng Phẩm' THEN 3 ELSE 9 END, ct.price_stones ASC, ct.id ASC`,[req.session.user_id,st.realmIndex])).rows;
+    const used=rows.filter(x=>x.learned).length;
+    res.json({rows,stage:st.stage,realmIndex:st.realmIndex,slots:techniqueSlots(st.realmIndex),used,spiritStones:Number(p.spirit_stones)||0});
+  }catch(e){console.error('codex load:',e);res.status(500).json({error:'Không thể mở Tàng Thư Các: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
 
 app.post('/api/codex/learn',auth,async(req,res)=>{
