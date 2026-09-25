@@ -1,0 +1,25 @@
+HÀN THIÊN MÔN v3.6.21 – PHI THĂNG / ĐỘ KIẾP & LƯỢT TU LUYỆN
+
+1. PHI THĂNG – ĐỘ KIẾP
+- Độ Kiếp Cửu Tầng mở chức năng Cửu Trọng Thiên Kiếp.
+- Có đúng 9 lần độ kiếp tuần tự.
+- Mỗi lần thành công không xóa chiến lực, không xóa trang bị, linh thú, linh căn, pháp khí hay vật phẩm.
+- Hoàn tất lần thứ 9 lập tức phi thăng lên Nhân Tiên Nhất Tầng.
+- PostgreSQL lưu tiến độ trong bảng ascension_tribulations để không bị mất khi tải lại trang.
+- Giao dịch dùng transaction; nếu lỗi hệ thống thì rollback, không trừ dữ liệu.
+
+2. HỆ THỐNG CẢNH GIỚI TIÊN GIỚI
+- Nhân Tiên → Chân Tiên → Địa Tiên → Thiên Tiên → Huyền Tiên → Kim Tiên → Tiên Quân → Tiên Tôn → Tiên Đế.
+- Mỗi cảnh giới có 9 tầng.
+- Mỗi tầng dùng 30.000 linh lực cho hệ thống tiến cảnh giới sau Độ Kiếp.
+- Độ Kiếp Cửu Tầng kết thúc ở 509.999 linh lực; Nhân Tiên bắt đầu tại 510.000.
+
+3. LƯỢT TU LUYỆN / VẬN CÔNG
+- Một lần bấm Vận Công = đúng 1 lượt tu luyện trong ngày.
+- Không còn khái niệm hai bộ đếm riêng cho lượt tu luyện và vận công.
+- Backend vẫn dùng train_count làm bộ đếm duy nhất; online cultivation cũng kiểm tra cùng bộ đếm này.
+- Giao diện đổi thành “Lượt tu luyện hôm nay = lượt vận công”.
+
+4. TƯƠNG THÍCH
+- Không xóa dữ liệu PostgreSQL hiện có.
+- Runtime schema tự tạo ascension_tribulations khi server khởi động.

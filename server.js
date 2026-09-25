@@ -105,16 +105,28 @@ const RANKS = [
   { name: 'Luyện Hư', min: 30000, max: 59999 },
   { name: 'Hợp Thể', min: 60000, max: 119999 },
   { name: 'Đại Thừa', min: 120000, max: 239999 },
-  { name: 'Độ Kiếp', min: 240000, max: Infinity }
+  { name: 'Độ Kiếp', min: 240000, max: 509999 },
+  // Tiên giới: mỗi cảnh giới tiếp tục có 9 tầng, 30.000 linh lực/tầng.
+  { name: 'Nhân Tiên', min: 510000, max: 779999, description: 'Cánh cửa đầu tiên bước vào thế giới tiên nhân, bắt đầu thích ứng với tiên khí.' },
+  { name: 'Chân Tiên', min: 780000, max: 1049999, description: 'Ổn định tiên thể, củng cố căn cơ tiên đạo.' },
+  { name: 'Địa Tiên', min: 1050000, max: 1319999, description: 'Tiên nhân có địa vị cơ bản, làm chủ một vùng nhỏ hoặc động phủ riêng.' },
+  { name: 'Thiên Tiên', min: 1320000, max: 1589999, description: 'Tiên lực hòa nhập thiên địa, bước vào tầng trời cao.' },
+  { name: 'Huyền Tiên', min: 1590000, max: 1859999, description: 'Lĩnh ngộ pháp tắc sâu hơn, pháp lực ngày càng thâm hậu.' },
+  { name: 'Kim Tiên', min: 1860000, max: 2129999, description: 'Thân thể và nguyên thần bất hủ, dung hợp với quy luật thiên địa.' },
+  { name: 'Tiên Quân', min: 2130000, max: 2399999, description: 'Bậc thống trị một phương, nắm giữ quyền lực tiên giới.' },
+  { name: 'Tiên Tôn', min: 2400000, max: 2669999, description: 'Chạm tới đại đạo chí cao, uy áp một phương tiên vực.' },
+  { name: 'Tiên Đế', min: 2670000, max: Infinity, description: 'Cảnh giới tối cao của hệ thống hiện tại, nắm giữ đại đạo chí cao vô thượng.' }
 ];
-const LEGEND_CHAR_LIMITS = [300,500,800,1200,1600,2200,3000,4000,5000];
+const IMMORTAL_REALM_START = 9;
+const TRIBULATION_COUNT = 9;
+const LEGEND_CHAR_LIMITS = [300,500,800,1200,1600,2200,3000,4000,5000,5500,6000,6500,7000,7500,8000,8500,9000,10000];
 const PROFESSION_DEFINITIONS = [
   {code:'alchemy',name:'Luyện Đan Sư',icon:'⚗️',reward:40,description:'Luyện chế đan dược, nhận linh thạch từ các đơn luyện đan.'},
   {code:'formation',name:'Trận Pháp Sư',icon:'🌀',reward:50,description:'Bố trí trận pháp, nhận linh thạch từ các nhiệm vụ hộ tông.'},
   {code:'talisman',name:'Luyện Phù Sư',icon:'🧿',reward:45,description:'Luyện chế linh phù, nhận linh thạch từ các đơn chế phù.'},
   {code:'herbalist',name:'Dược Sư',icon:'🌿',reward:35,description:'Nhận diện và xử lý linh dược, nhận linh thạch từ dược vụ.'}
 ];
-function legendCharLimit(realmIndex){ return LEGEND_CHAR_LIMITS[Math.max(0,Math.min(8,Number(realmIndex)||0))]||300; }
+function legendCharLimit(realmIndex){ return LEGEND_CHAR_LIMITS[Math.max(0,Math.min(LEGEND_CHAR_LIMITS.length-1,Number(realmIndex)||0))]||300; }
 function professionSlots(realmIndex){ return Math.min(PROFESSION_DEFINITIONS.length,1+Math.floor(Math.max(0,Number(realmIndex)||0)/2)); }
 function professionReward(def,realmIndex){ return Number(def.reward||0)+Math.max(0,Number(realmIndex)||0)*10; }
 const TIERS = ['Nhất Tầng','Nhị Tầng','Tam Tầng','Tứ Tầng','Ngũ Tầng','Lục Tầng','Thất Tầng','Bát Tầng','Cửu Tầng'];
@@ -163,7 +175,8 @@ const POSITION_RULES = [
   {name:'Hộ pháp', min:4, max:6},
   {name:'Trưởng lão', min:5, max:7},
   {name:'Thái thượng trưởng lão', min:7, max:8},
-  {name:'Tông chủ', min:8, max:8}
+  {name:'Tông chủ', min:8, max:8},
+  {name:'Tiên Môn Chí Tôn', min:9, max:17}
 ];
 function positionOptionsFor(realmIndex){ return POSITION_RULES.filter(x=>realmIndex>=x.min && realmIndex<=x.max).map(x=>x.name); }
 function defaultPositionFor(realmIndex){ const opts=positionOptionsFor(realmIndex); return opts[opts.length-1] || 'Ngoại môn đệ tử'; }
@@ -561,6 +574,12 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_activity_events_user_type_time ON activity_events(user_id,event_type,created_at);
+    CREATE TABLE IF NOT EXISTS ascension_tribulations (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 9),
+      started_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ
+    );
   `);
 
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL`);
@@ -1068,6 +1087,48 @@ app.patch('/api/profile',auth,async(req,res)=>{
     await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),avatar?.toString().slice(0,10)]);
     res.json({ok:true});
   } catch(e){res.status(500).json({error:'Không thể cập nhật hồ sơ.'});}
+});
+
+
+app.get('/api/ascension',auth,async(req,res)=>{
+  try{
+    const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    if(!p)return res.status(404).json({error:'Không tìm thấy hồ sơ.'});
+    const st=stageFor(Number(p.spirit_power)||0);
+    const row=(await query('SELECT attempt_count,started_at,completed_at FROM ascension_tribulations WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const attempts=Math.min(TRIBULATION_COUNT,Number(row?.attempt_count)||0);
+    const unlocked=st.realmIndex===8 && st.tier===9;
+    res.json({unlocked,attempts,maxAttempts:TRIBULATION_COUNT,stage:st,nextRealm:RANKS[IMMORTAL_REALM_START].name,nextRealmDescription:RANKS[IMMORTAL_REALM_START].description||'',preserveCombatPower:true,spiritPower:Number(p.spirit_power)||0});
+  }catch(e){console.error('ascension load:',e);res.status(500).json({error:'Không thể mở Phi Thăng - Độ Kiếp.'});}
+});
+
+app.post('/api/ascension/tribulation',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const uid=req.session.user_id;
+    const p=(await client.query('SELECT spirit_power,experience,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];
+    if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ.'});}
+    const st=stageFor(Number(p.spirit_power)||0);
+    if(st.realmIndex!==8 || st.tier!==9){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ khi đạt Độ Kiếp Cửu Tầng mới có thể mở Phi Thăng - Độ Kiếp.'});}
+    const row=(await client.query('SELECT attempt_count FROM ascension_tribulations WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];
+    let attempts=Math.min(TRIBULATION_COUNT,Number(row?.attempt_count)||0);
+    if(attempts>=TRIBULATION_COUNT){await client.query('ROLLBACK');return res.status(409).json({error:'Cửu Trọng Thiên Kiếp đã hoàn tất. Hãy tải lại hồ sơ để nhận cảnh giới mới.'});}
+    attempts+=1;
+    if(row){
+      await client.query('UPDATE ascension_tribulations SET attempt_count=$2,started_at=COALESCE(started_at,NOW()),completed_at=CASE WHEN $2=$3 THEN NOW() ELSE completed_at END WHERE user_id=$1',[uid,attempts,TRIBULATION_COUNT]);
+    }else{
+      await client.query('INSERT INTO ascension_tribulations(user_id,attempt_count,started_at,completed_at) VALUES($1,$2,NOW(),CASE WHEN $2=$3 THEN NOW() ELSE NULL END)',[uid,attempts,TRIBULATION_COUNT]);
+    }
+    let ascended=false, stage=st;
+    if(attempts===TRIBULATION_COUNT){
+      const next=RANKS[IMMORTAL_REALM_START];
+      await client.query('UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=1,updated_at=NOW() WHERE user_id=$1',[uid,next.min,Math.max(0,next.min-Number(p.spirit_power)),next.name]);
+      stage=stageFor(next.min); ascended=true;
+    }
+    await client.query('COMMIT');
+    res.json({ok:true,attempts,maxAttempts:TRIBULATION_COUNT,ascended,stage,message:ascended?`🌌 Cửu Trọng Thiên Kiếp đã vượt qua! Phi thăng thành ${stage.stage}. Chiến lực, trang bị và bảo vật không bị xóa.`:`⚡ Độ kiếp lần ${attempts}/${TRIBULATION_COUNT} thành công. Chiến lực không bị xóa; tiếp tục vượt ${TRIBULATION_COUNT-attempts} lần.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('ascension tribulation:',e);res.status(500).json({error:'Độ kiếp thất bại do lỗi hệ thống, dữ liệu không bị trừ.'});}finally{client.release();}
 });
 
 app.post('/api/cultivation/train',auth,async(req,res)=>{
