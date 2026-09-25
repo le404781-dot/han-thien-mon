@@ -83,3 +83,28 @@
 .friends-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:12px}.friends-head h3{margin:3px 0 4px;font:700 1.25rem 'Noto Serif SC';color:var(--jade)}.friends-head small,.friend-card small{color:var(--muted);font-size:.7rem}
 .friend-subtitle{font-size:.72rem;font-weight:800;color:var(--red);margin:16px 0 8px}.friend-list{display:grid;gap:8px}.friend-card{display:grid;grid-template-columns:42px minmax(0,1fr) auto auto;gap:9px;align-items:center;padding:10px 12px;border:1px solid var(--line);background:var(--bg)}.friend-avatar{width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--line);background:var(--surface);font-size:1.4rem}.friend-card b,.friend-card small{display:block}.friend-card b{font-size:.78rem}.friend-card .btn{white-space:nowrap}.friend-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.private-chat-window{height:390px;overflow:auto;padding:16px;border:1px solid var(--line);background:var(--bg);margin:14px 0}.private-chat-window .chat-empty{padding:120px 20px 0}.hidden{display:none!important}
 @media(max-width:620px){.friend-card{grid-template-columns:38px 1fr;}.friend-card .btn{grid-column:auto}.friends-head{flex-direction:column}.private-chat-window{height:330px}}
+
+/* Khiêu chiến */
+.challenge-area{display:grid;gap:18px}
+.challenge-rules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.challenge-rules>div,.challenge-block,.challenge-debuff{padding:18px;border:1px solid var(--line);background:var(--surface);box-shadow:0 10px 28px rgba(38,50,44,.05)}
+.challenge-rules h3{margin:.35rem 0 .4rem}
+.challenge-rules p{margin:0;color:var(--muted);line-height:1.55}
+.challenge-debuff{border-color:#9b5d5d;background:rgba(155,93,93,.08);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+.challenge-debuff small{color:var(--muted)}
+.challenge-subhead{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+.challenge-list{display:grid;gap:10px}
+.challenge-card{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:13px;border:1px solid var(--line);background:var(--surface-2,var(--surface))}
+.challenge-card.incoming{border-color:rgba(132,160,145,.55)}
+.challenge-avatar{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:var(--surface);border:1px solid var(--line);font-size:1.25rem}
+.challenge-card>div:not(.challenge-card-actions){min-width:0}
+.challenge-card small{display:block;color:var(--muted);margin-top:3px}
+.challenge-card-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.debuff-mini{color:#a95f5f!important}
+.challenge-history{display:grid;gap:8px}
+.challenge-history-row{display:grid;grid-template-columns:auto 1fr minmax(180px,auto);gap:12px;align-items:center;padding:11px 12px;border-top:1px solid var(--line)}
+.challenge-history-row>span{font-size:1.2rem}
+.challenge-history-row small{display:block;color:var(--muted);margin-top:2px}
+.challenge-result-text{text-align:right;color:var(--muted);font-size:.9rem}
+.challenge-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+@media(max-width:760px){.challenge-rules{grid-template-columns:1fr}.challenge-card{grid-template-columns:auto 1fr}.challenge-card-actions{grid-column:2;justify-content:flex-start}.challenge-history-row{grid-template-columns:auto 1fr}.challenge-result-text{text-align:left;grid-column:2}.challenge-debuff{align-items:flex-start}}

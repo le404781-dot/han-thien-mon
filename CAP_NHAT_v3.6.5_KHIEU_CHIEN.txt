@@ -1,0 +1,34 @@
+HÀN THIÊN MÔN v3.6.5 — KHIÊU CHIẾN
+
+1. Thêm mục Khiêu Chiến, hỗ trợ 2 chế độ:
+- ONLINE: mở lôi đài, bắt buộc đối phương đồng thuận.
+- OFFLINE: đấu với mô phỏng hiện tại của đối phương, không cần đối phương online.
+
+2. Cơ chế cảnh giới:
+- Khi cảnh giới người khiêu chiến thấp hơn đối thủ, hiệu lực sát thương giảm mạnh theo chênh lệch cảnh giới/tầng.
+- Tỷ lệ thắng cũng giảm theo chênh lệch cảnh giới/tầng.
+- Tỷ lệ được giới hạn để vẫn có cơ hội lật kèo, không phải 100% thắng/thua.
+
+3. Thắng:
+- ONLINE: tăng linh lực khoảng 30% theo linh lực hiện tại (có mức thưởng tối thiểu), nhận 1 vật phẩm ngẫu nhiên.
+- OFFLINE: tăng linh lực khoảng 12% theo linh lực hiện tại (mức thấp hơn), nhận 1 vật phẩm ngẫu nhiên.
+
+4. Thất bại:
+- ONLINE: hạ 1 cảnh giới nếu đang trên Luyện Khí + debuff -25% chiến lực khi khiêu chiến trong 2 giờ.
+- OFFLINE: hạ 1 cảnh giới nếu đang trên Luyện Khí + debuff -10% chiến lực khi khiêu chiến trong 30 phút.
+- Ở Luyện Khí, không thể hạ tiếp cảnh giới; thay vào đó mất một phần linh lực và nhận debuff.
+
+5. Online:
+- Lời mời được lưu PostgreSQL.
+- Đối phương có thể đồng thuận/từ chối.
+- Khi đồng thuận, trận đấu được xử lý trong một transaction khóa hồ sơ hai bên.
+- Người thắng nhận thưởng; người thua nhận hình phạt.
+
+6. Offline:
+- Không thay đổi hồ sơ đối thủ mô phỏng.
+- Chỉ người khiêu chiến nhận thưởng/phạt.
+
+7. Database:
+- Tự tạo bảng challenge_requests.
+- Tự thêm challenge_debuff_until, challenge_debuff_percent, challenge_debuff_text vào profiles nếu database cũ chưa có.
+- Không xóa users, profiles, inventory hay dữ liệu hiện tại.

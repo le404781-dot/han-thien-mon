@@ -230,6 +230,33 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_private_messages_conversation ON private_messages(sender_id,recipient_id,id DESC);
     CREATE INDEX IF NOT EXISTS idx_private_messages_recipient ON private_messages(recipient_id,id DESC);
+
+    CREATE TABLE IF NOT EXISTS challenge_requests (
+      id BIGSERIAL PRIMARY KEY,
+      challenger_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      opponent_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL CHECK(mode IN ('online','offline')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected','completed')),
+      winner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      loser_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      challenger_damage NUMERIC(8,4) NOT NULL DEFAULT 0,
+      opponent_damage NUMERIC(8,4) NOT NULL DEFAULT 0,
+      success_chance NUMERIC(6,4) NOT NULL DEFAULT 0,
+      reward_spirit INTEGER NOT NULL DEFAULT 0,
+      reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL,
+      reward_quantity INTEGER NOT NULL DEFAULT 0,
+      penalty_text TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_challenge_opponent_status ON challenge_requests(opponent_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_challenge_challenger_status ON challenge_requests(challenger_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_challenge_history ON challenge_requests(created_at DESC);
+
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_until TIMESTAMPTZ;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
+
     CREATE TABLE IF NOT EXISTS sect_quests (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -1129,8 +1156,172 @@ app.post('/api/chat',auth,async(req,res)=>{
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// KHIÊU CHIẾN · Lôi đài online / mô phỏng offline
+// ─────────────────────────────────────────────────────────────────────────────
+function challengePower(row){
+  const spirit=Math.max(0,Number(row.spirit_power)||0);
+  const st=stageFor(spirit);
+  const beast=(Number(row.beast_attack)||0)+(Number(row.beast_defense)||0)+(Number(row.beast_speed)||0)+(Number(row.beast_spirit)||0);
+  const debuffActive=row.challenge_debuff_until && new Date(row.challenge_debuff_until)>new Date();
+  const debuffPct=debuffActive?Math.max(0,Number(row.challenge_debuff_percent)||0):0;
+  const base=spirit*1.15+st.realmIndex*850+st.tier*120+beast*2;
+  return Math.max(1,base*(1-debuffPct/100));
+}
+
+function challengeOdds(attacker, defender){
+  const aStage=stageFor(Number(attacker.spirit_power)||0);
+  const dStage=stageFor(Number(defender.spirit_power)||0);
+  const gap=Math.max(0,dStage.realmIndex-aStage.realmIndex);
+  const reverseGap=Math.max(0,aStage.realmIndex-dStage.realmIndex);
+  const tierGap=dStage.realmIndex===aStage.realmIndex?Math.max(0,dStage.tier-aStage.tier):0;
+  const aPower=challengePower(attacker), dPower=challengePower(defender);
+  let chance=aPower/(aPower+dPower);
+  // Cảnh giới thấp đánh cảnh giới cao: sát thương giảm và tỷ lệ thất bại tăng rõ rệt.
+  const damageMultiplier=Math.max(0.12,1-gap*0.22-tierGap*0.035);
+  chance-=gap*0.11+tierGap*0.018;
+  // Người có cảnh giới cao hơn vẫn có lợi thế, nhưng không biến trận đấu thành 100% chắc thắng.
+  chance+=reverseGap*0.035;
+  chance=Math.max(0.08,Math.min(0.92,chance));
+  return {chance,damageMultiplier,aPower,dPower,gap,tierGap,aStage,dStage};
+}
+
+async function randomChallengeReward(client,userId,mode){
+  const profile=(await client.query('SELECT storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0];
+  const cap=Math.max(1,Number(profile?.storage_capacity)||30);
+  const used=Number((await client.query('SELECT COUNT(*)::int AS c FROM inventory WHERE user_id=$1 AND quantity>0',[userId])).rows[0].c)||0;
+  let item;
+  if(used>=cap){
+    item=(await client.query(`SELECT ti.id,ti.name,ti.category,ti.description FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY RANDOM() LIMIT 1`,[userId])).rows[0];
+  } else {
+    item=(await client.query(`SELECT id,name,category,description FROM treasure_items ORDER BY RANDOM() LIMIT 1`)).rows[0];
+  }
+  if(!item)return null;
+  await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[userId,item.id]);
+  return {...item,quantity:1,mode};
+}
+
+async function applyChallengeLoss(client,userId,mode,stage){
+  const p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0];
+  const spirit=Math.max(0,Number(p?.spirit_power)||0);
+  const current=stageFor(spirit);
+  let newSpirit=spirit;
+  let text='';
+  const pct=mode==='online'?25:10;
+  const duration=mode==='online'?'2 hours':'30 minutes';
+  if(current.realmIndex>0){
+    const previous=RANKS[current.realmIndex-1];
+    newSpirit=Math.max(previous.min,Math.min(previous.max,previous.min+Math.floor((current.tier-1)*Math.max(1,(previous.max-previous.min+1)/9))));
+    text=`Thất bại: hạ 1 cảnh giới về ${stageFor(newSpirit).stage}, nhận debuff -${pct}% chiến lực trong ${duration}.`;
+  } else {
+    newSpirit=Math.max(0,Math.floor(spirit*(mode==='online'?0.85:0.95)));
+    text=`Thất bại: cảnh giới đã ở mức thấp nhất, linh lực bị tổn hao và nhận debuff -${pct}% chiến lực trong ${duration}.`;
+  }
+  await client.query(`UPDATE profiles SET spirit_power=$2,rank=$3,realm_tier=$4,challenge_debuff_until=NOW()+$5::interval,challenge_debuff_percent=$6,challenge_debuff_text=$7,updated_at=NOW() WHERE user_id=$1`,[userId,newSpirit,stageFor(newSpirit).realm,stageFor(newSpirit).tier,duration,pct,text]);
+  return {newSpirit,debuffPercent:pct,text};
+}
+
+async function applyChallengeWin(client,userId,mode,odds){
+  const p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0];
+  const spirit=Math.max(0,Number(p?.spirit_power)||0);
+  const gain=Math.max(mode==='online'?180:80,Math.floor(spirit*(mode==='online'?0.30:0.12))+ (odds.gap>0?odds.gap*50:0));
+  const item=await randomChallengeReward(client,userId,mode);
+  const ns=spirit+gain;
+  const st=stageFor(ns);
+  await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,challenge_debuff_until=NULL,challenge_debuff_percent=0,challenge_debuff_text='',updated_at=NOW() WHERE user_id=$1`,[userId,ns,gain,st.realm,st.tier]);
+  return {gain,spiritPower:ns,stage:st,item};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BẰNG HỮU · Kết giao + chat riêng
 // ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/challenges',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id;
+    const [users,pending,history]=await Promise.all([
+      query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier,p.challenge_debuff_until,p.challenge_debuff_percent
+             FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name,u.id`,[uid]),
+      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.mode,cr.created_at,u.display_name AS challenger_name,p.avatar,p.rank,p.spirit_power,p.realm_tier
+             FROM challenge_requests cr JOIN users u ON u.id=cr.challenger_id JOIN profiles p ON p.user_id=u.id
+             WHERE cr.opponent_id=$1 AND cr.status='pending' AND cr.mode='online' ORDER BY cr.created_at DESC LIMIT 20`,[uid]),
+      query(`SELECT cr.*,cu.display_name AS challenger_name,ou.display_name AS opponent_name,
+             ri.name AS reward_item_name
+             FROM challenge_requests cr JOIN users cu ON cu.id=cr.challenger_id JOIN users ou ON ou.id=cr.opponent_id
+             LEFT JOIN treasure_items ri ON ri.id=cr.reward_item_id
+             WHERE cr.challenger_id=$1 OR cr.opponent_id=$1 ORDER BY cr.id DESC LIMIT 30`,[uid])
+    ]);
+    const me=(await query(`SELECT spirit_power,spirit_stones,challenge_debuff_until,challenge_debuff_percent,challenge_debuff_text FROM profiles WHERE user_id=$1`,[uid])).rows[0];
+    res.json({users:users.rows,pending:pending.rows,history:history.rows,me});
+  }catch(e){console.error('challenges load:',e);res.status(500).json({error:'Không thể mở Khiêu Chiến.'});}
+});
+
+app.post('/api/challenges/offline',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,target=Number(req.body?.userId);
+    if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
+    await client.query('BEGIN');
+    const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[uid,target])).rows;
+    const me=rows.find(x=>Number(x.id)===uid), opp=rows.find(x=>Number(x.id)===target);
+    if(!me||!opp){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy đối thủ.'});}
+    const odds=challengeOdds(me,opp);
+    const roll=Math.random();
+    const win=roll<odds.chance;
+    let winnerId=win?uid:target, loserId=win?target:uid, reward=null, loss=null;
+    if(win) reward=await applyChallengeWin(client,uid,'offline',odds); else loss=await applyChallengeLoss(client,uid,'offline',odds.aStage);
+    const row=await client.query(`INSERT INTO challenge_requests(challenger_id,opponent_id,mode,status,winner_id,loser_id,challenger_damage,opponent_damage,success_chance,reward_spirit,reward_item_id,reward_quantity,penalty_text,responded_at)
+      VALUES($1,$2,'offline','completed',$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW()) RETURNING id`,[uid,target,winnerId,loserId,win?odds.damageMultiplier:odds.damageMultiplier*0.55,win?1:Math.max(0.1,odds.damageMultiplier*0.35),odds.chance,reward?.gain||0,reward?.item?.id||null,reward?.item?.quantity||0,loss?.text||'']);
+    await client.query('COMMIT');
+    res.json({ok:true,mode:'offline',win,opponent:opp.display_name,successChance:Math.round(odds.chance*100),damageMultiplier:Math.round(odds.damageMultiplier*100),reward,rewardText:reward?`Linh lực bạo tăng +${reward.gain}. Vật phẩm ngẫu nhiên: ${reward.item?.name||'—'} ×1.`:null,penalty:loss?.text||null,stageAfter:stageFor(win?reward.spiritPower:loss.newSpirit).stage});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('offline challenge:',e);res.status(500).json({error:'Khiêu chiến offline thất bại. Không có tài nguyên nào bị trừ.'});}
+  finally{client.release();}
+});
+
+app.post('/api/challenges/online/request',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id,target=Number(req.body?.userId);
+    if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
+    const exists=(await query('SELECT id FROM users WHERE id=$1',[target])).rows[0];
+    if(!exists)return res.status(404).json({error:'Không tìm thấy môn nhân.'});
+    const pending=(await query(`SELECT id FROM challenge_requests WHERE challenger_id=$1 AND opponent_id=$2 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
+    if(pending)return res.status(409).json({error:'Bạn đã mở lôi đài và đang chờ đối phương đồng thuận.'});
+    const incoming=(await query(`SELECT id FROM challenge_requests WHERE challenger_id=$2 AND opponent_id=$1 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
+    if(incoming)return res.status(409).json({error:'Đối phương đã mở lôi đài với bạn. Hãy vào Khiêu Chiến để đồng thuận.'});
+    const r=await query(`INSERT INTO challenge_requests(challenger_id,opponent_id,mode,status) VALUES($1,$2,'online','pending') RETURNING id,created_at`,[uid,target]);
+    res.status(201).json({ok:true,...r.rows[0],message:'Đã mở lôi đài. Chờ đối phương đồng thuận.'});
+  }catch(e){console.error('online challenge request:',e);res.status(500).json({error:'Không thể mở lôi đài.'});}
+});
+
+app.post('/api/challenges/online/respond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,requestId=Number(req.body?.requestId),action=String(req.body?.action||'');
+    if(!Number.isInteger(requestId)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu lôi đài không hợp lệ.'});
+    await client.query('BEGIN');
+    const reqRow=(await client.query(`SELECT * FROM challenge_requests WHERE id=$1 AND opponent_id=$2 AND mode='online' AND status='pending' FOR UPDATE`,[requestId,uid])).rows[0];
+    if(!reqRow){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời lôi đài không còn hiệu lực.'});}
+    if(action==='reject'){
+      await client.query(`UPDATE challenge_requests SET status='rejected',responded_at=NOW() WHERE id=$1`,[requestId]);
+      await client.query('COMMIT');
+      return res.json({ok:true,status:'rejected',message:'Đã từ chối lôi đài.'});
+    }
+    const ids=[Number(reqRow.challenger_id),Number(reqRow.opponent_id)].sort((a,b)=>a-b);
+    const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[ids[0],ids[1]])).rows;
+    const challenger=rows.find(x=>Number(x.id)===Number(reqRow.challenger_id)), opponent=rows.find(x=>Number(x.id)===Number(reqRow.opponent_id));
+    if(!challenger||!opponent){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ chiến đấu.'});}
+    const odds=challengeOdds(challenger,opponent);
+    const win=Math.random()<odds.chance;
+    const winnerId=win?challenger.id:opponent.id, loserId=win?opponent.id:challenger.id;
+    const winner=win?challenger:opponent;
+    const loser=win?opponent:challenger;
+    const reward=await applyChallengeWin(client,Number(winner.id),'online',challengeOdds(winner,loser));
+    const loss=await applyChallengeLoss(client,Number(loser.id),'online',challengeOdds(loser,winner).dStage);
+    await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_damage=$4,opponent_damage=$5,success_chance=$6,reward_spirit=$7,reward_item_id=$8,reward_quantity=$9,penalty_text=$10,responded_at=NOW() WHERE id=$1`,[requestId,winnerId,loserId,win?odds.damageMultiplier:odds.damageMultiplier*0.35,win?odds.damageMultiplier*0.35:odds.damageMultiplier,odds.chance,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text]);
+    await client.query('COMMIT');
+    res.json({ok:true,status:'completed',winForRequester:win, winner:winner.display_name,loser:loser.display_name,successChance:Math.round(odds.chance*100),damageMultiplier:Math.round(odds.damageMultiplier*100),reward,penalty:loss,stageAfterWinner:reward.stage.stage,stageAfterLoser:stageFor(loss.newSpirit).stage,message:`Lôi đài kết thúc: ${winner.display_name} thắng. ${winner.display_name} +${reward.gain} linh lực và nhận ${reward.item?.name||'vật phẩm ngẫu nhiên'}; ${loser.display_name} ${loss.text}`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge respond:',e);res.status(500).json({error:'Lôi đài online thất bại. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
+});
+
 app.get('/api/friends',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id;

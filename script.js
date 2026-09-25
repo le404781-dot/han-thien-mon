@@ -30,9 +30,14 @@ function renderTimeline(){ $('#timelineList').innerHTML=timeline.map(e=>`<articl
 function openMember(i){
  const m=members[i];if(!m)return;
  const isSelf=currentUser&&Number(m.id)===Number(currentUser.id);
- $('#modalContent').innerHTML=`<div class="modal-avatar">${esc(m.emoji)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${(m.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${!getToken()||isSelf?'':`<div class="friend-actions" id="memberFriendActions"><button class="btn small primary" id="memberFriendBtn">🤝 Đang kiểm tra...</button><button class="btn small ghost hidden" id="memberChatBtn">💬 Chat riêng</button></div><p id="memberFriendMsg" class="train-msg"></p>`}</div>`;
+ $('#modalContent').innerHTML=`<div class="modal-avatar">${esc(m.emoji)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${(m.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${!getToken()||isSelf?'':`<div class="friend-actions" id="memberFriendActions"><button class="btn small primary" id="memberFriendBtn">🤝 Đang kiểm tra...</button><button class="btn small ghost hidden" id="memberChatBtn">💬 Chat riêng</button></div><div class="challenge-actions"><button class="btn small primary" id="memberOnlineChallengeBtn">⚔ Mở lôi đài Online</button><button class="btn small ghost" id="memberOfflineChallengeBtn">🌓 Khiêu chiến Offline</button></div><p id="memberFriendMsg" class="train-msg"></p><p id="memberChallengeMsg" class="train-msg"></p>`}</div>`;
  const friendsHost=$('#memberModal').showModal();
- if(getToken()&&!isSelf) refreshMemberFriendState(Number(m.id));
+ if(getToken()&&!isSelf){
+  refreshMemberFriendState(Number(m.id));
+  const on=$('#memberOnlineChallengeBtn'), off=$('#memberOfflineChallengeBtn'), msg=$('#memberChallengeMsg');
+  if(on)on.onclick=()=>challengeMember(Number(m.id),'online',msg);
+  if(off)off.onclick=()=>challengeMember(Number(m.id),'offline',msg);
+}
 }
 
 async function refreshMemberFriendState(targetId){
@@ -48,6 +53,57 @@ async function refreshMemberFriendState(targetId){
   else if(outgoing){btn.textContent='⌛ Đã gửi lời mời';btn.disabled=true;}
   else{btn.textContent='🤝 Kết làm bằng hữu';btn.onclick=async()=>{btn.disabled=true;try{const x=await api('/api/friends/request',{method:'POST',headers:authHeaders(),body:JSON.stringify({userId:targetId})});msg.textContent='✓ '+x.message;btn.textContent='⌛ Chờ đối phương chấp nhận';}catch(e){msg.textContent='❌ '+e.message;btn.disabled=false;}}}
  }catch(e){btn.textContent='🤝 Kết làm bằng hữu';btn.disabled=false;msg.textContent='❌ '+e.message;}
+}
+
+async function challengeMember(targetId, mode, msgEl){
+ const btn=mode==='online'?$('#memberOnlineChallengeBtn'):$('#memberOfflineChallengeBtn');
+ if(btn)btn.disabled=true;
+ try{
+  const x=await api(mode==='online'?'/api/challenges/online/request':'/api/challenges/offline',{method:'POST',headers:authHeaders(),body:JSON.stringify({userId:targetId})});
+  if(msgEl)msgEl.textContent=mode==='online'?`🏟 ${x.message}`:(x.win?`🏆 ${x.opponent} thất thủ! +${Number(x.reward?.gain||0).toLocaleString('vi-VN')} linh lực, nhận ${esc(x.reward?.item?.name||'vật phẩm ngẫu nhiên')} ×1. Hiệu lực sát thương: ${x.damageMultiplier}%.`:`💥 Thất bại trước ${x.opponent}. ${x.penalty||''}`);
+  await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
+ }catch(e){if(msgEl)msgEl.textContent='❌ '+e.message;}
+ finally{if(btn)btn.disabled=false;}
+}
+
+async function loadChallenges(){
+ const area=$('#challengeArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/challenges',{headers:authHeaders()});
+  const users=d.users||[], pending=d.pending||[], history=d.history||[], me=d.me||{};
+  const debuffActive=me.challenge_debuff_until&&new Date(me.challenge_debuff_until)>new Date();
+  area.innerHTML=`
+   ${debuffActive?`<div class="challenge-debuff"><b>☠ ${esc(me.challenge_debuff_text||'Khiêu chiến thất bại: đang chịu debuff.')}</b><small>Debuff còn hiệu lực đến ${new Date(me.challenge_debuff_until).toLocaleString('vi-VN')}</small></div>`:''}
+   <div class="challenge-rules"><div><span class="eyebrow">⚔ ONLINE · LÔI ĐÀI</span><h3>Cần đối phương đồng thuận</h3><p>Thưởng và hình phạt cao. Hai người dùng cảnh giới thực tế để quyết định kết quả.</p></div><div><span class="eyebrow">🌓 OFFLINE · MÔ PHỎNG</span><h3>Đánh với bản mô phỏng</h3><p>Không cần đối phương online. Thưởng/phạt thấp hơn để luyện thử.</p></div><div><span class="eyebrow">☯ QUY LUẬT CẢNH GIỚI</span><h3>Cảnh giới càng thấp càng bất lợi</h3><p>Chênh cảnh giới càng lớn → hiệu lực sát thương càng thấp và tỷ lệ thất bại càng tăng.</p></div></div>
+   ${pending.length?`<div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📨 LỜI MỜI LÔI ĐÀI</span><b>${pending.length} lời mời đang chờ</b></div><div class="challenge-list">${pending.map(x=>`<article class="challenge-card incoming"><span class="challenge-avatar">${esc(x.avatar||'⚔')}</span><div><b>${esc(x.challenger_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary challenge-accept" data-id="${x.id}">Đồng thuận</button><button class="btn small ghost challenge-reject" data-id="${x.id}">Từ chối</button></article>`).join('')}</div></div>`:''}
+   <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">🎯 CHỌN ĐỐI THỦ</span><b>${users.length} môn nhân</b></div><div class="challenge-list">${users.length?users.map(x=>`<article class="challenge-card"><span class="challenge-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${Number(x.challenge_debuff_percent||0)>0?`<small class="debuff-mini">☠ Đang chịu debuff ${x.challenge_debuff_percent}%</small>`:''}</div><div class="challenge-card-actions"><button class="btn small primary challenge-online" data-id="${x.id}">⚔ Online</button><button class="btn small ghost challenge-offline" data-id="${x.id}">🌓 Offline</button></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có môn nhân khác để khiêu chiến.</p></div>`}</div></div>
+   <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📜 CHIẾN TÍCH</span><b>${history.length} trận gần đây</b></div><div class="challenge-history">${history.length?history.map(h=>{const meId=Number(currentUser?.id),won=Number(h.winner_id)===meId, pendingStatus=h.status==='pending';return `<article class="challenge-history-row"><span>${h.mode==='online'?'⚔':'🌓'}</span><div><b>${won?'🏆 Thắng':h.status==='rejected'?'Từ chối':pendingStatus?'⌛ Chờ': '💀 Thất bại'}</b><small>${esc(Number(h.challenger_id)===meId?h.opponent_name:h.challenger_name)} · ${new Date(h.created_at).toLocaleString('vi-VN')}</small></div><div class="challenge-result-text">${won?`+${Number(h.reward_spirit||0).toLocaleString('vi-VN')} linh lực${h.reward_item_name?` · ${esc(h.reward_item_name)} ×${h.reward_quantity}`:''}`:esc(h.penalty_text||'')}</div></article>`}).join(''):`<div class="empty-state compact"><p>Chưa có chiến tích.</p></div>`}</div></div>
+   <p id="challengeMsg" class="train-msg"></p>`;
+  document.querySelectorAll('.challenge-online').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'online'));
+  document.querySelectorAll('.challenge-offline').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'offline'));
+  document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept'));
+  document.querySelectorAll('.challenge-reject').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'reject'));
+ }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
+}
+
+async function runChallenge(userId,mode){
+ const b=document.querySelector(`.${mode==='online'?'challenge-online':'challenge-offline'}[data-id="${userId}"]`); if(b)b.disabled=true;
+ const msg=$('#challengeMsg');
+ try{
+  const x=await api(mode==='online'?'/api/challenges/online/request':'/api/challenges/offline',{method:'POST',headers:authHeaders(),body:JSON.stringify({userId})});
+  msg.textContent=mode==='online'?`🏟 ${x.message}`:(x.win?`🏆 Khiêu chiến thắng! +${Number(x.reward?.gain||0).toLocaleString('vi-VN')} linh lực · 🎁 ${x.reward?.item?.name||'Vật phẩm ngẫu nhiên'} ×1 · sát thương hiệu lực ${x.damageMultiplier}%.`:`💀 Khiêu chiến thất bại. ${x.penalty||''}`);
+  await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
+ }catch(e){msg.textContent='❌ '+e.message;}
+ finally{if(b)b.disabled=false;}
+}
+
+async function respondChallenge(requestId,action){
+ const msg=$('#challengeMsg');
+ try{
+  const x=await api('/api/challenges/online/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,action})});
+  msg.textContent=action==='reject'?`🏳️ ${x.message}`:`⚔ ${x.message}`;
+  await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
+ }catch(e){msg.textContent='❌ '+e.message;}
 }
 
 async function loadFriends(){
@@ -84,19 +140,19 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadTuDi();await loadMarket();await loadQuests();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadTuDi();await loadMarket();await loadQuests();await loadChallenges();}
  catch{localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}
 }
 function renderGuestAreas(){
  $('#profileArea').innerHTML=`<div class="empty-state"><div class="empty-seal">寒</div><h3>Đệ tử chưa nhập môn</h3><p>Đăng ký hoặc đăng nhập để mở hồ sơ, linh lực, cảnh giới và thành tích cá nhân.</p><button class="btn primary" onclick="renderAuth('register')">✦ Ghi danh</button></div>`;
  $('#cultivationArea').innerHTML=`<div class="empty-state compact"><h3>Thiên đạo chờ người hữu duyên</h3><p>Đăng nhập để bắt đầu vận công và tích lũy linh lực.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
  $('#chatArea').innerHTML=`<div class="empty-state compact"><h3>Truyền âm bị phong</h3><p>Chỉ môn nhân đã nhập môn mới có thể vào Chat tổng.</p><button class="btn primary" onclick="renderAuth('register')">Đăng ký</button></div>`;
- $('#treasureArea').innerHTML=`<div class="empty-state compact"><h3>Tàng Bảo Các đang phong ấn</h3><p>Đăng nhập để nhận linh thạch hằng ngày và mua vật phẩm.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#questsArea').innerHTML=`<div class="empty-state compact"><h3>Nhiệm Vụ Đường đang phong ấn</h3><p>Đăng nhập để nhận nhiệm vụ và linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
+ $('#challengeArea').innerHTML=`<div class="empty-state compact"><h3>Lôi đài đang phong ấn</h3><p>Đăng nhập để khiêu chiến môn nhân và mô phỏng đối thủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#treasureArea').innerHTML=`<div class="empty-state compact"><h3>Tàng Bảo Các đang phong ấn</h3><p>Đăng nhập để nhận linh thạch hằng ngày và mua vật phẩm.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#questsArea').innerHTML=`<div class="empty-state compact"><h3>Nhiệm Vụ Đường đang phong ấn</h3><p>Đăng nhập để nhận nhiệm vụ và linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
  loadLeaderboard(); loadSect(); loadCodex();
 }
 
 async function loadProfile(){
- try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();if(Number(currentProfile.trainCount||0)>=Number(currentProfile.maxDaily||10))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadQuests();}
+ try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();loadChallenges();if(Number(currentProfile.trainCount||0)>=Number(currentProfile.maxDaily||10))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadQuests();}
  catch(e){if(e.message.includes('đăng nhập')){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}}
 }
 function renderProfile(p){
@@ -282,7 +338,7 @@ function renderAuth(mode){
  const register=mode==='register';
  $('#accountContent').innerHTML=`<div class="auth-title">寒天門</div><div class="auth-sub">Ghi danh môn nhân · Dữ liệu được lưu trong PostgreSQL</div><div class="tabs"><button class="tab ${!register?'active':''}" data-mode="login">Đăng nhập</button><button class="tab ${register?'active':''}" data-mode="register">Đăng ký</button></div><form id="authForm" class="auth-form"><div class="field ${register?'':'hidden'}"><label>Danh xưng</label><input id="displayName" maxlength="40" ${register?'required':''} placeholder="Tên hiển thị"></div><div class="field"><label>Tên tài khoản</label><input id="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="tu_tien_01"></div><div class="field"><label>Mật khẩu</label><input id="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Ít nhất 6 ký tự"></div><button class="btn primary" type="submit">${register?'Ghi danh vào sơn môn':'Nhập môn'}</button><div id="authMsg" class="auth-msg"></div></form>`;
  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>renderAuth(b.dataset.mode));
- $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadTuDi();await loadMarket();await loadData();}}catch(err){msg.textContent=err.message;}};
+ $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadTuDi();await loadMarket();await loadData();await loadChallenges();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }
 async function logout(){try{await api('/api/logout',{method:'POST',headers:authHeaders()});}catch{}finally{localStorage.removeItem(tokenKey);currentProfile=null;accountUI(null);$('#accountModal').close();renderGuestAreas();}}
