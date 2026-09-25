@@ -111,6 +111,32 @@ async function ensureRuntimeSchema() {
     ALTER TABLE user_mansions ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE user_mansions ADD COLUMN IF NOT EXISTS last_tick_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE user_mansions ADD COLUMN IF NOT EXISTS purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    -- v3.6.25: repair older Bí Cảnh schemas kept by Render PostgreSQL.
+    -- CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS required_realm_index INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS required_realm_name TEXT NOT NULL DEFAULT 'Luyện Khí';
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS activation_cost INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS funded_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'funding';
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS active_until TIMESTAMPTZ;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS paused_until TIMESTAMPTZ;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS danger_percent INTEGER NOT NULL DEFAULT 10;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS debuff_percent INTEGER NOT NULL DEFAULT 5;
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS loot_tier INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS realm_id INTEGER;
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS user_id INTEGER;
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS amount INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS reward_type TEXT NOT NULL DEFAULT '';
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS reward_item_id INTEGER;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS reward_quantity INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS reward_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS spirit_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS debuff_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS debuff_until TIMESTAMPTZ;
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
+    ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
   `);
 }
 
@@ -525,6 +551,16 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_challenge_opponent_status ON challenge_requests(opponent_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_challenger_status ON challenge_requests(challenger_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_history ON challenge_requests(created_at DESC);
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_max_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_max_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS turn_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS round_number INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_damage NUMERIC(14,2) NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action TEXT NOT NULL DEFAULT '';
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
 
     CREATE TABLE IF NOT EXISTS discipleship_requests (
       id BIGSERIAL PRIMARY KEY,
@@ -1235,8 +1271,12 @@ app.get('/api/profile',auth,async(req,res)=>{
     const trainCount=String(activity?.activity_date||'').slice(0,10)===today ? Number(activity.train_count)||0 : 0;
     const maxDaily=Math.max(2,10-stage.realmIndex);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
+    const activeBattle=(await query(`SELECT id,challenger_id,opponent_id,challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action,started_at FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) ORDER BY id DESC LIMIT 1`,[p.id])).rows[0]||null;
+    const healthMax=challengeHealth({...p,equipment_power:equipmentPower});
+    const healthCurrent=activeBattle ? (Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_hp):Number(activeBattle.opponent_hp)) : healthMax;
+
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower},techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:techniqueSlots(stage.realmIndex),mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
+    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:techniqueSlots(stage.realmIndex),mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -2092,12 +2132,28 @@ app.get('/api/bicanh',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id;
     const me=(await query(`SELECT spirit_power,spirit_stones,secret_realm_debuff_until,secret_realm_debuff_percent FROM profiles WHERE user_id=$1`,[uid])).rows[0];
-    const stage=stageFor(Number(me?.spirit_power)||0);
-    const raw=(await query(`SELECT sr.*,COALESCE((SELECT SUM(src.amount) FROM secret_realm_contributions src WHERE src.realm_id=sr.id),0)::int AS contributed_total FROM secret_realms sr ORDER BY sr.required_realm_index`)).rows;
-    const realms=[];
-    for(const r of raw){const x=await syncSecretRealm(r.id); realms.push({...x,contributed_total:Number(x.funded_stones)||0,canEnter:stage.realmIndex>=Number(x.required_realm_index),realm:stageFor(RANKS[Number(x.required_realm_index)]?.min||0).realm});}
+    if(!me) return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});
+    const stage=stageFor(Number(me.spirit_power)||0);
+    // Repair expired realms before returning the list. All parameters are explicit.
+    await query(`UPDATE secret_realms SET status='funding',funded_stones=0,active_until=NULL WHERE status='active' AND active_until IS NOT NULL AND active_until<=NOW()`);
+    await query(`UPDATE secret_realms SET status='funding',funded_stones=0,paused_until=NULL WHERE status='paused' AND paused_until IS NOT NULL AND paused_until<=NOW()`);
+    const raw=(await query(`
+      SELECT sr.*,
+             COALESCE((SELECT SUM(src.amount) FROM secret_realm_contributions src WHERE src.realm_id=sr.id),0)::int AS contributed_total
+      FROM secret_realms sr
+      ORDER BY sr.required_realm_index ASC, sr.id ASC
+    `)).rows;
+    const realms=raw.map(r=>({...r,
+      funded_stones:Number(r.funded_stones)||0,
+      contributed_total:Number(r.contributed_total)||0,
+      canEnter:stage.realmIndex>=Number(r.required_realm_index),
+      realm:stageFor(Number(RANKS[Number(r.required_realm_index)]?.min||0)).realm
+    }));
     res.json({realms,me:{...me,stage:stage.stage,realmIndex:stage.realmIndex}});
-  }catch(e){console.error('bicanh load:',e);res.status(500).json({error:'Không thể mở Bí Cảnh.'});}
+  }catch(e){
+    console.error('bicanh load:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,query:e?.query});
+    res.status(500).json({error:`Không thể mở Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});
+  }
 });
 
 app.post('/api/bicanh/contribute',auth,async(req,res)=>{
@@ -2126,7 +2182,7 @@ app.post('/api/bicanh/contribute',auth,async(req,res)=>{
     await client.query(`UPDATE secret_realms SET funded_stones=$2 WHERE id=$1`,[realmId,funded]);
     await client.query('COMMIT');
     res.json({ok:true,activated:false,paid:pay,funded,remaining:Number(realm.activation_cost)-funded,message:`Đã đóng ${pay} linh thạch. Còn ${Number(realm.activation_cost)-funded} linh thạch để khởi động.`});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh contribute:',e);res.status(500).json({error:'Đóng góp Bí Cảnh thất bại. Linh thạch đã được bảo toàn.'});}finally{client.release();}
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh contribute:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint});res.status(500).json({error:`Đóng góp Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
 });
 
 app.post('/api/bicanh/enter',auth,async(req,res)=>{
@@ -2145,7 +2201,7 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
     const breakChance=Math.min(65,Math.max(0,gap*12-4));
     if(gap>=2 && crypto.randomInt(1,101)<=breakChance){
       const pauseMinutes=Math.min(90,20+gap*10);
-      await client.query(`UPDATE secret_realms SET status='paused',paused_until=NOW()+($2||' minutes')::interval,active_until=NULL,funded_stones=0 WHERE id=$1`,[realmId,String(pauseMinutes)]);
+      await client.query(`UPDATE secret_realms SET status='paused',paused_until=NOW() + ($2::double precision * INTERVAL '1 minute'),active_until=NULL,funded_stones=0 WHERE id=$1`,[realmId,String(pauseMinutes)]);
       await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,reward_type,note) VALUES($1,$2,'broken','','Cảnh giới cao phá vỡ linh áp, Bí Cảnh tạm hoãn ${pauseMinutes} phút.')`,[realmId,uid]);
       await client.query('COMMIT');
       return res.json({ok:true,outcome:'broken',message:`Thiên uy của ${st.stage} áp đảo ${realm.name}, Bí Cảnh bị phá vỡ và tạm hoãn ${pauseMinutes} phút.`});
@@ -2169,12 +2225,12 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
     const loss=Math.max(10,Math.floor((Number(p.spirit_power)||0)*(0.03+Number(realm.loot_tier)*0.01)));
     const newSpirit=Math.max(0,(Number(p.spirit_power)||0)-loss);
     const ns=stageFor(newSpirit);
-    await client.query(`UPDATE profiles SET spirit_power=$2,experience=GREATEST(0,experience-$3),rank=$4,realm_tier=$5,secret_realm_debuff_until=NOW()+($6||' minutes')::interval,secret_realm_debuff_percent=$7,updated_at=NOW() WHERE user_id=$1`,[uid,newSpirit,Math.floor(loss/2),ns.realm,ns.tier,String(duration),debuff]);
+    await client.query(`UPDATE profiles SET spirit_power=$2,experience=GREATEST(0,experience-$3),rank=$4,realm_tier=$5,secret_realm_debuff_until=NOW() + ($6::double precision * INTERVAL '1 minute'),secret_realm_debuff_percent=$7,updated_at=NOW() WHERE user_id=$1`,[uid,newSpirit,Math.floor(loss/2),ns.realm,ns.tier,String(duration),debuff]);
     const note=`Bí Cảnh thất bại: mất ${loss} linh lực, debuff -${debuff}% trong ${duration} phút.`;
-    await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,debuff_percent,debuff_until,note) VALUES($1,$2,'failure',$3,NOW()+($4||' minutes')::interval,$5)`,[realmId,uid,debuff,String(duration),note]);
+    await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,debuff_percent,debuff_until,note) VALUES($1,$2,'failure',$3,NOW() + ($4::double precision * INTERVAL '1 minute'),$5)`,[realmId,uid,debuff,String(duration),note]);
     await client.query('COMMIT');
     res.json({ok:true,outcome:'failure',successChance,lossSpirit:loss,newSpirit,stage:ns.stage,debuffPercent:debuff,debuffMinutes:duration,message:note});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh enter:',e);res.status(500).json({error:'Tham gia Bí Cảnh thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh enter:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint});res.status(500).json({error:`Tham gia Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
 });
 
 app.get('/api/bicanh/history',auth,async(req,res)=>{
@@ -2252,6 +2308,57 @@ function challengeOdds(attacker, defender){
   chance+=reverseGap*0.035;
   chance=Math.max(0.08,Math.min(0.92,chance));
   return {chance,damageMultiplier,aPower,dPower,gap,tierGap,aStage,dStage};
+}
+
+function challengeHealth(row){
+  const spirit=Math.max(0,Number(row.spirit_power)||0);
+  const st=stageFor(spirit);
+  const base=attributesFor(spirit);
+  const equipment=Number(row.equipment_power)||0;
+  return Math.max(1200,Math.round(1200 + spirit*0.045 + base.phongThu*30 + base.congLuc*8 + st.realmIndex*700 + st.tier*120 + equipment*2));
+}
+
+function ultimateDamage(attacker, defender){
+  const aSpirit=Math.max(0,Number(attacker.spirit_power)||0);
+  const dSpirit=Math.max(0,Number(defender.spirit_power)||0);
+  const aStage=stageFor(aSpirit), dStage=stageFor(dSpirit);
+  const aAttr=attributesFor(aSpirit), dAttr=attributesFor(dSpirit);
+  const equipment=Number(attacker.equipment_power)||0;
+  const baseDamage=70 + aAttr.congLuc*2.4 + aSpirit*0.012 + equipment*0.55;
+  const realmGap=aStage.realmIndex-dStage.realmIndex;
+  let realmMultiplier=1;
+  if(realmGap>0){
+    realmMultiplier=1 + Math.min(1.6,realmGap*0.22);
+  }else if(realmGap<0){
+    realmMultiplier=Math.max(0.22,1-Math.min(0.78,Math.abs(realmGap)*0.26));
+  }else{
+    realmMultiplier=1 + Math.max(0,dStage.tier-aStage.tier)*0.035;
+  }
+  const defenseReduction=Math.max(0.35,1-(dAttr.phongThu/(dAttr.phongThu+900)));
+  const variance=0.92+Math.random()*0.16;
+  return Math.max(1,Math.round(baseDamage*realmMultiplier*defenseReduction*variance));
+}
+
+function battleSnapshot(row,viewerId){
+  const challengerTurn=Number(row.turn_user_id)===Number(row.challenger_id);
+  const viewerIsChallenger=Number(viewerId)===Number(row.challenger_id);
+  return {
+    id:Number(row.id),
+    status:row.status,
+    challengerId:Number(row.challenger_id),
+    opponentId:Number(row.opponent_id),
+    challengerHp:Number(row.challenger_hp)||0,
+    opponentHp:Number(row.opponent_hp)||0,
+    challengerMaxHp:Number(row.challenger_max_hp)||0,
+    opponentMaxHp:Number(row.opponent_max_hp)||0,
+    turnUserId:row.turn_user_id==null?null:Number(row.turn_user_id),
+    yourTurn:row.status==='accepted' && Number(row.turn_user_id)===Number(viewerId),
+    round:Number(row.round_number)||0,
+    lastActorId:row.last_actor_id==null?null:Number(row.last_actor_id),
+    lastDamage:Number(row.last_damage)||0,
+    lastAction:row.last_action||'',
+    startedAt:row.started_at
+  };
 }
 
 async function randomChallengeReward(client,userId,mode){
@@ -2551,7 +2658,7 @@ app.post('/api/disciples/gift',auth,async(req,res)=>{
 app.get('/api/challenges',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id;
-    const [users,pending,history]=await Promise.all([
+    const [users,pending,history,activeRows]=await Promise.all([
       query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier,p.challenge_debuff_until,p.challenge_debuff_percent,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
              FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name,u.id`,[uid]),
       query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.mode,cr.created_at,u.display_name AS challenger_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
@@ -2561,10 +2668,18 @@ app.get('/api/challenges',auth,async(req,res)=>{
              ri.name AS reward_item_name
              FROM challenge_requests cr JOIN users cu ON cu.id=cr.challenger_id JOIN users ou ON ou.id=cr.opponent_id
              LEFT JOIN treasure_items ri ON ri.id=cr.reward_item_id
-             WHERE cr.challenger_id=$1 OR cr.opponent_id=$1 ORDER BY cr.id DESC LIMIT 30`,[uid])
+             WHERE cr.challenger_id=$1 OR cr.opponent_id=$1 ORDER BY cr.id DESC LIMIT 30`,[uid]),
+      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.status,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,
+                    cu.display_name AS challenger_name,cu.avatar AS challenger_avatar,cp.rank AS challenger_rank,cp.spirit_power AS challenger_spirit,
+                    ou.display_name AS opponent_name,ou.avatar AS opponent_avatar,op.rank AS opponent_rank,op.spirit_power AS opponent_spirit
+             FROM challenge_requests cr
+             JOIN users cu ON cu.id=cr.challenger_id JOIN profiles cp ON cp.user_id=cu.id
+             JOIN users ou ON ou.id=cr.opponent_id JOIN profiles op ON op.user_id=ou.id
+             WHERE cr.status='accepted' AND (cr.challenger_id=$1 OR cr.opponent_id=$1) ORDER BY cr.id DESC LIMIT 1`,[uid])
     ]);
     const me=(await query(`SELECT spirit_power,spirit_stones,challenge_debuff_until,challenge_debuff_percent,challenge_debuff_text FROM profiles WHERE user_id=$1`,[uid])).rows[0];
-    res.json({users:users.rows,pending:pending.rows,history:history.rows,me});
+    const active=activeRows.rows[0]||null;
+    res.json({users:users.rows,pending:pending.rows,history:history.rows,me,activeBattle:active?{...battleSnapshot(active,uid),challengerName:active.challenger_name,challengerAvatar:active.challenger_avatar,challengerRank:active.challenger_rank,challengerSpirit:Number(active.challenger_spirit)||0,opponentName:active.opponent_name,opponentAvatar:active.opponent_avatar,opponentRank:active.opponent_rank,opponentSpirit:Number(active.opponent_spirit)||0}:null});
   }catch(e){console.error('challenges load:',e);res.status(500).json({error:'Không thể mở Khiêu Chiến.'});}
 });
 
@@ -2602,6 +2717,8 @@ app.post('/api/challenges/online/request',auth,async(req,res)=>{
     if(!exists){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân.'});}
     const protection=await consumeDiscipleChallengePermission(client,uid,target,false);
     if(!protection.allowed){await client.query('ROLLBACK');return res.status(403).json({error:protection.error,protected:true,mentorId:protection.mentor?.mentor_id,mentorName:protection.mentor?.mentor_name,discipleId:target});}
+    const activeEither=(await client.query(`SELECT id FROM challenge_requests WHERE status='accepted' AND (challenger_id IN ($1,$2) OR opponent_id IN ($1,$2)) LIMIT 1`,[uid,target])).rows[0];
+    if(activeEither){await client.query('ROLLBACK');return res.status(409).json({error:'Một trong hai môn nhân đang ở trong lôi đài khác.'});}
     const pending=(await client.query(`SELECT id FROM challenge_requests WHERE challenger_id=$1 AND opponent_id=$2 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
     if(pending){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã mở lôi đài và đang chờ đối phương đồng thuận.'});}
     const incoming=(await client.query(`SELECT id FROM challenge_requests WHERE challenger_id=$2 AND opponent_id=$1 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
@@ -2630,19 +2747,61 @@ app.post('/api/challenges/online/respond',auth,async(req,res)=>{
     const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[ids[0],ids[1]])).rows;
     const challenger=rows.find(x=>Number(x.id)===Number(reqRow.challenger_id)), opponent=rows.find(x=>Number(x.id)===Number(reqRow.opponent_id));
     if(!challenger||!opponent){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ chiến đấu.'});}
+    const activeA=(await client.query(`SELECT 1 FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) LIMIT 1`,[challenger.id])).rows[0];
+    const activeB=(await client.query(`SELECT 1 FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) LIMIT 1`,[opponent.id])).rows[0];
+    if(activeA||activeB){await client.query('ROLLBACK');return res.status(409).json({error:'Một trong hai môn nhân đang ở trong lôi đài khác.'});}
     const protection=await consumeDiscipleChallengePermission(client,Number(reqRow.challenger_id),Number(reqRow.opponent_id),true);
     if(!protection.allowed){await client.query('ROLLBACK');return res.status(403).json({error:protection.error,protected:true,mentorId:protection.mentor?.mentor_id,mentorName:protection.mentor?.mentor_name,discipleId:Number(reqRow.opponent_id)});}
-    const odds=challengeOdds(challenger,opponent);
-    const win=Math.random()<odds.chance;
-    const winnerId=win?challenger.id:opponent.id, loserId=win?opponent.id:challenger.id;
-    const winner=win?challenger:opponent;
-    const loser=win?opponent:challenger;
-    const reward=await applyChallengeWin(client,Number(winner.id),'online',challengeOdds(winner,loser));
-    const loss=await applyChallengeLoss(client,Number(loser.id),'online',challengeOdds(loser,winner).dStage);
-    await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_damage=$4,opponent_damage=$5,success_chance=$6,reward_spirit=$7,reward_item_id=$8,reward_quantity=$9,penalty_text=$10,responded_at=NOW() WHERE id=$1`,[requestId,winnerId,loserId,win?odds.damageMultiplier:odds.damageMultiplier*0.35,win?odds.damageMultiplier*0.35:odds.damageMultiplier,odds.chance,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text]);
+    const challengerMax=challengeHealth(challenger), opponentMax=challengeHealth(opponent);
+    await client.query(`UPDATE challenge_requests SET status='accepted',challenger_hp=$2,opponent_hp=$3,challenger_max_hp=$4,opponent_max_hp=$5,turn_user_id=$6,round_number=0,last_actor_id=NULL,last_damage=0,last_action='',started_at=NOW(),responded_at=NOW() WHERE id=$1`,[requestId,challengerMax,opponentMax,challengerMax,opponentMax,challenger.id]);
     await client.query('COMMIT');
-    res.json({ok:true,status:'completed',winForRequester:win, winner:winner.display_name,loser:loser.display_name,successChance:Math.round(odds.chance*100),damageMultiplier:Math.round(odds.damageMultiplier*100),reward,penalty:loss,stageAfterWinner:reward.stage.stage,stageAfterLoser:stageFor(loss.newSpirit).stage,message:`Lôi đài kết thúc: ${winner.display_name} thắng. ${winner.display_name} +${reward.gain} linh lực và nhận ${reward.item?.name||'vật phẩm ngẫu nhiên'}; ${loser.display_name} ${loss.text}`});
+    res.json({ok:true,status:'accepted',battle:{id:requestId,challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:challengerMax,opponentHp:opponentMax,challengerMaxHp:challengerMax,opponentMaxHp:opponentMax,turnUserId:Number(challenger.id),yourTurn:Number(challenger.id)===uid,round:0,lastDamage:0,lastAction:'',challengerName:challenger.display_name,opponentName:opponent.display_name},message:`Lôi đài đã khai mở. ${challenger.display_name} ra chiêu trước.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge respond:',e);res.status(500).json({error:'Lôi đài online thất bại. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
+});
+
+app.post('/api/challenges/online/action',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,requestId=Number(req.body?.requestId);
+    if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
+    await client.query('BEGIN');
+    const battle=(await client.query(`SELECT cr.*,cu.display_name AS challenger_name,ou.display_name AS opponent_name
+      FROM challenge_requests cr JOIN users cu ON cu.id=cr.challenger_id JOIN users ou ON ou.id=cr.opponent_id
+      WHERE cr.id=$1 AND cr.mode='online' AND cr.status='accepted' AND (cr.challenger_id=$2 OR cr.opponent_id=$2) FOR UPDATE`,[requestId,uid])).rows[0];
+    if(!battle){await client.query('ROLLBACK');return res.status(404).json({error:'Lôi đài không còn hoạt động.'});}
+    if(Number(battle.turn_user_id)!==uid){await client.query('ROLLBACK');return res.status(409).json({error:'Chưa tới lượt bạn tung tuyệt chiêu.'});}
+    const rows=(await client.query(`SELECT u.id,u.display_name,p.*
+      FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[battle.challenger_id,battle.opponent_id])).rows;
+    const attacker=rows.find(x=>Number(x.id)===uid), defender=rows.find(x=>Number(x.id)!==uid);
+    if(!attacker||!defender){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hai hồ sơ chiến đấu.'});}
+    const attackerEq=(await client.query(`SELECT COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[uid])).rows[0];
+    const defenderEq=(await client.query(`SELECT COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[defender.id])).rows[0];
+    attacker.equipment_power=Number(attackerEq?.equipment_power)||0; defender.equipment_power=Number(defenderEq?.equipment_power)||0;
+    const damage=ultimateDamage(attacker,defender);
+    const attackerIsChallenger=Number(attacker.id)===Number(battle.challenger_id);
+    const oldDefHp=attackerIsChallenger?Number(battle.opponent_hp):Number(battle.challenger_hp);
+    const newDefHp=Math.max(0,oldDefHp-damage);
+    const newRound=Number(battle.round_number||0)+1;
+    const actionName='⚡ Tuyệt Chiêu · Hàn Thiên Phá';
+    const realmGap=stageFor(Number(attacker.spirit_power)||0).realmIndex-stageFor(Number(defender.spirit_power)||0).realmIndex;
+    if(newDefHp<=0){
+      const winner=attacker, loser=defender;
+      const reward=await applyChallengeWin(client,Number(winner.id),'online',challengeOdds(winner,loser));
+      const loss=await applyChallengeLoss(client,Number(loser.id),'online',challengeOdds(loser,winner).dStage);
+      const challengerDamage=attackerIsChallenger?damage:Number(battle.challenger_damage||0);
+      const opponentDamage=attackerIsChallenger?Number(battle.opponent_damage||0):damage;
+      await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_hp=$4,opponent_hp=$5,turn_user_id=NULL,round_number=$6,last_actor_id=$7,last_damage=$8,last_action=$9,challenger_damage=$10,opponent_damage=$11,success_chance=1,reward_spirit=$12,reward_item_id=$13,reward_quantity=$14,penalty_text=$15,responded_at=NOW() WHERE id=$1`,[requestId,winner.id,loser.id,attackerIsChallenger?Number(battle.challenger_hp):newDefHp,attackerIsChallenger?newDefHp:Number(battle.opponent_hp),newRound,attacker.id,damage,actionName,challengerDamage,opponentDamage,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text]);
+      await client.query('COMMIT');
+      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,realmGap,round:newRound,reward,penalty:loss,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
+    }
+    const challengerHp=attackerIsChallenger?Number(battle.challenger_hp):newDefHp;
+    const opponentHp=attackerIsChallenger?newDefHp:Number(battle.opponent_hp);
+    const nextTurn=Number(defender.id);
+    await client.query(`UPDATE challenge_requests SET challenger_hp=$2,opponent_hp=$3,turn_user_id=$4,round_number=$5,last_actor_id=$6,last_damage=$7,last_action=$8,challenger_damage=challenger_damage+$9,opponent_damage=opponent_damage+$10 WHERE id=$1`,[requestId,challengerHp,opponentHp,nextTurn,newRound,attacker.id,damage,actionName,attackerIsChallenger?damage:0,attackerIsChallenger?0:damage]);
+    await client.query('COMMIT');
+    res.json({ok:true,status:'accepted',damage,realmGap,round:newRound,turnUserId:nextTurn,yourTurn:false,challengerHp,opponentHp,challengerMaxHp:Number(battle.challenger_max_hp),opponentMaxHp:Number(battle.opponent_max_hp),lastActorId:uid,lastAction:actionName,message:`${attacker.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương. Đến lượt ${defender.display_name}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge action:',e);res.status(500).json({error:'Không thể tung tuyệt chiêu. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });
 

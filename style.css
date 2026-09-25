@@ -107,6 +107,22 @@
 .challenge-history-row small{display:block;color:var(--muted);margin-top:2px}
 .challenge-result-text{text-align:right;color:var(--muted);font-size:.9rem}
 .challenge-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.health-attribute{margin:14px 0 18px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2,var(--surface))}
+.health-attribute-head,.battle-hp-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px}
+.health-attribute-head span{font-weight:700}.health-attribute-head b{font-variant-numeric:tabular-nums}
+.health-bar,.battle-hp{height:14px;border-radius:999px;overflow:hidden;background:rgba(130,130,130,.18);border:1px solid var(--line)}
+.health-bar i,.battle-hp i{display:block;height:100%;width:100%;border-radius:inherit;transition:width .35s ease}
+.health-bar i{background:linear-gradient(90deg,#b53d3d,#e86a5d)}
+.health-battle-note{display:block;margin-top:8px;color:var(--muted)}
+.active-battle{border-color:rgba(180,80,70,.45);background:linear-gradient(180deg,var(--surface),rgba(180,80,70,.06))}
+.battle-arena{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:14px;align-items:center}
+.battle-fighter{padding:16px;border:1px solid var(--line);border-radius:16px;background:var(--surface-2,var(--surface));transition:transform .2s,border-color .2s,box-shadow .2s}
+.battle-fighter.turn{border-color:rgba(180,80,70,.7);box-shadow:0 0 0 2px rgba(180,80,70,.1)}
+.battle-fighter-top{display:flex;gap:10px;align-items:center;margin-bottom:12px}.battle-fighter-top small{display:block;color:var(--muted);margin-top:3px}
+.battle-hp i{background:linear-gradient(90deg,#b53d3d,#e65b4f)}.battle-hp i.warn{background:linear-gradient(90deg,#c7832e,#e6b34a)}.battle-hp i.danger{background:linear-gradient(90deg,#7f2323,#b53d3d)}
+.battle-vs{font-weight:900;letter-spacing:.08em;color:var(--muted)}
+.battle-turn-note{text-align:center;margin:15px 0 8px;font-size:1.05rem}.battle-last-action{text-align:center;color:var(--muted);margin-bottom:12px}.battle-ultimate{display:block;margin:0 auto;min-width:210px}.battle-rule{display:block;text-align:center;color:var(--muted);margin:12px auto 0;max-width:820px;line-height:1.5}
+@media(max-width:760px){.battle-arena{grid-template-columns:1fr}.battle-vs{text-align:center}.battle-ultimate{width:100%}}
 @media(max-width:760px){.challenge-rules{grid-template-columns:1fr}.challenge-card{grid-template-columns:auto 1fr}.challenge-card-actions{grid-column:2;justify-content:flex-start}.challenge-history-row{grid-template-columns:auto 1fr}.challenge-result-text{text-align:left;grid-column:2}.challenge-debuff{align-items:flex-start}}
 
 /* Thú Đường + Linh Pháp */

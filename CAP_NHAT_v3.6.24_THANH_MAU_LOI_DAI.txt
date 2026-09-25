@@ -1,0 +1,51 @@
+HÀN THIÊN MÔN v3.6.24 – THANH MÁU + LÔI ĐÀI ONLINE THEO LƯỢT
+
+Đã nâng cấp trực tiếp từ bản v3.6.23.
+
+1. BẢNG THUỘC TÍNH
+- Thêm Thanh Máu (HP) vào Bảng thuộc tính hồ sơ.
+- Có HP hiện tại / HP tối đa và thanh hiển thị trực quan.
+- Khi đang ở lôi đài online, HP trong hồ sơ phản ánh đúng HP chiến đấu hiện tại.
+- Ngoài trận, HP hiển thị đầy thanh.
+
+2. KHIÊU CHIẾN ONLINE
+- Hai người phải đồng thuận để khai mở lôi đài.
+- Sau khi đồng thuận, trận đấu chuyển sang trạng thái đang giao chiến.
+- Hai bên lần lượt hành động; người mở lôi đài được ra tuyệt chiêu trước.
+- Mỗi lượt có nút "TUNG TUYỆT CHIÊU".
+- Server khóa bản ghi trận bằng transaction/row lock để tránh hai lượt đánh đồng thời.
+- Hết HP trước = thất bại.
+- Khi trận kết thúc mới trao thưởng người thắng và áp hình phạt người thua.
+
+3. SÁT THƯƠNG THEO CẢNH GIỚI
+- Sát thương tuyệt chiêu dựa trên Công lực, linh lực và trang bị.
+- Chênh lệch cảnh giới được áp trực tiếp vào hệ số sát thương.
+- Cảnh giới cao hơn gây sát thương tăng theo khoảng cách cảnh giới.
+- Cảnh giới thấp hơn gây sát thương giảm mạnh theo khoảng cách cảnh giới.
+- Nếu cùng cảnh giới, chênh lệch tầng vẫn ảnh hưởng nhẹ.
+- Phòng thủ của đối thủ cũng giảm sát thương thực nhận.
+- Có dao động sát thương nhỏ để trận đấu không hoàn toàn cố định.
+
+4. DỮ LIỆU DATABASE
+- Tự động bổ sung các cột trạng thái HP, lượt đánh, vòng đấu, sát thương cuối và thời gian bắt đầu vào challenge_requests bằng ALTER TABLE IF NOT EXISTS.
+- Không cần xóa dữ liệu cũ.
+- Lịch sử khiêu chiến cũ vẫn giữ nguyên.
+
+5. API MỚI
+POST /api/challenges/online/action
+- Nhận requestId.
+- Kiểm tra đúng lượt.
+- Tính sát thương theo cảnh giới.
+- Trừ HP đối thủ.
+- Chuyển lượt.
+- Nếu HP về 0, hoàn tất trận và xử lý thưởng/phạt.
+
+6. GIAO DIỆN
+- Khu Khiêu Chiến có bảng đấu 2 bên, HP hiện tại/tối đa, lượt hiện tại và tuyệt chiêu.
+- Tự động tải lại trạng thái trận để đối thủ thấy lượt mới.
+- Các nút mở trận khác bị khóa khi người chơi đang ở một lôi đài online.
+
+KIỂM TRA
+- node --check server.js: OK
+- node --check script.js: OK
+- Chưa kết nối trực tiếp Render/PostgreSQL thật trong môi trường tạo file; schema migration sẽ chạy khi server khởi động.
