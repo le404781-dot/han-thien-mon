@@ -1,0 +1,11 @@
+HÀN THIÊN MÔN v3.0
+
+Cập nhật từ v2.9:
+- Cơ chế Tàng Bảo Các: đổi linh lực để nhận vật phẩm; giao dịch nguyên tử PostgreSQL.
+- Đổi tên Tụ Di Giới thành Tu Di Giới.
+- Đổi tên mục Môn Phái thành Hàn Thiên Ký Sự.
+- Thêm Chức Vị theo cảnh giới; chỉ cho chọn chức vị phù hợp với cảnh giới hiện tại.
+- Tông chủ hiển thị tên Thiên Gia Đạo.
+- Giữ nguyên DATABASE_URL và PostgreSQL hiện tại.
+
+Không tạo database mới.

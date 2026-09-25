@@ -47,6 +47,18 @@ function stageFor(spirit) {
   return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1]};
 }
 function rankFor(spirit) { return RANKS[realmIndexFor(spirit)]; }
+const POSITION_RULES = [
+  {name:'Ngoại môn đệ tử', min:0, max:0},
+  {name:'Nội môn đệ tử', min:1, max:2},
+  {name:'Chấp sự', min:2, max:4},
+  {name:'Hộ pháp', min:4, max:6},
+  {name:'Trưởng lão', min:5, max:7},
+  {name:'Thái thượng trưởng lão', min:7, max:8},
+  {name:'Tông chủ', min:8, max:8}
+];
+function positionOptionsFor(realmIndex){ return POSITION_RULES.filter(x=>realmIndex>=x.min && realmIndex<=x.max).map(x=>x.name); }
+function defaultPositionFor(realmIndex){ const opts=positionOptionsFor(realmIndex); return opts[opts.length-1] || 'Ngoại môn đệ tử'; }
+
 function progressFor(spirit) {
   const r=rankFor(spirit), s=stageFor(spirit);
   const nextRealm=RANKS[RANKS.findIndex(x=>x.name===r.name)+1];
@@ -400,16 +412,22 @@ app.get('/api/profile',auth,async(req,res)=>{
     const stage=stageFor(p.spirit_power);
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
-    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30}});
+    const allowedPositions=positionOptionsFor(stage.realmIndex);
+    if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
+    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30}});
   } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
 });
 
 app.patch('/api/profile',auth,async(req,res)=>{
   try {
-    const {displayName,title,sect,birthday,hobby,bio,avatar}=req.body||{};
+    const {displayName,title,sect,position,birthday,hobby,bio,avatar}=req.body||{};
     if(displayName!==undefined){const dn=String(displayName).trim().slice(0,40);if(!dn)return res.status(400).json({error:'Danh xưng không được để trống.'});await query('UPDATE users SET display_name=$2 WHERE id=$1',[req.session.user_id,dn]);}
     await ensureProfile(req.session.user_id);
-    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), birthday=COALESCE($4,birthday), hobby=COALESCE($5,hobby), bio=COALESCE($6,bio), avatar=COALESCE($7,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),avatar?.toString().slice(0,10)]);
+    const pr=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const ps=stageFor(Number(pr?.spirit_power)||0);
+    let chosenPosition=position?.toString().trim();
+    if(chosenPosition){ const allowed=positionOptionsFor(ps.realmIndex); if(!allowed.includes(chosenPosition)) return res.status(400).json({error:`Chức vị ${chosenPosition} không phù hợp với ${ps.stage}.`}); }
+    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),avatar?.toString().slice(0,10)]);
     res.json({ok:true});
   } catch(e){res.status(500).json({error:'Không thể cập nhật hồ sơ.'});}
 });
@@ -516,7 +534,7 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
     const used=Number(capR.rows[0]?.used)||0;
     if(used>=capacity){
       await client.query('ROLLBACK');
-      return res.status(400).json({error:`Tụ Di Giới đã đầy (${used}/${capacity}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
+      return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${capacity}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
     }
 
     let newSpirit=(Number(p.spirit_power)||0)-Number(item.price);
@@ -558,7 +576,7 @@ app.get('/api/tu-di-gioi',auth,async(req,res)=>{
       WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC`,[req.session.user_id]);
     const count=r.rows.reduce((n,x)=>n+Number(x.quantity||0),0);
     res.json({rows:r.rows,used:count,capacity:Number(p.storage_capacity)||30,spiritRoot:p.spirit_root,spiritBeast:p.spirit_beast});
-  }catch(e){res.status(500).json({error:'Không thể mở Tụ Di Giới.'});}
+  }catch(e){res.status(500).json({error:'Không thể mở Tu Di Giới.'});}
 });
 
 app.post('/api/random-gifts',auth,async(req,res)=>{
@@ -643,7 +661,7 @@ app.get('/api/achievements',auth,async(req,res)=>{
 app.get('/api/sect',async(req,res)=>{
   try {
     const count=await query('SELECT COUNT(*)::int AS c FROM profiles WHERE sect=$1',['Hàn Thiên Môn']);
-    res.json({name:'Hàn Thiên Môn',han:'寒天門',motto:'Giữ đạo tâm · Giữ tình bằng hữu',count:count.rows[0].c,positions:[['Tông chủ','Chưởng môn sơn môn'],['Hộ pháp','Giữ luật và hộ sơn'],['Nội môn đệ tử','Đệ tử đã lập đạo cơ'],['Ngoại môn đệ tử','Môn nhân mới nhập môn']]});
+    res.json({name:'Hàn Thiên Môn',han:'寒天門',motto:'Giữ đạo tâm · Giữ tình bằng hữu',count:count.rows[0].c,positions:[['Tông chủ · Thiên Gia Đạo','Chưởng môn sơn môn'],['Thái thượng trưởng lão','Trấn thủ đạo thống'],['Trưởng lão · Hộ pháp','Giữ luật và hộ sơn'],['Nội môn đệ tử','Đệ tử đã lập đạo cơ'],['Ngoại môn đệ tử','Môn nhân mới nhập môn']]});
   } catch(e){res.status(500).json({error:'Không thể tải môn phái.'});}
 });
 

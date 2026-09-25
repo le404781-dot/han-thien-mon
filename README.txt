@@ -33,3 +33,6 @@ v2.8 cập nhật: Tụ Di Giới 30 ô chứa vật phẩm; đan dược/pháp 
 - Có bảng Phụ Trợ hiển thị ảnh hưởng của Linh Căn và Linh Thú.
 - Tu luyện nhận thêm hiệu quả theo độ hiếm Linh Căn.
 - Không tạo PostgreSQL mới; initDb tự thêm cột cần thiết.
+
+
+Bản v3.0: đổi linh lực nhận vật phẩm, Tu Di Giới, Hàn Thiên Ký Sự, Chức Vị theo cảnh giới, Tông chủ: Thiên Gia Đạo.
