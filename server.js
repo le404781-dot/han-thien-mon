@@ -97,6 +97,16 @@ const RANKS = [
   { name: 'Đại Thừa', min: 120000, max: 239999 },
   { name: 'Độ Kiếp', min: 240000, max: Infinity }
 ];
+const LEGEND_CHAR_LIMITS = [300,500,800,1200,1600,2200,3000,4000,5000];
+const PROFESSION_DEFINITIONS = [
+  {code:'alchemy',name:'Luyện Đan Sư',icon:'⚗️',reward:40,description:'Luyện chế đan dược, nhận linh thạch từ các đơn luyện đan.'},
+  {code:'formation',name:'Trận Pháp Sư',icon:'🌀',reward:50,description:'Bố trí trận pháp, nhận linh thạch từ các nhiệm vụ hộ tông.'},
+  {code:'talisman',name:'Luyện Phù Sư',icon:'🧿',reward:45,description:'Luyện chế linh phù, nhận linh thạch từ các đơn chế phù.'},
+  {code:'herbalist',name:'Dược Sư',icon:'🌿',reward:35,description:'Nhận diện và xử lý linh dược, nhận linh thạch từ dược vụ.'}
+];
+function legendCharLimit(realmIndex){ return LEGEND_CHAR_LIMITS[Math.max(0,Math.min(8,Number(realmIndex)||0))]||300; }
+function professionSlots(realmIndex){ return Math.min(PROFESSION_DEFINITIONS.length,1+Math.floor(Math.max(0,Number(realmIndex)||0)/2)); }
+function professionReward(def,realmIndex){ return Number(def.reward||0)+Math.max(0,Number(realmIndex)||0)*10; }
 const TIERS = ['Nhất Tầng','Nhị Tầng','Tam Tầng','Tứ Tầng','Ngũ Tầng','Lục Tầng','Thất Tầng','Bát Tầng','Cửu Tầng'];
 function realmIndexFor(spirit) {
   return RANKS.map(r=>r.min).reduce((idx,min,i)=>spirit>=min?i:idx,0);
@@ -166,6 +176,28 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS timeline (
       id SERIAL PRIMARY KEY, year TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS legends (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      realm_index INTEGER NOT NULL DEFAULT 0,
+      realm_name TEXT NOT NULL DEFAULT 'Luyện Khí',
+      realm_tier INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_legends_updated_at ON legends(updated_at DESC);
+    CREATE TABLE IF NOT EXISTS user_professions (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      profession_code TEXT NOT NULL,
+      learned_realm_index INTEGER NOT NULL DEFAULT 0,
+      learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_claim_at TIMESTAMPTZ,
+      UNIQUE(user_id, profession_code)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_professions_user ON user_professions(user_id);
     CREATE TABLE IF NOT EXISTS profiles (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       title TEXT NOT NULL DEFAULT 'Tân đệ tử',
@@ -758,14 +790,116 @@ async function auth(req,res,next) {
 }
 
 app.get('/api/health',(req,res)=>res.json({ok:true,service:'Hàn Thiên Môn'}));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRUYỀN KỲ · mỗi môn nhân có một mục truyền kỳ công khai toàn tông môn
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/legends',async(req,res)=>{
+  try{
+    const r=await query(`SELECT l.id,l.user_id,l.title,l.content,l.realm_index,l.realm_name,l.realm_tier,l.created_at,l.updated_at,
+      u.display_name AS author_name,u.username,p.avatar,p.position
+      FROM legends l JOIN users u ON u.id=l.user_id JOIN profiles p ON p.user_id=u.id
+      ORDER BY l.updated_at DESC,l.id DESC LIMIT 200`);
+    res.json({rows:r.rows.map(x=>({...x,charLimit:legendCharLimit(x.realm_index)}))});
+  }catch(e){console.error('legends load:',e);res.status(500).json({error:'Không thể mở Truyền Kỳ.'});}
+});
+
+app.post('/api/legends',auth,async(req,res)=>{
+  try{
+    await ensureProfile(req.session.user_id);
+    const p=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const st=stageFor(Number(p?.spirit_power)||0);
+    const limit=legendCharLimit(st.realmIndex);
+    const title=String(req.body?.title||'').trim().slice(0,60);
+    const content=String(req.body?.content||'').trim();
+    if(!title)return res.status(400).json({error:'Tên mục Truyền Kỳ không được để trống.'});
+    if(!content)return res.status(400).json({error:'Nội dung Truyền Kỳ không được để trống.'});
+    if([...content].length>limit)return res.status(400).json({error:`Cảnh giới ${st.stage} chỉ được nhập tối đa ${limit.toLocaleString('vi-VN')} ký tự.`});
+    const r=await query(`INSERT INTO legends(user_id,title,content,realm_index,realm_name,realm_tier,updated_at)
+      VALUES($1,$2,$3,$4,$5,$6,NOW())
+      ON CONFLICT(user_id) DO UPDATE SET title=EXCLUDED.title,content=EXCLUDED.content,realm_index=EXCLUDED.realm_index,realm_name=EXCLUDED.realm_name,realm_tier=EXCLUDED.realm_tier,updated_at=NOW()
+      RETURNING id,user_id,title,content,realm_index,realm_name,realm_tier,created_at,updated_at`,
+      [req.session.user_id,title,content,st.realmIndex,st.realm,st.tier]);
+    res.status(201).json({ok:true,legend:{...r.rows[0],charLimit:limit},message:'Truyền Kỳ đã được thông cáo cho toàn tông môn.'});
+  }catch(e){console.error('legend save:',e);res.status(500).json({error:'Không thể lưu Truyền Kỳ.'});}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NGHIỆP VỤ · nghề chính + nghề phụ mở khóa theo cảnh giới
+// 2 cảnh giới mới mở thêm 1 ô nghề phụ. Mỗi nghề có thù lao linh thạch riêng.
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/professions',auth,async(req,res)=>{
+  try{
+    await ensureProfile(req.session.user_id);
+    const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const st=stageFor(Number(p?.spirit_power)||0);
+    const slots=professionSlots(st.realmIndex);
+    const owned=(await query('SELECT * FROM user_professions WHERE user_id=$1 ORDER BY id',[req.session.user_id])).rows;
+    const rows=PROFESSION_DEFINITIONS.map(d=>{
+      const o=owned.find(x=>x.profession_code===d.code);
+      const reward=professionReward(d,st.realmIndex);
+      return {...d,reward,learned:Boolean(o),learnedAt:o?.learned_at||null,lastClaimAt:o?.last_claim_at||null,primary:o?Number(o.id)===Number(owned[0]?.id):false};
+    });
+    res.json({rows,stage:st.stage,realmIndex:st.realmIndex,slots,used:owned.length,spiritStones:Number(p?.spirit_stones)||0});
+  }catch(e){console.error('professions load:',e);res.status(500).json({error:'Không thể mở Nghiệp Vụ.'});}
+});
+
+app.post('/api/professions/learn',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const code=String(req.body?.code||'').trim();
+    const def=PROFESSION_DEFINITIONS.find(x=>x.code===code);
+    if(!def)return res.status(400).json({error:'Nghề nghiệp không hợp lệ.'});
+    await client.query('BEGIN');
+    const p=(await client.query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ.'});}
+    const st=stageFor(Number(p.spirit_power)||0);
+    const slots=professionSlots(st.realmIndex);
+    const existing=(await client.query('SELECT * FROM user_professions WHERE user_id=$1 ORDER BY id FOR UPDATE',[req.session.user_id])).rows;
+    if(existing.some(x=>x.profession_code===code)){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã tiếp nhận nghề này.'});}
+    if(existing.length>=slots){await client.query('ROLLBACK');return res.status(400).json({error:`${st.stage} chỉ mở ${slots} ô nghề. Cần đạt thêm cảnh giới để học nghề phụ.`});}
+    const reward=professionReward(def,st.realmIndex);
+    await client.query(`INSERT INTO user_professions(user_id,profession_code,learned_realm_index) VALUES($1,$2,$3)`,[req.session.user_id,code,st.realmIndex]);
+    const nr=await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[req.session.user_id,reward]);
+    await client.query('COMMIT');
+    res.status(201).json({ok:true,profession:def.name,reward,spiritStones:Number(nr.rows[0].spirit_stones),message:`Tiếp nhận ${def.name} thành công. Nhận ${reward.toLocaleString('vi-VN')} linh thạch nhập nghiệp.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('profession learn:',e);res.status(500).json({error:'Không thể tiếp nhận nghề nghiệp.'});}
+  finally{client.release();}
+});
+
+app.post('/api/professions/claim',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const code=String(req.body?.code||'').trim();
+    const def=PROFESSION_DEFINITIONS.find(x=>x.code===code);
+    if(!def)return res.status(400).json({error:'Nghề nghiệp không hợp lệ.'});
+    await client.query('BEGIN');
+    const p=(await client.query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    const own=(await client.query(`SELECT * FROM user_professions WHERE user_id=$1 AND profession_code=$2 FOR UPDATE`,[req.session.user_id,code])).rows[0];
+    if(!p||!own){await client.query('ROLLBACK');return res.status(403).json({error:'Bạn chưa tiếp nhận nghề này.'});}
+    const st=stageFor(Number(p.spirit_power)||0);
+    const reward=professionReward(def,st.realmIndex);
+    if(own.last_claim_at){
+      const dayCheck=(await client.query(`SELECT (($1::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS claimed_today`,[own.last_claim_at])).rows[0];
+      if(dayCheck?.claimed_today){await client.query('ROLLBACK');return res.status(400).json({error:'Nghiệp vụ này đã nhận thù lao hôm nay. Hãy quay lại ngày mai.'});}
+    }
+    const nr=await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[req.session.user_id,reward]);
+    await client.query(`UPDATE user_professions SET last_claim_at=NOW() WHERE id=$1`,[own.id]);
+    await client.query('COMMIT');
+    res.json({ok:true,profession:def.name,reward,spiritStones:Number(nr.rows[0].spirit_stones),message:`Nghiệp vụ hoàn thành. Nhận ${reward.toLocaleString('vi-VN')} linh thạch.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('profession claim:',e);res.status(500).json({error:'Không thể nhận thù lao nghề nghiệp.'});}
+  finally{client.release();}
+});
+
 app.get('/api/data',async(req,res)=>{
   try {
-    const [m,mem,t,u] = await Promise.all([
+    const [m,t,u] = await Promise.all([
       query(`SELECT id,name,nick,emoji,role,bio,birthday,hobby,tags FROM members ORDER BY id`),
-      query('SELECT icon,title,description FROM memories ORDER BY id'),
       query('SELECT year,title,description FROM timeline ORDER BY id'),
       query('SELECT COUNT(*)::int AS c FROM users')
     ]);
+    const legends=(await query(`SELECT l.id,l.user_id,l.title,l.content,l.realm_index,l.realm_name,l.realm_tier,l.created_at,l.updated_at,u.display_name AS author_name,u.username,p.avatar,p.position
+      FROM legends l JOIN users u ON u.id=l.user_id JOIN profiles p ON p.user_id=u.id ORDER BY l.updated_at DESC,l.id DESC LIMIT 200`)).rows.map(x=>({...x,charLimit:legendCharLimit(x.realm_index)}));
     const [accounts] = await Promise.all([
       query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier
              FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY u.id`)
@@ -773,7 +907,7 @@ app.get('/api/data',async(req,res)=>{
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
     const accountMembers=accounts.rows.map(x=>({...x,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true}));
-    res.json({members:accountMembers,memories:mem.rows,timeline:t.rows,userCount:u.rows[0].c,memberCount:accountMembers.length});
+    res.json({members:accountMembers,memories:legends,timeline:t.rows,userCount:u.rows[0].c,memberCount:accountMembers.length});
   } catch(e) { res.status(500).json({error:'Không thể tải dữ liệu.'}); }
 });
 

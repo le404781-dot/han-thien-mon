@@ -1,0 +1,45 @@
+HÀN THIÊN MÔN v3.6.14
+
+1. ĐỔI KÝ ỨC → TRUYỀN KỲ
+- Giao diện mục Ký ức được đổi thành Truyền Kỳ.
+- Mỗi tài khoản có 1 mục Truyền Kỳ riêng, có thể đặt tên riêng.
+- Nội dung được thông cáo công khai cho toàn tông môn.
+- Máy chủ lưu tác giả, cảnh giới, tầng, thời gian tạo/cập nhật.
+- Giới hạn ký tự theo cảnh giới:
+  Luyện Khí 300
+  Trúc Cơ 500
+  Kim Đan 800
+  Nguyên Anh 1.200
+  Hóa Thần 1.600
+  Luyện Hư 2.200
+  Hợp Thể 3.000
+  Đại Thừa 4.000
+  Độ Kiếp 5.000
+- Máy chủ kiểm tra giới hạn ký tự, không chỉ dựa vào maxlength của trình duyệt.
+- Có thể cập nhật lại Truyền Kỳ của chính mình.
+
+2. NGHIỆP VỤ
+- Thêm 4 nghề:
+  + Luyện Đan Sư
+  + Trận Pháp Sư
+  + Luyện Phù Sư
+  + Dược Sư
+- Nghề đầu tiên là nghề chính.
+- Cứ mỗi 2 cảnh giới mở thêm 1 ô nghề phụ:
+  Luyện Khí: 1 nghề
+  Trúc Cơ: 1 nghề
+  Kim Đan: 2 nghề
+  Nguyên Anh: 2 nghề
+  Hóa Thần: 3 nghề
+  Luyện Hư: 3 nghề
+  Hợp Thể: 4 nghề
+  Đại Thừa: 4 nghề
+  Độ Kiếp: 5 nghề
+- Khi tiếp nhận nghề, nhận linh thạch nhập nghiệp riêng theo nghề và cảnh giới.
+- Mỗi nghề đã tiếp nhận có thể nhận thù lao tối đa 1 lần/ngày.
+- Toàn bộ thao tác nhận nghề và nhận thù lao dùng transaction + khóa hồ sơ, tránh trừ/cộng sai linh thạch.
+
+3. DATABASE
+- Tự tạo bảng legends.
+- Tự tạo bảng user_professions.
+- Không xóa bảng memories cũ để bảo toàn dữ liệu legacy; giao diện/API mới dùng Truyền Kỳ.

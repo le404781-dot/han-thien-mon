@@ -2,14 +2,14 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Hàn Thiên Môn — sơn môn tiên hiệp, hồ sơ đệ tử, cửu đại cảnh giới, linh thạch, Tàng Bảo Các, Cửu Đại Bí Cảnh, chat tổng và ký ức.">
+<meta name="description" content="Hàn Thiên Môn — sơn môn tiên hiệp, hồ sơ đệ tử, cửu đại cảnh giới, linh thạch, Tàng Bảo Các, Cửu Đại Bí Cảnh, Truyền Kỳ và Nghiệp Vụ.">
 <title>Hàn Thiên Môn | 寒天門</title><link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="mist mist-a"></div><div class="mist mist-b"></div>
 <header class="topbar">
   <a class="brand" href="#home"><span class="brand-seal">寒</span><span>Hàn Thiên Môn<small>寒天門 · SƠN MÔN</small></span></a>
-  <nav id="nav"><a href="#home">Sơn môn</a><a href="#profile">Hồ sơ</a><a href="#cultivation">Tu luyện</a><a href="#quests">Nhiệm Vụ Đường</a><a href="#challenge">Khiêu Chiến</a><a href="#treasure">Tàng Bảo Các</a><a href="#beast-house">Thú Đường</a><a href="#linh-phap">Linh Pháp</a><a href="#equipment">Trang bị</a><a href="#bicanh">Bí Cảnh</a><a href="#sumeru">Tu Di Giới</a><a href="#market">Phường Thị</a><a href="#sect">Hàn Thiên Ký Sự</a><a href="#chat">Chat tổng</a><a href="#profile">Bằng hữu</a><a href="#gallery">Ký ức</a><a href="#leaderboard">Thành tích</a><a href="#linhcanbang">Linh Căn Bảng</a><a href="#linhthubang">Linh Thú Bảng</a></nav>
+  <nav id="nav"><a href="#home">Sơn môn</a><a href="#profile">Hồ sơ</a><a href="#cultivation">Tu luyện</a><a href="#quests">Nhiệm Vụ Đường</a><a href="#challenge">Khiêu Chiến</a><a href="#treasure">Tàng Bảo Các</a><a href="#beast-house">Thú Đường</a><a href="#linh-phap">Linh Pháp</a><a href="#equipment">Trang bị</a><a href="#bicanh">Bí Cảnh</a><a href="#sumeru">Tu Di Giới</a><a href="#market">Phường Thị</a><a href="#sect">Hàn Thiên Ký Sự</a><a href="#chat">Chat tổng</a><a href="#profile">Bằng hữu</a><a href="#gallery">Truyền Kỳ</a><a href="#leaderboard">Thành tích</a><a href="#linhcanbang">Linh Căn Bảng</a><a href="#linhthubang">Linh Thú Bảng</a></nav>
   <div class="top-actions"><span id="userBadge" class="user-badge hidden"></span><button id="accountBtn" class="seal-btn">☯ Đăng nhập</button><button id="themeBtn" class="icon-btn">☾</button><button id="menuBtn" class="icon-btn menu-btn">☰</button></div>
 </header>
 <main id="home">
@@ -19,7 +19,7 @@
   <h1>HÀN THIÊN<br><span>MÔN</span></h1>
   <p class="hero-sub">Một phương trời tiên hiệp dành cho những người đồng hành. Lưu danh đệ tử, tu luyện linh lực, kết giao đạo hữu và cùng nhau viết nên môn sử.</p>
   <div class="hero-actions"><a class="btn primary" href="#profile">Nhập môn</a><a class="btn ghost" href="#gallery">Xem ký ức</a></div>
-  <div class="stats"><div><b id="memberCount">0</b><span>Đệ tử</span></div><div><b id="memoryCount">0</b><span>Ký ức</span></div><div><b id="userCount">0</b><span>Đạo hữu</span></div></div>
+  <div class="stats"><div><b id="memberCount">0</b><span>Đệ tử</span></div><div><b id="memoryCount">0</b><span>Truyền Kỳ</span></div><div><b id="userCount">0</b><span>Đạo hữu</span></div></div>
  </div>
  <div class="hero-card"><div class="seal-xl">寒</div><div class="cloud-ring"></div><span class="card-kicker">寒天門</span><h3>Nhất niệm nhập tiên môn</h3><p>“Đồng hành vạn dặm, chẳng phụ một đời tri kỷ.”</p><div class="card-line"></div></div>
 </section>
@@ -32,6 +32,11 @@
 <section id="cultivation" class="section alt">
  <div class="section-head"><div><span class="eyebrow">✦ TU LUYỆN · LINH LỰC</span><h2>Con đường tu hành</h2></div></div>
  <div id="cultivationArea" class="cultivation-area"></div>
+</section>
+
+<section id="professions" class="section">
+ <div class="section-head"><div><span class="eyebrow">🛠 NGHIỆP VỤ · 職業</span><h2>Nghiệp Vụ Tông Môn</h2></div><span class="live-pill">💎 THÙ LAO LINH THẠCH</span></div>
+ <div id="professionsArea" class="professions-area"><div class="empty-state compact"><h3>Đang mở Nghiệp Vụ...</h3></div></div>
 </section>
 
 <section id="quests" class="section alt">
@@ -111,7 +116,8 @@
 </section>
 
 <section id="gallery" class="section">
- <div class="section-head"><div><span class="eyebrow">◈ TÀNG KINH CÁC</span><h2>Ký ức lưu danh</h2></div></div>
+ <div class="section-head"><div><span class="eyebrow">◈ TRUYỀN KỲ · 傳奇</span><h2>Truyền Kỳ Lưu Danh</h2><p class="section-lead">Mỗi môn nhân có thể tạo một mục Truyền Kỳ riêng. Tên mục và nội dung sẽ được thông cáo cho toàn tông môn.</p></div></div>
+ <div id="legendEditor"></div>
  <div id="galleryGrid" class="gallery-grid"></div>
 </section>
 
