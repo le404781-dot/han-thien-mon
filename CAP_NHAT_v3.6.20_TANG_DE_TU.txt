@@ -1,0 +1,21 @@
+HÀN THIÊN MÔN v3.6.20 – TẶNG VẬT PHẨM CHO ĐỆ TỬ
+
+1. Mở khu vực “🎁 Ban tặng đệ tử” ngay trong mục Sư Đồ.
+2. Sư phụ chỉ có thể tặng cho đệ tử thuộc quan hệ mentor_disciples.
+3. Hỗ trợ 4 loại:
+   - Linh thạch
+   - Pháp khí / vật phẩm trong inventory
+   - Linh thú
+   - Linh căn
+4. Giao dịch dùng transaction PostgreSQL và khóa hồ sơ/vật phẩm để tránh tặng vượt số lượng khi gửi đồng thời.
+5. Nếu kho của đệ tử đầy, vật phẩm mới sẽ bị từ chối; nếu đệ tử đã sở hữu đúng vật phẩm thì cộng dồn số lượng.
+6. Vật phẩm được chuyển vào kho của đệ tử, không tự động trang bị.
+7. UI hiển thị số lượng vật phẩm sư phụ hiện có và ô nhập số lượng.
+8. Linh thạch chuyển trực tiếp từ số dư sư phụ sang số dư đệ tử.
+9. Không yêu cầu xóa database. Các bảng hiện có được sử dụng: inventory, owned_spirit_beasts, owned_spirit_roots, profiles, mentor_disciples.
+
+Kiểm tra cú pháp:
+- node --check server.js: OK
+- node --check script.js: OK
+
+Lưu ý: chưa chạy giao dịch PostgreSQL thực tế vì môi trường build không có DATABASE_URL của Render. Khi deploy, server dùng DATABASE_URL hiện có và giao dịch được xử lý bằng PostgreSQL transaction.

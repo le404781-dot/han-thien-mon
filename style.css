@@ -171,3 +171,12 @@
 .equipment-profile-item p{margin:4px 0 0;font-size:.82rem;line-height:1.45}
 .equipment-profile-total{margin-top:13px;padding:10px 12px;border-top:1px solid var(--line,#d8d2bd);font-size:.92rem}
 @media(max-width:760px){.equipment-profile-grid{grid-template-columns:1fr}.profile-equipment-panel{padding:14px}}
+
+/* Sư Đồ · Ban tặng đệ tử */
+.disciple-card{align-items:flex-start;flex-wrap:wrap}
+.disciple-gift-box{width:100%;margin-top:10px;padding:12px;border:1px solid rgba(80,100,80,.25);border-radius:12px;background:rgba(255,255,255,.42)}
+.disciple-gift-box>b{display:block;margin-bottom:8px}
+.disciple-gift-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.disciple-gift-select{flex:1 1 220px;min-width:0;padding:9px;border:1px solid rgba(80,100,80,.3);border-radius:9px;background:#fffdf5;color:inherit}
+.disciple-gift-qty{width:76px;padding:9px;border:1px solid rgba(80,100,80,.3);border-radius:9px;background:#fffdf5;color:inherit}
+@media(max-width:600px){.disciple-gift-select{flex-basis:100%}.disciple-gift-qty{width:78px}.disciple-gift-row .btn{flex:1}}

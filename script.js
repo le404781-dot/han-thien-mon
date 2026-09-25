@@ -150,7 +150,7 @@ async function loadDisciples(){
  const area=$('#disciplesArea'); if(!area||!getToken())return;
  try{
   const d=await api('/api/disciples',{headers:authHeaders()});
-  const me=d.stage||{}, myIdx=Number(me.realmIndex||0), mentor=d.mentor, disciples=d.disciples||[], incoming=d.incoming||[], outgoing=d.outgoing||[], users=d.users||[];
+  const me=d.stage||{}, myIdx=Number(me.realmIndex||0), mentor=d.mentor, disciples=d.disciples||[], incoming=d.incoming||[], outgoing=d.outgoing||[], users=d.users||[], giftInventory=d.giftInventory||{stones:0,artifacts:[],beasts:[],roots:[]};
   const mentorRequests=incoming.filter(x=>x.request_type==='disciple_to_mentor');
   const inviteRequests=incoming.filter(x=>x.request_type==='mentor_to_disciple');
   const baisRequests=outgoing.filter(x=>x.request_type==='disciple_to_mentor');
@@ -159,7 +159,7 @@ async function loadDisciples(){
   const discipleCandidates=users.filter(x=>myIdx>=5&&Number(x.realmIndex)<myIdx);
   area.innerHTML=`<div class="friends-head"><div><span class="eyebrow">👑 SƯ ĐỒ · 師徒</span><h3>Kết giao sư đồ</h3><small>Luyện Hư trở lên có thể nhận tối đa 2 đệ tử; môn nhân cảnh giới thấp hơn có thể gửi lời bái sư. Hai bên đều có thể chủ động gửi lời mời tương tự kết giao bằng hữu.</small></div><span class="tag">${mentor?`Có sư phụ`:myIdx>=5?`Có thể nhận đệ tử`:'Có thể bái sư'}</span></div>
   ${mentor?`<div class="friend-subtitle">🛡 SƯ PHỤ CỦA BẠN</div><div class="friend-list"><article class="friend-card"><span class="friend-avatar">${esc(mentor.avatar||'👑')}</span><div><b>${esc(mentor.mentor_name)}</b><small>${esc(mentor.rank||'Luyện Hư')} · ${Number(mentor.spirit_power||0).toLocaleString('vi-VN')} linh lực</small></div><span class="tag">🛡 Bảo hộ</span></article></div>`:''}
-  ${disciples.length?`<div class="friend-subtitle">👑 ĐỆ TỬ CỦA BẠN · ${disciples.length}/2</div><div class="friend-list">${disciples.map(x=>`<article class="friend-card"><span class="friend-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank||'Đệ tử')} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small></div><span class="tag">🛡 Được bảo hộ</span></article>`).join('')}</div>`:''}
+  ${disciples.length?`<div class="friend-subtitle">👑 ĐỆ TỬ CỦA BẠN · ${disciples.length}/2</div><div class="friend-list">${disciples.map(x=>`<article class="friend-card disciple-card"><span class="friend-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank||'Đệ tử')} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small><span class="tag">🛡 Được bảo hộ</span></div><div class="disciple-gift-box"><b>🎁 Ban tặng đệ tử</b><div class="disciple-gift-row"><select class="disciple-gift-select" data-disciple="${x.disciple_id}"><option value="stones:0">💎 Linh thạch · Có ${Number(giftInventory.stones||0).toLocaleString('vi-VN')}</option>${(giftInventory.artifacts||[]).map(i=>`<option value="artifact:${i.id}">⚔ ${esc(i.name)} ×${Number(i.quantity||0)}</option>`).join('')}${(giftInventory.beasts||[]).map(i=>`<option value="beast:${i.id}">🐉 ${esc(i.name)} ×${Number(i.quantity||0)}</option>`).join('')}${(giftInventory.roots||[]).map(i=>`<option value="root:${i.id}">🌿 ${esc(i.name)} ×${Number(i.quantity||0)}</option>`).join('')}</select><input class="disciple-gift-qty" data-disciple="${x.disciple_id}" type="number" min="1" value="1" inputmode="numeric"><button class="btn small primary disciple-gift-btn" data-disciple="${x.disciple_id}">🎁 Tặng</button></div></div></article>`).join('')}</div>`:''}
   ${mentorRequests.length?`<div class="friend-subtitle">📨 LỜI BÁI SƯ ĐẾN</div><div class="friend-list">${mentorRequests.map(x=>`<article class="friend-card"><span class="friend-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank||'Đệ tử')} · Muốn bái sư</small></div><button class="btn small primary disciple-accept-mentor" data-id="${x.id}">Nhận đệ tử</button><button class="btn small ghost disciple-reject-mentor" data-id="${x.id}">Từ chối</button></article>`).join('')}</div>`:''}
   ${inviteRequests.length?`<div class="friend-subtitle">📨 LỜI MỜI NHẬP MÔN</div><div class="friend-list">${inviteRequests.map(x=>`<article class="friend-card"><span class="friend-avatar">👑</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank||'Luyện Hư')} · Mời bạn làm đệ tử</small></div><button class="btn small primary disciple-accept-invite" data-id="${x.id}">Nhập môn</button><button class="btn small ghost disciple-reject-invite" data-id="${x.id}">Từ chối</button></article>`).join('')}</div>`:''}
   ${baisRequests.length?`<div class="friend-subtitle">⌛ LỜI BÁI SƯ ĐÃ GỬI</div><div class="friend-list">${baisRequests.map(x=>`<article class="friend-card"><span class="friend-avatar">👑</span><div><b>${esc(x.display_name)}</b><small>Đang chờ sư phụ chấp thuận</small></div></article>`).join('')}</div>`:''}
@@ -175,6 +175,14 @@ async function loadDisciples(){
   document.querySelectorAll('.disciple-reject-mentor').forEach(b=>b.onclick=()=>{b.disabled=true;act('/api/disciples/respond',{requestId:Number(b.dataset.id),action:'reject'});});
   document.querySelectorAll('.disciple-accept-invite').forEach(b=>b.onclick=()=>{b.disabled=true;act('/api/disciples/invite/respond',{requestId:Number(b.dataset.id),action:'accept'});});
   document.querySelectorAll('.disciple-reject-invite').forEach(b=>b.onclick=()=>{b.disabled=true;act('/api/disciples/invite/respond',{requestId:Number(b.dataset.id),action:'reject'});});
+  document.querySelectorAll('.disciple-gift-btn').forEach(b=>b.onclick=async()=>{
+    const id=Number(b.dataset.disciple), select=document.querySelector(`.disciple-gift-select[data-disciple="${id}"]`), qtyEl=document.querySelector(`.disciple-gift-qty[data-disciple="${id}"]`);
+    const [giftType,itemId]=String(select?.value||'').split(':'); const quantity=Math.floor(Number(qtyEl?.value)||0);
+    if(!giftType||!Number.isInteger(quantity)||quantity<1){$('#disciplesMsg').textContent='❌ Số lượng tặng không hợp lệ.';return;}
+    b.disabled=true;
+    try{const x=await api('/api/disciples/gift',{method:'POST',headers:authHeaders(),body:JSON.stringify({discipleId:id,giftType,itemId:Number(itemId)||0,quantity})});$('#disciplesMsg').textContent='✅ '+x.message;await loadDisciples();await loadProfile();}
+    catch(e){$('#disciplesMsg').textContent='❌ '+e.message;b.disabled=false;}
+  });
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 

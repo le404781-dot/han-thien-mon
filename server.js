@@ -2015,7 +2015,7 @@ async function consumeDiscipleChallengePermission(client,challengerId,targetId,c
 app.get('/api/disciples',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id;
-    const [mentor,disciples,incoming,outgoing,permissions,users]=await Promise.all([
+    const [mentor,disciples,incoming,outgoing,permissions,users,giftArtifacts,giftBeasts,giftRoots]=await Promise.all([
       query(`SELECT md.mentor_id,u.display_name AS mentor_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title FROM mentor_disciples md JOIN users u ON u.id=md.mentor_id JOIN profiles p ON p.user_id=md.mentor_id WHERE md.disciple_id=$1`,[uid]),
       query(`SELECT md.disciple_id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title FROM mentor_disciples md JOIN users u ON u.id=md.disciple_id JOIN profiles p ON p.user_id=md.disciple_id WHERE md.mentor_id=$1 ORDER BY md.created_at`,[uid]),
       query(`SELECT dr.id,dr.disciple_id,dr.mentor_id,dr.request_type,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title
@@ -2025,12 +2025,15 @@ app.get('/api/disciples',auth,async(req,res)=>{
         FROM discipleship_requests dr JOIN users u ON u.id=dr.mentor_id JOIN profiles p ON p.user_id=u.id
         WHERE dr.disciple_id=$1 AND dr.status='pending' ORDER BY dr.created_at DESC`,[uid]),
       query(`SELECT cp.id,cp.disciple_id,cp.challenger_id,cp.mentor_id,cp.status,cp.created_at,du.display_name AS disciple_name,cu.display_name AS challenger_name FROM disciple_challenge_permissions cp JOIN users du ON du.id=cp.disciple_id JOIN users cu ON cu.id=cp.challenger_id WHERE cp.mentor_id=$1 AND cp.status='pending' ORDER BY cp.created_at DESC`,[uid]),
-      query(`SELECT u.id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY p.spirit_power DESC,u.id`,[uid])
+      query(`SELECT u.id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY p.spirit_power DESC,u.id`,[uid]),
+      query(`SELECT ti.id,ti.name,ti.category,i.quantity,'artifact'::text AS gift_type FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY ti.category,ti.name`,[uid]),
+      query(`SELECT o.beast_id AS id,c.name,c.rarity,c.beast_realm,c.beast_realm_tier,o.quantity,'beast'::text AS gift_type FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.name`,[uid]),
+      query(`SELECT o.root_id AS id,c.name,c.rarity,o.quantity,'root'::text AS gift_type FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.name`,[uid])
     ]);
-    const me=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[uid])).rows[0];
+    const me=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[uid])).rows[0];
     const st=stageFor(Number(me?.spirit_power)||0);
     const mentorCandidates=users.rows.map(x=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex}));
-    res.json({eligible:st.realmIndex>=5,stage:st,mentor:mentor.rows[0]||null,disciples:disciples.rows,incoming:incoming.rows,outgoing:outgoing.rows,permissions:permissions.rows,users:mentorCandidates});
+    res.json({eligible:st.realmIndex>=5,stage:st,mentor:mentor.rows[0]||null,disciples:disciples.rows,incoming:incoming.rows,outgoing:outgoing.rows,permissions:permissions.rows,users:mentorCandidates,giftInventory:{stones:Number(me?.spirit_stones||0),artifacts:giftArtifacts.rows,beasts:giftBeasts.rows,roots:giftRoots.rows}});
   }catch(e){console.error('disciples load:',e);res.status(500).json({error:'Không thể mở Sư Đồ.'});}
 });
 
@@ -2153,21 +2156,69 @@ app.post('/api/disciples/permission/respond',auth,async(req,res)=>{
 app.post('/api/disciples/gift',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
-    const uid=req.session.user_id,target=Number(req.body?.discipleId),itemId=Number(req.body?.itemId),qty=Math.floor(Number(req.body?.quantity)||0);
-    if(!Number.isInteger(target)||!Number.isInteger(itemId)||qty<1)return res.status(400).json({error:'Thông tin tặng vật phẩm không hợp lệ.'});
+    const uid=req.session.user_id;
+    const target=Number(req.body?.discipleId);
+    const giftType=String(req.body?.giftType||'').toLowerCase();
+    const itemId=Number(req.body?.itemId);
+    const qty=Math.floor(Number(req.body?.quantity)||0);
+    if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đệ tử không hợp lệ.'});
+    if(!['stones','artifact','beast','root'].includes(giftType))return res.status(400).json({error:'Loại vật phẩm tặng không hợp lệ.'});
+    if(!Number.isInteger(qty)||qty<1)return res.status(400).json({error:'Số lượng tặng phải lớn hơn 0.'});
+    if(giftType!=='stones' && (!Number.isInteger(itemId)||itemId<1))return res.status(400).json({error:'Vật phẩm tặng không hợp lệ.'});
+
     await client.query('BEGIN');
     const relation=(await client.query(`SELECT 1 FROM mentor_disciples WHERE mentor_id=$1 AND disciple_id=$2`,[uid,target])).rows[0];
     if(!relation){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ có thể tặng vật phẩm cho đệ tử trực thuộc.'});}
-    const sender=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,itemId])).rows[0];
-    if(!sender||Number(sender.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Sư phụ không đủ số lượng vật phẩm.'});}
-    const cap=(await client.query(`SELECT storage_capacity,COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned,COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used FROM profiles WHERE user_id=$1 FOR UPDATE`,[target,itemId])).rows[0];
-    if(!cap){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy đệ tử.'});}
-    if(Number(cap.used)>=Number(cap.storage_capacity)&&Number(cap.owned)<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới của đệ tử đã đầy.'});}
-    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,itemId,qty]);
-    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[target,itemId,qty]);
-    const item=(await client.query('SELECT name FROM treasure_items WHERE id=$1',[itemId])).rows[0];
-    await client.query('COMMIT');res.json({ok:true,message:`Đã ban tặng ${item?.name||'vật phẩm'} ×${qty} cho đệ tử.`});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('disciple gift:',e);res.status(500).json({error:'Không thể tặng vật phẩm.'});}finally{client.release();}
+
+    // Khóa hồ sơ hai bên để không thể tặng vượt số dư khi gửi nhiều lần cùng lúc.
+    const profiles=(await client.query(`SELECT user_id,spirit_stones,storage_capacity FROM profiles WHERE user_id IN ($1,$2) ORDER BY user_id FOR UPDATE`,[uid,target])).rows;
+    const sender=profiles.find(x=>Number(x.user_id)===uid), receiver=profiles.find(x=>Number(x.user_id)===target);
+    if(!sender||!receiver){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ sư phụ hoặc đệ tử.'});}
+
+    if(giftType==='stones'){
+      if(Number(sender.spirit_stones)<qty){await client.query('ROLLBACK');return res.status(400).json({error:`Sư phụ không đủ linh thạch. Hiện có ${Number(sender.spirit_stones).toLocaleString('vi-VN')}.`});}
+      await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,qty]);
+      await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[target,qty]);
+      await client.query('COMMIT');
+      return res.json({ok:true,giftType,quantity:qty,message:`Đã ban tặng 💎 ${qty.toLocaleString('vi-VN')} linh thạch cho đệ tử.`});
+    }
+
+    const used=Number((await client.query(`SELECT COUNT(*)::int AS c FROM inventory WHERE user_id=$1 AND quantity>0`,[target])).rows[0].c)||0;
+    const capacity=Math.max(1,Number(receiver.storage_capacity)||30);
+    if(giftType==='artifact'){
+      const senderItem=(await client.query(`SELECT i.quantity,ti.name FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 FOR UPDATE`,[uid,itemId])).rows[0];
+      if(!senderItem||Number(senderItem.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Sư phụ không đủ số lượng pháp khí/vật phẩm này.'});}
+      const targetItem=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[target,itemId])).rows[0];
+      if(!targetItem && used>=capacity){await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới của đệ tử đã đầy.'});}
+      await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,itemId,qty]);
+      await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[target,itemId,qty]);
+      await client.query('COMMIT');
+      return res.json({ok:true,giftType,quantity:qty,itemName:senderItem.name,message:`Đã ban tặng ${senderItem.name} ×${qty} cho đệ tử.`});
+    }
+
+    if(giftType==='beast'){
+      const senderItem=(await client.query(`SELECT o.quantity,c.name FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 FOR UPDATE`,[uid,itemId])).rows[0];
+      if(!senderItem||Number(senderItem.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Sư phụ không đủ số lượng linh thú này.'});}
+      const targetItem=(await client.query(`SELECT quantity FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2 FOR UPDATE`,[target,itemId])).rows[0];
+      const usedAll=Number((await client.query(`SELECT (SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0)+(SELECT COUNT(*) FROM owned_spirit_beasts WHERE user_id=$1 AND quantity>0)+(SELECT COUNT(*) FROM owned_spirit_roots WHERE user_id=$1 AND quantity>0) AS c`,[target])).rows[0].c)||0;
+      if(!targetItem && usedAll>=capacity){await client.query('ROLLBACK');return res.status(400).json({error:'Kho vật phẩm của đệ tử đã đầy.'});}
+      await client.query(`UPDATE owned_spirit_beasts SET quantity=quantity-$3 WHERE user_id=$1 AND beast_id=$2`,[uid,itemId,qty]);
+      await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity) VALUES($1,$2,$3) ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+EXCLUDED.quantity`,[target,itemId,qty]);
+      await client.query('COMMIT');
+      return res.json({ok:true,giftType,quantity:qty,itemName:senderItem.name,message:`Đã ban tặng 🐉 ${senderItem.name} ×${qty} cho đệ tử.`});
+    }
+
+    const senderItem=(await client.query(`SELECT o.quantity,c.name FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.root_id=$2 FOR UPDATE`,[uid,itemId])).rows[0];
+    if(!senderItem||Number(senderItem.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Sư phụ không đủ số lượng linh căn này.'});}
+    const targetItem=(await client.query(`SELECT quantity FROM owned_spirit_roots WHERE user_id=$1 AND root_id=$2 FOR UPDATE`,[target,itemId])).rows[0];
+    const usedAll=Number((await client.query(`SELECT (SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0)+(SELECT COUNT(*) FROM owned_spirit_beasts WHERE user_id=$1 AND quantity>0)+(SELECT COUNT(*) FROM owned_spirit_roots WHERE user_id=$1 AND quantity>0) AS c`,[target])).rows[0].c)||0;
+    if(!targetItem && usedAll>=capacity){await client.query('ROLLBACK');return res.status(400).json({error:'Kho vật phẩm của đệ tử đã đầy.'});}
+    await client.query(`UPDATE owned_spirit_roots SET quantity=quantity-$3 WHERE user_id=$1 AND root_id=$2`,[uid,itemId,qty]);
+    await client.query(`INSERT INTO owned_spirit_roots(user_id,root_id,quantity) VALUES($1,$2,$3) ON CONFLICT(user_id,root_id) DO UPDATE SET quantity=owned_spirit_roots.quantity+EXCLUDED.quantity`,[target,itemId,qty]);
+    await client.query('COMMIT');
+    res.json({ok:true,giftType,quantity:qty,itemName:senderItem.name,message:`Đã ban tặng 🌿 ${senderItem.name} ×${qty} cho đệ tử.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('disciple gift:',e);res.status(500).json({error:'Không thể tặng vật phẩm.'});}
+  finally{client.release();}
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
