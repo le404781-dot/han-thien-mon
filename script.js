@@ -401,7 +401,8 @@ async function loadCodex(){
 }
 
 async function loadProfessions(){
- const area=$('#professionsArea'); if(!area||!getToken())return;
+ const area=$('#professionsArea'); if(!area)return;
+ if(!getToken()){area.innerHTML=`<div class="empty-state compact"><h3>🛠 Nghiệp Vụ đang phong ấn</h3><p>Đăng nhập để tiếp nhận nghề và nhận thù lao linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;return;}
  try{
   const d=await api('/api/professions',{headers:authHeaders()});
   area.innerHTML=`<div class="profession-summary"><div><span class="eyebrow">🛠 CẢNH GIỚI NGHIỆP VỤ</span><h3>${esc(d.stage)}</h3><small>Đang dùng ${Number(d.used)}/${Number(d.slots)} ô nghề. Cứ <b>2 cảnh giới</b> tăng thêm 1 nghề phụ.</small></div><b>💎 ${Number(d.spiritStones||0).toLocaleString('vi-VN')} linh thạch</b></div><div class="profession-grid">${(d.rows||[]).map(x=>`<article class="profession-card ${x.learned?'learned':''}"><div class="profession-icon">${esc(x.icon)}</div><div class="profession-copy"><span class="eyebrow">${x.learned?(x.primary?'NGHỀ CHÍNH':'NGHỀ PHỤ'):'CHƯA TIẾP NHẬN'}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>💎 Thù lao: <b>${Number(x.reward).toLocaleString('vi-VN')}</b> linh thạch</small>${x.learned&&x.lastClaimAt?`<small>Đã nhận gần nhất: ${new Date(x.lastClaimAt).toLocaleDateString('vi-VN')}</small>`:''}</div><div class="profession-actions">${x.learned?`<button class="btn small primary profession-claim" data-code="${esc(x.code)}">💎 Nhận thù lao</button>`:`<button class="btn small primary profession-learn" data-code="${esc(x.code)}" ${Number(d.used)>=Number(d.slots)?'disabled':''}>${Number(d.used)>=Number(d.slots)?'🔒 Hết ô nghề':'🛠 Tiếp nhận nghề'}</button>`}</div></article>`).join('')}</div><div class="profession-note">Nghề đầu tiên là nghề chính. Mỗi 2 cảnh giới mở thêm 1 ô nghề phụ. Mỗi nghề được nhận thù lao tối đa 1 lần/ngày.</div><p id="professionMsg" class="train-msg"></p>`;

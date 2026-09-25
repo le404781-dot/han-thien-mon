@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.15 — HIỂN THỊ NGHIỆP VỤ
+
+- Bổ sung mục "🛠 Nghiệp Vụ" trực tiếp vào menu điều hướng.
+- Bổ sung nút "🛠 Mở Nghiệp Vụ" ngay tại trang Sơn Môn.
+- Đổi nút cũ "Xem ký ức" thành "Xem Truyền Kỳ".
+- loadProfessions() luôn render trạng thái phong ấn nếu chưa đăng nhập thay vì bỏ qua khu vực.
+- Giữ nguyên API /api/professions, /api/professions/learn và /api/professions/claim.
+- Không thay đổi dữ liệu PostgreSQL hiện có.
