@@ -1,0 +1,24 @@
+HÀN THIÊN MÔN v3.6.8 — BÍ CẢNH
+
+1. Thêm mục Cửu Đại Bí Cảnh, mỗi Bí Cảnh đối ứng một cảnh giới:
+   Luyện Khí, Trúc Cơ, Kim Đan, Nguyên Anh, Hóa Thần, Luyện Hư, Hợp Thể, Đại Thừa, Độ Kiếp.
+2. Bí Cảnh mở tự do để mọi môn nhân đủ cảnh giới tham gia đóng góp.
+3. Mỗi lần khởi động cần đủ linh thạch tương ứng. Nhiều thành viên có thể đóng góp đồng thời; giao dịch PostgreSQL dùng FOR UPDATE + transaction để tránh mất linh thạch.
+4. Đủ chi phí sẽ mở Bí Cảnh trong 60 phút.
+5. Cảnh giới thấp hơn yêu cầu không thể đóng góp/tham gia.
+6. Người có cảnh giới cao hơn Bí Cảnh từ 2 cảnh giới trở lên có nguy cơ phá vỡ linh áp. Nếu xảy ra, Bí Cảnh tạm hoãn 20–90 phút tùy chênh lệch.
+7. Tỷ lệ nguy hiểm và debuff tăng theo cấp Bí Cảnh.
+8. Thành công có thể nhận: linh lực bạo tăng, linh thạch, Linh Thú, Linh Căn, Pháp Khí/Đan dược/vật phẩm. Bí Cảnh càng cao thì bảng loot ưu tiên vật phẩm có cảnh giới yêu cầu cao hơn.
+9. Thất bại gây mất một phần linh lực, giảm một phần kinh nghiệm và nhận debuff Bí Cảnh theo thời gian.
+10. Debuff Bí Cảnh được tính vào chiến lực và ảnh hưởng hệ thống Khiêu Chiến trong thời gian hiệu lực.
+11. Giao diện dùng ảnh Bí Cảnh bicanh.png làm nền, tối ưu cho mobile.
+12. Không xóa Tu Di Giới, Tàng Bảo Các, Phường Thị, Bằng Hữu, Khiêu Chiến, Thú Đường, Linh Pháp hoặc Trang Bị.
+
+Database tự tạo:
+- secret_realms
+- secret_realm_contributions
+- secret_realm_runs
+- profiles.secret_realm_debuff_until
+- profiles.secret_realm_debuff_percent
+
+Không cần xóa PostgreSQL hiện tại. Chỉ cần deploy bản mới để migration tự chạy.

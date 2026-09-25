@@ -308,6 +308,49 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_percent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
 
+    CREATE TABLE IF NOT EXISTS secret_realms (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL,
+      required_realm_index INTEGER NOT NULL UNIQUE,
+      required_realm_name TEXT NOT NULL,
+      activation_cost INTEGER NOT NULL CHECK(activation_cost > 0),
+      funded_stones INTEGER NOT NULL DEFAULT 0 CHECK(funded_stones >= 0),
+      status TEXT NOT NULL DEFAULT 'funding' CHECK(status IN ('funding','active','paused')),
+      active_until TIMESTAMPTZ,
+      paused_until TIMESTAMPTZ,
+      danger_percent INTEGER NOT NULL DEFAULT 10,
+      debuff_percent INTEGER NOT NULL DEFAULT 5,
+      loot_tier INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS secret_realm_contributions (
+      id BIGSERIAL PRIMARY KEY,
+      realm_id INTEGER NOT NULL REFERENCES secret_realms(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount INTEGER NOT NULL CHECK(amount > 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_secret_realm_contrib_realm ON secret_realm_contributions(realm_id,created_at DESC);
+    CREATE TABLE IF NOT EXISTS secret_realm_runs (
+      id BIGSERIAL PRIMARY KEY,
+      realm_id INTEGER NOT NULL REFERENCES secret_realms(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      outcome TEXT NOT NULL CHECK(outcome IN ('success','failure','broken')),
+      reward_type TEXT NOT NULL DEFAULT '',
+      reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL,
+      reward_quantity INTEGER NOT NULL DEFAULT 0,
+      reward_stones INTEGER NOT NULL DEFAULT 0,
+      spirit_gain INTEGER NOT NULL DEFAULT 0,
+      debuff_percent INTEGER NOT NULL DEFAULT 0,
+      debuff_until TIMESTAMPTZ,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_secret_realm_runs_realm ON secret_realm_runs(realm_id,created_at DESC);
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
+
     CREATE TABLE IF NOT EXISTS sect_quests (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -410,6 +453,21 @@ async function initDb() {
     ['Cửu Thiên Long Tước','Linh thú','Linh thú hiếm cấp cao, mang huyết mạch long tước.',5000,0,5]
   ];
   for (const item of beastItems) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO NOTHING',item);
+
+  const secretRealmSeeds = [
+    ['Thanh Vân Bí Cảnh','Bí cảnh sơ cấp, thích hợp Luyện Khí và Trúc Cơ; nguy hiểm thấp.',0,'Luyện Khí',500,8,5,0],
+    ['Hàn Nguyệt Bí Cảnh','Hàn khí dày đặc, thử thách Trúc Cơ.',1,'Trúc Cơ',1200,14,8,1],
+    ['Kim Đan Cổ Cảnh','Cổ địa ngưng tụ đan khí, chỉ người từ Kim Đan mới nên bước vào.',2,'Kim Đan',2500,22,12,2],
+    ['Nguyên Anh Thiên Uyên','Thiên uyên biến ảo, phần thưởng bắt đầu xuất hiện bảo vật hiếm.',3,'Nguyên Anh',5000,30,16,3],
+    ['Hóa Thần Tiên Khư','Tiên khư đổ nát, linh áp mạnh và nguy cơ debuff cao.',4,'Hóa Thần',9000,40,22,4],
+    ['Luyện Hư Hư Không','Không gian vặn xoắn, vật phẩm trung-cao cấp có tỷ lệ rơi cao.',5,'Luyện Hư',16000,50,30,5],
+    ['Hợp Thể Long Mạch','Long mạch cổ xưa, nguy hiểm lớn nhưng cơ duyên cực mạnh.',6,'Hợp Thể',28000,60,38,6],
+    ['Đại Thừa Thần Điện','Thần điện thượng cổ, chỉ đại năng mới chịu được linh áp.',7,'Đại Thừa',45000,72,48,7],
+    ['Độ Kiếp Thiên Môn','Thiên môn cuối cùng, nguy hiểm cực cao và phần thưởng tối thượng.',8,'Độ Kiếp',80000,85,60,8]
+  ];
+  for (const [name,description,requiredIndex,requiredName,cost,danger,debuff,lootTier] of secretRealmSeeds) {
+    await query(`INSERT INTO secret_realms(name,description,required_realm_index,required_realm_name,activation_cost,danger_percent,debuff_percent,loot_tier) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(name) DO UPDATE SET description=EXCLUDED.description,required_realm_index=EXCLUDED.required_realm_index,required_realm_name=EXCLUDED.required_realm_name,activation_cost=EXCLUDED.activation_cost,danger_percent=EXCLUDED.danger_percent,debuff_percent=EXCLUDED.debuff_percent,loot_tier=EXCLUDED.loot_tier`,[name,description,requiredIndex,requiredName,cost,danger,debuff,lootTier]);
+  }
 
   const rootCatalog = [
     ['Kim Linh Căn','Phàm','Căn cơ kim hệ, thiên về công kích và luyện khí.','+2% hiệu quả tu luyện',250,0],
@@ -704,7 +762,9 @@ app.get('/api/profile',auth,async(req,res)=>{
       WHERE p.user_id=$1`,[p.id])).rows[0]||{};
     const baseAttr=attributesFor(p.spirit_power);
     const equipmentPower=(Number(eq.beast_power)||0)+(Number(eq.root_power)||0)+(Number(eq.artifact_power)||0);
-    const combatPower=Object.values(baseAttr).reduce((n,v)=>n+(Number(v)||0),0)+equipmentPower;
+    const secretDebuffActive=p.secret_realm_debuff_until && new Date(p.secret_realm_debuff_until)>new Date();
+    const secretDebuffPct=secretDebuffActive?Math.max(0,Number(p.secret_realm_debuff_percent)||0):0;
+    const combatPower=Math.max(1,Math.round((Object.values(baseAttr).reduce((n,v)=>n+(Number(v)||0),0)+equipmentPower)*(1-secretDebuffPct/100)));
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
     await touchDailyActivity(p.id);
@@ -713,7 +773,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const maxDaily=Math.max(2,10-stage.realmIndex);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower},equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
+    res.json({profile:{...p,secretRealmDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower},equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
   } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
 });
 
@@ -1342,6 +1402,148 @@ app.post('/api/enhance/roll',auth,async(req,res)=>{
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('enhance roll:',e);res.status(500).json({error:'Không thể quay vật phẩm tăng cường.'});}finally{client.release();}
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BÍ CẢNH · Cửu đại bí cảnh, đồng góp linh thạch + tham gia cơ duyên
+// ─────────────────────────────────────────────────────────────────────────────
+async function syncSecretRealm(realmId){
+  const r=(await query(`SELECT * FROM secret_realms WHERE id=$1`,[realmId])).rows[0];
+  if(!r) return null;
+  const now=Date.now();
+  if(r.status==='active' && r.active_until && new Date(r.active_until).getTime()<=now){
+    await query(`UPDATE secret_realms SET status='funding',funded_stones=0,active_until=NULL WHERE id=$1`,[realmId]);
+    return (await query(`SELECT * FROM secret_realms WHERE id=$1`,[realmId])).rows[0];
+  }
+  if(r.status==='paused' && r.paused_until && new Date(r.paused_until).getTime()<=now){
+    await query(`UPDATE secret_realms SET status='funding',funded_stones=0,paused_until=NULL WHERE id=$1`,[realmId]);
+    return (await query(`SELECT * FROM secret_realms WHERE id=$1`,[realmId])).rows[0];
+  }
+  return r;
+}
+
+async function secretRealmLoot(client,userId,realm){
+  const tier=Number(realm.loot_tier)||0;
+  const roll=crypto.randomInt(1,101);
+  if(roll<=18){
+    const stones=Math.max(30,Math.floor((tier+1)*crypto.randomInt(40,91)));
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[userId,stones]);
+    return {type:'stones',stones,quantity:0};
+  }
+  if(roll<=42){
+    const root=(await client.query(`SELECT id,name,rarity,description,support,power_bonus,ability FROM spirit_roots_catalog WHERE min_realm <= $1 ORDER BY (min_realm + power_bonus/100.0) DESC, RANDOM() LIMIT 1`,[tier])).rows[0];
+    if(root){
+      await client.query(`INSERT INTO owned_spirit_roots(user_id,root_id,quantity) VALUES($1,$2,1) ON CONFLICT(user_id,root_id) DO UPDATE SET quantity=owned_spirit_roots.quantity+1`,[userId,root.id]);
+      return {type:'root',item:root,quantity:1};
+    }
+  }
+  if(roll<=66){
+    const beast=(await client.query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,attack,defense,speed,spirit,skill,power_bonus,ability FROM spirit_beasts_catalog WHERE min_realm <= $1 ORDER BY (min_realm + beast_realm_tier) DESC, RANDOM() LIMIT 1`,[tier])).rows[0];
+    if(beast){
+      await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity) VALUES($1,$2,1) ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1`,[userId,beast.id]);
+      return {type:'beast',item:beast,quantity:1};
+    }
+  }
+  const item=(await client.query(`SELECT id,name,category,description,price,spirit_gain,min_realm,power_bonus,ability FROM treasure_items WHERE min_realm <= $1 ORDER BY (min_realm + power_bonus/100.0) DESC, RANDOM() LIMIT 1`,[tier])).rows[0];
+  if(item){
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[userId,item.id]);
+    return {type:'item',item,quantity:1};
+  }
+  return {type:'stones',stones:50,quantity:0};
+}
+
+app.get('/api/bicanh',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id;
+    const me=(await query(`SELECT spirit_power,spirit_stones,secret_realm_debuff_until,secret_realm_debuff_percent FROM profiles WHERE user_id=$1`,[uid])).rows[0];
+    const stage=stageFor(Number(me?.spirit_power)||0);
+    const raw=(await query(`SELECT sr.*,COALESCE((SELECT SUM(src.amount) FROM secret_realm_contributions src WHERE src.realm_id=sr.id),0)::int AS contributed_total FROM secret_realms sr ORDER BY sr.required_realm_index`)).rows;
+    const realms=[];
+    for(const r of raw){const x=await syncSecretRealm(r.id); realms.push({...x,contributed_total:Number(x.funded_stones)||0,canEnter:stage.realmIndex>=Number(x.required_realm_index),realm:stageFor(RANKS[Number(x.required_realm_index)]?.min||0).realm});}
+    res.json({realms,me:{...me,stage:stage.stage,realmIndex:stage.realmIndex}});
+  }catch(e){console.error('bicanh load:',e);res.status(500).json({error:'Không thể mở Bí Cảnh.'});}
+});
+
+app.post('/api/bicanh/contribute',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id, realmId=Number(req.body?.realmId), amount=Math.floor(Number(req.body?.amount));
+    if(!Number.isInteger(realmId)||realmId<1||!Number.isInteger(amount)||amount<1)return res.status(400).json({error:'Số linh thạch đóng góp không hợp lệ.'});
+    await client.query('BEGIN');
+    const realm=(await client.query(`SELECT * FROM secret_realms WHERE id=$1 FOR UPDATE`,[realmId])).rows[0];
+    const p=(await client.query(`SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    if(!realm||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Bí Cảnh hoặc hồ sơ.'});}
+    if(realm.status!=='funding'){await client.query('ROLLBACK');return res.status(409).json({error:realm.status==='active'?'Bí Cảnh đã khởi động.':'Bí Cảnh đang tạm hoãn.'});}
+    const st=stageFor(Number(p.spirit_power)||0);
+    if(st.realmIndex<Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần ${realm.required_realm_name} trở lên để đóng góp vào Bí Cảnh này.`});}
+    if(Number(p.spirit_stones)<amount){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ linh thạch.'});}
+    const remaining=Math.max(0,Number(realm.activation_cost)-Number(realm.funded_stones));
+    const pay=Math.min(amount,remaining);
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,pay]);
+    await client.query(`INSERT INTO secret_realm_contributions(realm_id,user_id,amount) VALUES($1,$2,$3)`,[realmId,pay]);
+    const funded=Number(realm.funded_stones)+pay;
+    if(funded>=Number(realm.activation_cost)){
+      await client.query(`UPDATE secret_realms SET funded_stones=0,status='active',active_until=NOW()+INTERVAL '60 minutes' WHERE id=$1`,[realmId]);
+      await client.query('COMMIT');
+      return res.json({ok:true,activated:true,paid:pay,message:`${realm.name} đã được khởi động! Mở cửa trong 60 phút.`});
+    }
+    await client.query(`UPDATE secret_realms SET funded_stones=$2 WHERE id=$1`,[realmId,funded]);
+    await client.query('COMMIT');
+    res.json({ok:true,activated:false,paid:pay,funded,remaining:Number(realm.activation_cost)-funded,message:`Đã đóng ${pay} linh thạch. Còn ${Number(realm.activation_cost)-funded} linh thạch để khởi động.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh contribute:',e);res.status(500).json({error:'Đóng góp Bí Cảnh thất bại. Linh thạch đã được bảo toàn.'});}finally{client.release();}
+});
+
+app.post('/api/bicanh/enter',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id, realmId=Number(req.body?.realmId);
+    if(!Number.isInteger(realmId)||realmId<1)return res.status(400).json({error:'Bí Cảnh không hợp lệ.'});
+    await client.query('BEGIN');
+    const realm=(await client.query(`SELECT * FROM secret_realms WHERE id=$1 FOR UPDATE`,[realmId])).rows[0];
+    const p=(await client.query(`SELECT p.*,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    if(!realm||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Bí Cảnh hoặc hồ sơ.'});}
+    if(realm.status!=='active'||!realm.active_until||new Date(realm.active_until)<=new Date()){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh chưa được khởi động hoặc đã đóng.'});}
+    const st=stageFor(Number(p.spirit_power)||0);
+    if(st.realmIndex<Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần ${realm.required_realm_name} trở lên mới có thể bước vào.`});}
+    const gap=st.realmIndex-Number(realm.required_realm_index);
+    const breakChance=Math.min(65,Math.max(0,gap*12-4));
+    if(gap>=2 && crypto.randomInt(1,101)<=breakChance){
+      const pauseMinutes=Math.min(90,20+gap*10);
+      await client.query(`UPDATE secret_realms SET status='paused',paused_until=NOW()+($2||' minutes')::interval,active_until=NULL,funded_stones=0 WHERE id=$1`,[realmId,String(pauseMinutes)]);
+      await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,reward_type,note) VALUES($1,$2,'broken','','Cảnh giới cao phá vỡ linh áp, Bí Cảnh tạm hoãn ${pauseMinutes} phút.')`,[realmId,uid]);
+      await client.query('COMMIT');
+      return res.json({ok:true,outcome:'broken',message:`Thiên uy của ${st.stage} áp đảo ${realm.name}, Bí Cảnh bị phá vỡ và tạm hoãn ${pauseMinutes} phút.`});
+    }
+    const successChance=Math.max(18,100-Number(realm.danger_percent));
+    const success=crypto.randomInt(1,101)<=successChance;
+    if(success){
+      const spiritGain=Math.max(80,Math.floor((Number(p.spirit_power)||0)*(0.08+Number(realm.loot_tier)*0.015)));
+      const loot=await secretRealmLoot(client,uid,realm);
+      const newSpirit=(Number(p.spirit_power)||0)+spiritGain;
+      const ns=stageFor(newSpirit);
+      await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,secret_realm_debuff_until=NULL,secret_realm_debuff_percent=0,updated_at=NOW() WHERE user_id=$1`,[uid,newSpirit,spiritGain,ns.realm,ns.tier]);
+      const itemId=loot.item?.id||null;
+      await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,reward_type,reward_item_id,reward_quantity,reward_stones,spirit_gain,note) VALUES($1,$2,'success',$3,$4,$5,$6,$7,$8)`,[realmId,uid,loot.type,itemId,loot.quantity||0,loot.stones||0,spiritGain,`Thành công tại ${realm.name}.`]);
+      await client.query('COMMIT');
+      const rewardText=loot.type==='stones'?`+${loot.stones} linh thạch`:loot.type==='root'?`Linh Căn ${loot.item.name}`:loot.type==='beast'?`Linh Thú ${loot.item.name}`:`${loot.item?.name||'Vật phẩm'} ×1`;
+      return res.json({ok:true,outcome:'success',successChance,spiritGain,newSpirit,stage:ns.stage,reward:loot,message:`Bí Cảnh thành công! +${spiritGain} linh lực, nhận ${rewardText}.`});
+    }
+    const debuff=Number(realm.debuff_percent)||5;
+    const duration=Math.min(180,20+Number(realm.loot_tier)*15);
+    const loss=Math.max(10,Math.floor((Number(p.spirit_power)||0)*(0.03+Number(realm.loot_tier)*0.01)));
+    const newSpirit=Math.max(0,(Number(p.spirit_power)||0)-loss);
+    const ns=stageFor(newSpirit);
+    await client.query(`UPDATE profiles SET spirit_power=$2,experience=GREATEST(0,experience-$3),rank=$4,realm_tier=$5,secret_realm_debuff_until=NOW()+($6||' minutes')::interval,secret_realm_debuff_percent=$7,updated_at=NOW() WHERE user_id=$1`,[uid,newSpirit,Math.floor(loss/2),ns.realm,ns.tier,String(duration),debuff]);
+    const note=`Bí Cảnh thất bại: mất ${loss} linh lực, debuff -${debuff}% trong ${duration} phút.`;
+    await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,debuff_percent,debuff_until,note) VALUES($1,$2,'failure',$3,NOW()+($4||' minutes')::interval,$5)`,[realmId,uid,debuff,String(duration),note]);
+    await client.query('COMMIT');
+    res.json({ok:true,outcome:'failure',successChance,lossSpirit:loss,newSpirit,stage:ns.stage,debuffPercent:debuff,debuffMinutes:duration,message:note});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh enter:',e);res.status(500).json({error:'Tham gia Bí Cảnh thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}
+});
+
+app.get('/api/bicanh/history',auth,async(req,res)=>{
+  try{const r=await query(`SELECT r.id,r.outcome,r.reward_type,r.reward_quantity,r.reward_stones,r.spirit_gain,r.debuff_percent,r.note,r.created_at,sr.name AS realm_name,ti.name AS reward_item_name FROM secret_realm_runs r JOIN secret_realms sr ON sr.id=r.realm_id LEFT JOIN treasure_items ti ON ti.id=r.reward_item_id WHERE r.user_id=$1 ORDER BY r.id DESC LIMIT 30`,[req.session.user_id]);res.json({rows:r.rows});}
+  catch(e){res.status(500).json({error:'Không thể tải lịch sử Bí Cảnh.'});}
+});
+
 app.get('/api/leaderboard',async(req,res)=>{
   try {
     const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,
@@ -1387,8 +1589,11 @@ function challengePower(row){
   const spirit=Math.max(0,Number(row.spirit_power)||0);
   const st=stageFor(spirit);
   const beast=(Number(row.beast_attack)||0)+(Number(row.beast_defense)||0)+(Number(row.beast_speed)||0)+(Number(row.beast_spirit)||0);
-  const debuffActive=row.challenge_debuff_until && new Date(row.challenge_debuff_until)>new Date();
-  const debuffPct=debuffActive?Math.max(0,Number(row.challenge_debuff_percent)||0):0;
+  const challengeDebuffActive=row.challenge_debuff_until && new Date(row.challenge_debuff_until)>new Date();
+  const secretDebuffActive=row.secret_realm_debuff_until && new Date(row.secret_realm_debuff_until)>new Date();
+  const challengeDebuff=challengeDebuffActive?Math.max(0,Number(row.challenge_debuff_percent)||0):0;
+  const secretDebuff=secretDebuffActive?Math.max(0,Number(row.secret_realm_debuff_percent)||0):0;
+  const debuffPct=Math.min(90,challengeDebuff+secretDebuff);
   const equipment=Number(row.equipment_power)||0;
   const base=spirit*1.15+st.realmIndex*850+st.tier*120+beast*2+equipment;
   return Math.max(1,base*(1-debuffPct/100));
