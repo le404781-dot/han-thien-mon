@@ -1,0 +1,10 @@
+HÀN THIÊN MÔN — v3.2
+
+CẬP NHẬT:
+1. LINH CĂN BẢNG: chỉ xếp hạng những linh căn thực tế đang được thành viên/tài khoản trong tông môn sở hữu; hiển thị thứ hạng, độ hiếm, số người sở hữu, danh sách đạo hữu và mô tả phụ trợ.
+2. LINH THÚ BẢNG: chỉ xếp hạng những linh thú thực tế đang được thành viên/tài khoản sở hữu; hiển thị thứ hạng, độ hiếm, số người sở hữu, danh sách đạo hữu và thuộc tính/mô tả phụ trợ.
+3. NHIỆM VỤ ĐƯỜNG: tạo một chu kỳ nhiệm vụ mới mỗi 5 phút. Mỗi chu kỳ có 4 nhiệm vụ mới; tiến độ của từng đệ tử được tính từ thời điểm nhận chu kỳ, tránh lấy lại tiến độ của chu kỳ trước. Phần thưởng vẫn là vật phẩm và tự vào Tu Di Giới.
+4. QUAY VẬT PHẨM TĂNG CƯỜNG: thêm chức năng quay bằng 300 linh lực/lượt. Có 4 cấp vật phẩm với tỷ lệ khác nhau; vật phẩm nhận được tự động vào Tu Di Giới. Nếu kho đầy hoặc không đủ linh lực thì không trừ linh lực.
+5. GIỮ NGUYÊN DATABASE_URL VÀ POSTGRESQL HIỆN TẠI. Code tự tạo bảng/column bổ sung khi khởi động.
+
+Triển khai: cập nhật toàn bộ file lên GitHub, sau đó Render → Manual Deploy → Deploy latest commit.

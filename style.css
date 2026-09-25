@@ -53,3 +53,5 @@
 .codex-card h3{margin:.25rem 0 .45rem}
 .codex-card p{margin:.25rem 0 .65rem;line-height:1.55}
 .codex-card small{opacity:.8}
+
+.enhance-panel{margin:16px 0;padding:18px;border:1px solid rgba(120,95,55,.25);border-radius:16px;background:rgba(255,250,238,.72);display:flex;align-items:center;gap:18px;flex-wrap:wrap}.enhance-panel>div:first-child{flex:1;min-width:230px}.ranked-codex{position:relative;padding-left:52px}.codex-rank{position:absolute;left:16px;top:18px;font:800 1rem 'Noto Serif SC';color:var(--jade)}.owners{display:block;margin-top:7px;opacity:.78;line-height:1.45}.quest-card small{line-height:1.5}

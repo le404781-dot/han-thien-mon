@@ -1,0 +1,10 @@
+v3.3
+
+Đã kiểm tra và sửa Tàng Bảo Các.
+- Mua vật phẩm bằng LINH LỰC.
+- Giao dịch PostgreSQL theo transaction, khóa hồ sơ trước khi trừ linh lực.
+- Tu Di Giới tính theo SỐ Ô vật phẩm (COUNT item slots), không tính tổng số lượng.
+- Có thể mua thêm vật phẩm đã sở hữu dù các ô khác đã đầy.
+- Nếu đầy và vật phẩm chưa có trong kho: giao dịch bị từ chối trước khi trừ linh lực.
+- Nếu không đủ linh lực/cảnh giới không đủ: không bị trừ linh lực.
+- Vật phẩm mua thành công được cộng vào inventory.

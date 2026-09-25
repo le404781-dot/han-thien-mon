@@ -187,6 +187,14 @@ async function initDb() {
       claim_date DATE NOT NULL,
       UNIQUE(user_id, quest_id, claim_date)
     );
+    CREATE TABLE IF NOT EXISTS user_quest_progress (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      quest_id INTEGER NOT NULL REFERENCES sect_quests(id) ON DELETE CASCADE,
+      baseline_train INTEGER NOT NULL DEFAULT 0,
+      baseline_buy INTEGER NOT NULL DEFAULT 0,
+      baseline_stone_claim INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(user_id, quest_id)
+    );
     CREATE TABLE IF NOT EXISTS daily_activity (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       activity_date DATE NOT NULL,
@@ -197,6 +205,8 @@ async function initDb() {
   `);
 
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL`);
+  await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS cycle_key TEXT`);
+  await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS display_name TEXT`);
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_quantity INTEGER NOT NULL DEFAULT 0`);
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_stones INTEGER NOT NULL DEFAULT 0`);
 
@@ -235,16 +245,24 @@ async function initDb() {
     ];
     for (const item of items) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6)',item);
   }
+  const enhanceItems = [
+    ['Linh Phù Cường Hóa','Vật phẩm tăng cường','Linh phù dùng để cường hóa pháp bảo, tăng 3% hiệu quả trong lần cường hóa tiếp theo.',0,0,0],
+    ['Tinh Thạch Cường Hóa','Vật phẩm tăng cường','Tinh thạch hiếm, tăng 8% hiệu quả cường hóa pháp bảo.',0,0,2],
+    ['Huyền Thiết Cường Hóa','Vật phẩm tăng cường','Huyền thiết tôi luyện từ địa hỏa, tăng 15% hiệu quả cường hóa.',0,0,4],
+    ['Thiên Đạo Cường Hóa Thạch','Vật phẩm tăng cường','Cường hóa thạch cực hiếm, tăng 30% hiệu quả cường hóa.',0,0,7]
+  ];
+  for (const item of enhanceItems) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO NOTHING',item);
   const qCount = await query('SELECT COUNT(*)::int AS c FROM sect_quests');
   if (!qCount.rows[0].c) {
     const quests = [
-      ['Vận công nhập môn','Vận công 1 lần trong ngày.','train',1,40],
-      ['Tu luyện tinh tiến','Vận công 3 lần trong ngày.','train',3,100],
-      ['Thám bảo sơn môn','Mua 1 vật phẩm tại Tàng Bảo Các.','buy',1,60],
-      ['Kho báu Hàn Thiên','Mua 3 vật phẩm tại Tàng Bảo Các.','buy',3,180],
-      ['Nhận lộc thiên đạo','Nhận linh thạch hằng ngày.','stone_claim',1,50]
+      ['Vận công nhập môn','Vận công 1 lần.','train',1,0],
+      ['Tu luyện tinh tiến','Vận công 2 lần.','train',2,0],
+      ['Thám bảo sơn môn','Mua 1 vật phẩm tại Tàng Bảo Các.','buy',1,0],
+      ['Kho báu Hàn Thiên','Mua 2 vật phẩm tại Tàng Bảo Các.','buy',2,0],
+      ['Dâng vật vào môn','Mua 3 vật phẩm tại Tàng Bảo Các.','buy',3,0],
+      ['Thiên đạo thử luyện','Nhận linh thạch hằng ngày.','stone_claim',1,0]
     ];
-    for (const q of quests) await query('INSERT INTO sect_quests(name,description,requirement_type,requirement_value,reward_stones,reward_item_id,reward_quantity) VALUES($1,$2,$3,$4,$5,NULL,0) ON CONFLICT(name) DO NOTHING',q);
+    for (const q of quests) await query('INSERT INTO sect_quests(name,description,requirement_type,requirement_value,reward_stones) VALUES($1,$2,$3,$4,$5) ON CONFLICT(name) DO NOTHING',q);
   }
   // Nhiệm Vụ Đường dùng vật phẩm làm phần thưởng; giữ reward_stones cũ để tương thích dữ liệu.
   const rewardMap = [
@@ -257,6 +275,38 @@ async function initDb() {
   for (const [qname,itemName,qty] of rewardMap) {
     await query(`UPDATE sect_quests SET reward_item_id=(SELECT id FROM treasure_items WHERE name=$2), reward_quantity=$3, reward_stones=0 WHERE name=$1`,[qname,itemName,qty]);
   }
+}
+
+async function ensureQuestCycle() {
+  const cycle=Math.floor(Date.now()/300000); // 5 phút / chu kỳ
+  const cycleKey=String(cycle);
+  const exists=await query('SELECT COUNT(*)::int AS c FROM sect_quests WHERE cycle_key=$1',[cycleKey]);
+  if(Number(exists.rows[0].c)>=4) return cycleKey;
+  const pool=[
+    ['Vận công nhập môn','Vận công 1 lần trong chu kỳ.','train',1,'Tụ Linh Đan',1],
+    ['Tu luyện tinh tiến','Vận công 2 lần trong chu kỳ.','train',2,'Hàn Tuyết Đan',1],
+    ['Thám bảo sơn môn','Mua 1 vật phẩm tại Tàng Bảo Các.','buy',1,'Tụ Linh Đan',1],
+    ['Kho báu Hàn Thiên','Mua 2 vật phẩm tại Tàng Bảo Các.','buy',2,'Ngọc Bội Hộ Tâm',1],
+    ['Dâng vật vào môn','Mua 3 vật phẩm tại Tàng Bảo Các.','buy',3,'Kim Đan Ngọc Lộ',1],
+    ['Nhận lộc thiên đạo','Nhận linh thạch hằng ngày.','stone_claim',1,'Tụ Linh Đan',2]
+  ];
+  const start=Number(cycle)%pool.length;
+  for(let i=0;i<4;i++){
+    const q=pool[(start+i)%pool.length];
+    const internalName=`${q[0]} · Chu kỳ ${cycleKey}`;
+    await query(`INSERT INTO sect_quests(name,description,requirement_type,requirement_value,reward_stones,reward_item_id,reward_quantity,active,cycle_key,display_name)
+      VALUES($1,$2,$3,$4,0,(SELECT id FROM treasure_items WHERE name=$5),$6,TRUE,$7,$8) ON CONFLICT(name) DO NOTHING`,
+      [internalName,q[1],q[2],q[3],q[4],q[5],cycleKey,q[0]]);
+  }
+  await query(`UPDATE sect_quests SET active=FALSE WHERE active=TRUE AND cycle_key IS NOT NULL AND cycle_key<>$1`,[cycleKey]);
+  return cycleKey;
+}
+
+async function ensureQuestBaseline(userId, questId) {
+  await touchDailyActivity(userId);
+  const r=await query(`SELECT a.train_count,a.buy_count,a.stone_claim_count FROM daily_activity a WHERE a.user_id=$1`,[userId]);
+  const a=r.rows[0]||{train_count:0,buy_count:0,stone_claim_count:0};
+  await query(`INSERT INTO user_quest_progress(user_id,quest_id,baseline_train,baseline_buy,baseline_stone_claim) VALUES($1,$2,$3,$4,$5) ON CONFLICT(user_id,quest_id) DO NOTHING`,[userId,questId,Number(a.train_count)||0,Number(a.buy_count)||0,Number(a.stone_claim_count)||0]);
 }
 
 async function touchDailyActivity(userId) {
@@ -327,7 +377,7 @@ function inferBeastRarity(name){
 }
 
 async function ensureProfile(userId) {
-  await query('INSERT INTO profiles(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING', [userId]);
+  await query('INSERT INTO profiles(user_id,storage_capacity) VALUES($1,30) ON CONFLICT (user_id) DO UPDATE SET storage_capacity=GREATEST(COALESCE(profiles.storage_capacity,30),30)', [userId]);
   const p=(await query('SELECT spirit_power,spirit_root,spirit_beast,gacha_claimed FROM profiles WHERE user_id=$1',[userId])).rows[0];
   const stage=stageFor(Number(p.spirit_power)||0);
   // Existing accounts from v2.8 already have a roll; lock it. New accounts get one roll only.
@@ -590,13 +640,17 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
     }
 
     const capR=await client.query(`SELECT COALESCE(storage_capacity,30)::int AS capacity,
-      COALESCE((SELECT SUM(quantity) FROM inventory WHERE user_id=$1),0)::int AS used
-      FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
-    const capacity=Number(capR.rows[0]?.capacity)||30;
-    const used=Number(capR.rows[0]?.used)||0;
-    if(used>=capacity){
+      COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used_slots,
+      COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned_qty
+      FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id,itemId]);
+    const capacity=Math.max(1,Number(capR.rows[0]?.capacity)||30);
+    const usedSlots=Number(capR.rows[0]?.used_slots)||0;
+    const ownedQty=Number(capR.rows[0]?.owned_qty)||0;
+    // Tu Di Giới tính theo số ô vật phẩm, không tính từng đơn vị.
+    // Có thể mua thêm vật phẩm đã có sẵn ngay cả khi các ô khác đã đầy.
+    if(usedSlots>=capacity && ownedQty<=0){
       await client.query('ROLLBACK');
-      return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${capacity}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
+      return res.status(400).json({error:`Tu Di Giới đã đầy (${usedSlots}/${capacity}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
     }
 
     let newSpirit=(Number(p.spirit_power)||0)-Number(item.price);
@@ -636,8 +690,8 @@ app.get('/api/tu-di-gioi',auth,async(req,res)=>{
     const r=await query(`SELECT ti.id,ti.name,ti.category,ti.description,i.quantity
       FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
       WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC`,[req.session.user_id]);
-    const count=r.rows.reduce((n,x)=>n+Number(x.quantity||0),0);
-    res.json({rows:r.rows,used:count,capacity:Number(p.storage_capacity)||30,spiritRoot:p.spirit_root,spiritBeast:p.spirit_beast});
+    const count=r.rows.filter(x=>Number(x.quantity||0)>0).length;
+    res.json({rows:r.rows,used:count,capacity:Number(p.storage_capacity)||30,unlocked:true,spiritRoot:p.spirit_root,spiritBeast:p.spirit_beast});
   }catch(e){res.status(500).json({error:'Không thể mở Tu Di Giới.'});}
 });
 
@@ -672,43 +726,50 @@ app.get('/api/inventory',auth,async(req,res)=>{
 
 app.get('/api/quests',auth,async(req,res)=>{
   try {
-    await touchDailyActivity(req.session.user_id);
-    const r=await query(`SELECT q.*,ti.name AS reward_item_name,COALESCE(a.train_count,0)::int AS train_count,COALESCE(a.buy_count,0)::int AS buy_count,COALESCE(a.stone_claim_count,0)::int AS stone_claim_count,
+    const cycleKey=await ensureQuestCycle();
+    const r=await query(`SELECT q.*,COALESCE(q.display_name,q.name) AS visible_name,ti.name AS reward_item_name,
+      COALESCE(a.train_count,0)::int AS train_count,COALESCE(a.buy_count,0)::int AS buy_count,COALESCE(a.stone_claim_count,0)::int AS stone_claim_count,
+      COALESCE(up.baseline_train,0)::int AS baseline_train,COALESCE(up.baseline_buy,0)::int AS baseline_buy,COALESCE(up.baseline_stone_claim,0)::int AS baseline_stone_claim,
       EXISTS(SELECT 1 FROM user_quest_claims c WHERE c.user_id=$1 AND c.quest_id=q.id AND c.claim_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS claimed
-      FROM sect_quests q LEFT JOIN treasure_items ti ON ti.id=q.reward_item_id LEFT JOIN daily_activity a ON a.user_id=$1 WHERE q.active=true ORDER BY q.id`,[req.session.user_id]);
-    const rows=r.rows.map(q=>{
-      const progress=q.requirement_type==='train'?q.train_count:q.requirement_type==='buy'?q.buy_count:q.stone_claim_count;
-      return {...q,progress:Math.min(progress,q.requirement_value),completed:progress>=q.requirement_value,rewardItem:q.reward_item_id?{id:q.reward_item_id,name:q.reward_item_name,quantity:Number(q.reward_quantity)||0}:null};
+      FROM sect_quests q LEFT JOIN treasure_items ti ON ti.id=q.reward_item_id LEFT JOIN daily_activity a ON a.user_id=$1 LEFT JOIN user_quest_progress up ON up.user_id=$1 AND up.quest_id=q.id
+      WHERE q.active=true AND q.cycle_key=$2 ORDER BY q.id`,[req.session.user_id,cycleKey]);
+    for(const q of r.rows) await ensureQuestBaseline(req.session.user_id,q.id);
+    const rr=(await query(`SELECT q.*,COALESCE(q.display_name,q.name) AS visible_name,ti.name AS reward_item_name,
+      COALESCE(a.train_count,0)::int AS train_count,COALESCE(a.buy_count,0)::int AS buy_count,COALESCE(a.stone_claim_count,0)::int AS stone_claim_count,
+      COALESCE(up.baseline_train,0)::int AS baseline_train,COALESCE(up.baseline_buy,0)::int AS baseline_buy,COALESCE(up.baseline_stone_claim,0)::int AS baseline_stone_claim,
+      EXISTS(SELECT 1 FROM user_quest_claims c WHERE c.user_id=$1 AND c.quest_id=q.id AND c.claim_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS claimed
+      FROM sect_quests q LEFT JOIN treasure_items ti ON ti.id=q.reward_item_id LEFT JOIN daily_activity a ON a.user_id=$1 LEFT JOIN user_quest_progress up ON up.user_id=$1 AND up.quest_id=q.id
+      WHERE q.active=true AND q.cycle_key=$2 ORDER BY q.id`,[req.session.user_id,cycleKey])).rows;
+    const rows=rr.map(q=>{
+      const raw=q.requirement_type==='train'?(q.train_count-q.baseline_train):q.requirement_type==='buy'?(q.buy_count-q.baseline_buy):(q.stone_claim_count-q.baseline_stone_claim);
+      const progress=Math.max(0,Math.min(raw,q.requirement_value));
+      return {...q,name:q.visible_name,progress,completed:progress>=q.requirement_value,rewardItem:q.reward_item_id?{id:q.reward_item_id,name:q.reward_item_name,quantity:Number(q.reward_quantity)||0}:null};
     });
-    res.json({rows});
-  } catch(e){res.status(500).json({error:'Không thể mở Nhiệm Vụ Đường.'});}
+    res.json({cycleKey,nextRefreshMs:300000-(Date.now()%300000),rows});
+  } catch(e){console.error('quests:',e);res.status(500).json({error:'Không thể mở Nhiệm Vụ Đường.'});}
 });
 app.post('/api/quests/:id/claim',auth,async(req,res)=>{
   const client=await pool.connect();
   try {
-    const questId=Number(req.params.id);
-    if(!Number.isInteger(questId))return res.status(400).json({error:'Nhiệm vụ không hợp lệ.'});
+    const questId=Number(req.params.id); if(!Number.isInteger(questId))return res.status(400).json({error:'Nhiệm vụ không hợp lệ.'});
     await client.query('BEGIN');
-    const qR=await client.query('SELECT q.*,ti.name AS reward_item_name FROM sect_quests q LEFT JOIN treasure_items ti ON ti.id=q.reward_item_id WHERE q.id=$1 AND q.active=true FOR UPDATE',[questId]);
-    if(!qR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy nhiệm vụ.'});}
+    const qR=await client.query(`SELECT q.*,COALESCE(q.display_name,q.name) AS visible_name,ti.name AS reward_item_name FROM sect_quests q LEFT JOIN treasure_items ti ON ti.id=q.reward_item_id WHERE q.id=$1 AND q.active=true FOR UPDATE`,[questId]);
+    if(!qR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Nhiệm vụ đã đổi sang chu kỳ mới.'});}
     const q=qR.rows[0];
-    const aR=await client.query(`SELECT COALESCE(train_count,0)::int AS train_count,COALESCE(buy_count,0)::int AS buy_count,COALESCE(stone_claim_count,0)::int AS stone_claim_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id]);
-    const a=aR.rows[0]||{train_count:0,buy_count:0,stone_claim_count:0};
-    const progress=q.requirement_type==='train'?a.train_count:q.requirement_type==='buy'?a.buy_count:a.stone_claim_count;
-    if(progress<q.requirement_value){await client.query('ROLLBACK');return res.status(400).json({error:`Chưa hoàn thành nhiệm vụ. Tiến độ ${progress}/${q.requirement_value}.`});}
+    const a=(await client.query(`SELECT COALESCE(train_count,0)::int AS train_count,COALESCE(buy_count,0)::int AS buy_count,COALESCE(stone_claim_count,0)::int AS stone_claim_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id])).rows[0]||{train_count:0,buy_count:0,stone_claim_count:0};
+    const base=(await client.query(`SELECT * FROM user_quest_progress WHERE user_id=$1 AND quest_id=$2`,[req.session.user_id,questId])).rows[0]||{baseline_train:0,baseline_buy:0,baseline_stone_claim:0};
+    const raw=q.requirement_type==='train'?a.train_count-base.baseline_train:q.requirement_type==='buy'?a.buy_count-base.baseline_buy:a.stone_claim_count-base.baseline_stone_claim;
+    if(raw<q.requirement_value){await client.query('ROLLBACK');return res.status(400).json({error:`Chưa hoàn thành nhiệm vụ. Tiến độ ${Math.max(0,raw)}/${q.requirement_value}.`});}
     const c=await client.query(`INSERT INTO user_quest_claims(user_id,quest_id,claim_date) VALUES($1,$2,(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) ON CONFLICT DO NOTHING RETURNING id`,[req.session.user_id,questId]);
-    if(!c.rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Hôm nay bạn đã nhận thưởng nhiệm vụ này.'});}
+    if(!c.rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã nhận thưởng nhiệm vụ này.'});}
     let rewardItem=null;
     if(q.reward_item_id && Number(q.reward_quantity)>0){
-      const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW())
-        ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()
-        RETURNING quantity`,[req.session.user_id,q.reward_item_id,Number(q.reward_quantity)]);
+      const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW() RETURNING quantity`,[req.session.user_id,q.reward_item_id,Number(q.reward_quantity)]);
       rewardItem={name:q.reward_item_name,quantity:Number(q.reward_quantity),total:Number(ir.rows[0].quantity)};
     }
-    const p=await client.query('SELECT spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id]);
     await client.query('COMMIT');
-    res.json({ok:true,rewardItem,spiritStones:Number(p.rows[0]?.spirit_stones||0)});
-  } catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể nhận thưởng nhiệm vụ.'});}
+    res.json({ok:true,rewardItem});
+  } catch(e){try{await client.query('ROLLBACK')}catch{};console.error('quest claim:',e);res.status(500).json({error:'Không thể nhận thưởng nhiệm vụ.'});}
   finally{client.release();}
 });
 
@@ -734,8 +795,32 @@ const BEAST_CODEX = [
   ['Cửu U Miêu','Sử Thi','Linh miêu u minh, tăng thân pháp và cảm nhận nguy hiểm.','Công 110 · Phòng 75 · Thân 150 · Linh 125'],
   ['Tử Điện Điêu','Thần Thoại','Điện thú cực hiếm, tốc độ và linh lực đều vượt trội.','Công 180 · Phòng 120 · Thân 210 · Linh 190']
 ];
-app.get('/api/linh-can-bang',auth,async(req,res)=>res.json({rows:ROOT_CODEX.map(x=>({name:x[0],rarity:x[1],description:x[2],support:x[3]}))}));
-app.get('/api/linh-thu-bang',auth,async(req,res)=>res.json({rows:BEAST_CODEX.map(x=>({name:x[0],rarity:x[1],description:x[2],attributes:x[3]}))}));
+const rarityScore={'Phàm':1,'Hạ Phẩm':2,'Trung Phẩm':3,'Thượng Phẩm':4,'Hiếm':5,'Sử Thi':6,'Thần Thoại':7};
+app.get('/api/linh-can-bang',async(req,res)=>{
+  try{const r=await query(`SELECT p.spirit_root AS name,COALESCE(p.spirit_root_rarity,'Phàm') AS rarity,COUNT(*)::int AS owner_count,STRING_AGG(u.display_name, ', ' ORDER BY u.display_name) AS owners FROM profiles p JOIN users u ON u.id=p.user_id WHERE p.spirit_root IS NOT NULL AND p.spirit_root<>'' GROUP BY p.spirit_root,p.spirit_root_rarity`);
+    const map=new Map(ROOT_CODEX.map(x=>[x[0],x])); const rows=r.rows.map(x=>{const c=map.get(x.name)||[x.name,x.rarity,'',''];return {...x,description:c[2],support:c[3]};}).sort((a,b)=>(rarityScore[b.rarity]||0)-(rarityScore[a.rarity]||0)||b.owner_count-a.owner_count); res.json({rows});
+  }catch(e){res.status(500).json({error:'Không thể tải Linh Căn Bảng.'});}
+});
+app.get('/api/linh-thu-bang',async(req,res)=>{
+  try{const r=await query(`SELECT p.spirit_beast AS name,COALESCE(p.spirit_beast_rarity,'Phàm') AS rarity,COUNT(*)::int AS owner_count,STRING_AGG(u.display_name, ', ' ORDER BY u.display_name) AS owners FROM profiles p JOIN users u ON u.id=p.user_id WHERE p.spirit_beast IS NOT NULL AND p.spirit_beast<>'' GROUP BY p.spirit_beast,p.spirit_beast_rarity`);
+    const map=new Map(BEAST_CODEX.map(x=>[x[0],x])); const rows=r.rows.map(x=>{const c=map.get(x.name)||[x.name,x.rarity,'',''];return {...x,description:c[2],attributes:c[3]};}).sort((a,b)=>(rarityScore[b.rarity]||0)-(rarityScore[a.rarity]||0)||b.owner_count-a.owner_count); res.json({rows});
+  }catch(e){res.status(500).json({error:'Không thể tải Linh Thú Bảng.'});}
+});
+
+app.post('/api/enhance/roll',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN'); const cost=300; const p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    if(Number(p.spirit_power)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost} linh lực để quay vật phẩm tăng cường.`});}
+    const poolItems=[['Linh Phù Cường Hóa',55],['Tinh Thạch Cường Hóa',28],['Huyền Thiết Cường Hóa',12],['Thiên Đạo Cường Hóa Thạch',5]];
+    const total=poolItems.reduce((n,x)=>n+x[1],0); let n=crypto.randomInt(1,total+1), chosen=poolItems[0][0]; for(const x of poolItems){n-=x[1];if(n<=0){chosen=x[0];break;}}
+    const item=(await client.query('SELECT id,name,description FROM treasure_items WHERE name=$1',[chosen])).rows[0];
+    const used=Number((await client.query('SELECT COALESCE(SUM(quantity),0)::int AS used FROM inventory WHERE user_id=$1',[req.session.user_id])).rows[0].used); const cap=Number((await client.query('SELECT storage_capacity FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0].storage_capacity)||30;
+    if(used>=cap){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}).`});}
+    const nr=(await client.query(`UPDATE profiles SET spirit_power=spirit_power-$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,[req.session.user_id,cost])).rows[0];
+    const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW() RETURNING quantity`,[req.session.user_id,item.id]);
+    await client.query('COMMIT'); res.json({ok:true,item:item.name,description:item.description,quantity:ir.rows[0].quantity,spirit:Number(nr.spirit_power)});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('enhance roll:',e);res.status(500).json({error:'Không thể quay vật phẩm tăng cường.'});}finally{client.release();}
+});
 
 app.get('/api/leaderboard',async(req,res)=>{
   try {

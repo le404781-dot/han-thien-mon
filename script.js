@@ -106,13 +106,17 @@ async function loadTreasure(){
   const area=$('#treasureArea'); if(!area)return;
   area.innerHTML=`<div class="treasure-wallet"><span>☯ Linh lực hiện có</span><strong>${Number(d.spiritPower).toLocaleString('vi-VN')}</strong><small>${esc(d.realm)} · ${d.tier}/9 · Thanh toán bằng linh lực</small></div>
   <div class="stone-exchange"><div><span class="eyebrow">⚙ QUY TẮC TÀNG BẢO CÁC</span><h3>Đổi linh lực → Nhận bảo vật</h3><p>Mỗi vật phẩm là một lần đổi linh lực để nhận bảo vật. Linh lực sẽ được trừ khi giao dịch thành công; vật phẩm lập tức vào Tu Di Giới.</p></div><span class="tag">☯ Dùng Linh lực</span></div>
+  <div class="enhance-panel"><div><span class="eyebrow">🎲 CƯỜNG HÓA · 增強</span><h3>Quay vật phẩm tăng cường</h3><p>Dùng <b>300 linh lực</b> cho mỗi lượt quay. Vật phẩm nhận được sẽ tự động vào Tu Di Giới.</p></div><button id="enhanceRollBtn" class="btn primary">🎲 Quay 300 linh lực</button><div id="enhanceMsg" class="train-msg"></div></div>
   <div class="treasure-grid">${d.items.map(i=>{
     const spirit=Number(d.spiritPower||0), price=Number(i.price||0);
     const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp'];
-    const currentIndex=realmNames.indexOf(d.realm), isLocked=currentIndex<Number(i.min_realm), canBuy=!isLocked&&spirit>=price;
-    const buttonText=isLocked?'🔒 Cần '+esc(realmNames[Number(i.min_realm)]):canBuy?'☯ Đổi linh lực nhận vật phẩm':'Thiếu '+Number(price-spirit).toLocaleString('vi-VN')+' linh lực';
+    const currentIndex=realmNames.indexOf(d.realm);
+    const isLocked=currentIndex<Number(i.min_realm);
+    const canBuy=!isLocked&&spirit>=price;
+    const buttonText=isLocked?'🔒 Cần '+esc(realmNames[Number(i.min_realm)]):canBuy?'☯ Đổi linh lực nhận vật phẩm':'Thiếu '+Number(Math.max(0,price-spirit)).toLocaleString('vi-VN')+' linh lực';
     return `<article class="treasure-card ${isLocked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đã sở hữu: ${Number(i.quantity||0)} · Giá: ☯ ${price.toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${isLocked||!canBuy?'disabled':''}>${buttonText}</button></article>`;
   }).join('')}</div><div id="treasureMsg" class="train-msg"></div>`;
+  $('#enhanceRollBtn').onclick=async()=>{const b=$('#enhanceRollBtn');const msg=$('#enhanceMsg');b.disabled=true;try{const x=await api('/api/enhance/roll',{method:'POST',headers:authHeaders(),body:'{}'});msg.textContent=`🎁 Nhận ${x.item} · ${x.description} · Còn ${Number(x.spirit).toLocaleString('vi-VN')} linh lực.`;await loadProfile();await loadTuDi();}catch(e){msg.textContent='❌ '+e.message;}finally{b.disabled=false;}};
   document.querySelectorAll('.buy-item').forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     try{
@@ -128,7 +132,7 @@ async function loadTuDi(){
   const d=await api('/api/tu-di-gioi',{headers:authHeaders()});
   const area=$('#sumeruArea'); if(!area)return;
   const rows=d.rows||[];
-  area.innerHTML=`<div class="treasure-wallet"><span>◈ Tu Di Giới</span><strong>${d.used}/${d.capacity}</strong><small>🌿 ${esc(d.spiritRoot||'—')} · 🐉 ${esc(d.spiritBeast||'—')}</small></div>
+  area.innerHTML=`<div class="treasure-wallet"><span>◈ Tu Di Giới · 🔓 Đã mở khóa</span><strong>${d.used}/${d.capacity}</strong><small>🌿 ${esc(d.spiritRoot||'—')} · 🐉 ${esc(d.spiritBeast||'—')}</small></div>
   <div class="inventory-grid">${rows.length?rows.map(i=>`<article class="inventory-card"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><b>Số lượng: ${Number(i.quantity||0)}</b></div></article>`).join(''):`<div class="empty-state compact"><h3>Tu Di Giới đang trống</h3><p>Vật phẩm và đan dược mua thành công tại Tàng Bảo Các sẽ tự động được cất vào đây.</p></div>`}</div>`;
  }catch(e){const area=$('#sumeruArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
@@ -138,6 +142,7 @@ async function loadQuests(){
   const area=$('#questsArea'); if(!area)return;
   area.innerHTML=`<div class="quest-grid">${d.rows.map(q=>`<article class="quest-card ${q.claimed?'claimed':''}"><div class="quest-seal">✦</div><div><span class="eyebrow">NHIỆM VỤ ĐƯỜNG</span><h3>${esc(q.name)}</h3><p>${esc(q.description)}</p><div class="quest-progress"><i style="width:${Math.min(100,Math.round(q.progress/q.requirement_value*100))}%"></i></div><small>Tiến độ: ${q.progress}/${q.requirement_value} · Thưởng: 🎁 ${q.rewardItem?`${esc(q.rewardItem.name)} ×${q.rewardItem.quantity}`:'Không có'}</small></div><button class="btn small primary quest-claim" data-id="${q.id}" ${q.claimed||!q.completed?'disabled':''}>${q.claimed?'✓ Đã nhận':q.completed?'Nhận thưởng':'Chưa hoàn thành'}</button></article>`).join('')}</div><p id="questMsg" class="train-msg">Hoàn thành nhiệm vụ để nhận vật phẩm trực tiếp vào Tu Di Giới.</p>`;
   document.querySelectorAll('.quest-claim').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/quests/'+b.dataset.id+'/claim',{method:'POST',headers:authHeaders(),body:'{}'});$('#questMsg').textContent=x.rewardItem?`🎁 Nhận ${x.rewardItem.name} ×${x.rewardItem.quantity}. Vật phẩm đã vào Tu Di Giới.`:'Đã nhận thưởng.';await loadProfile();await loadQuests();await loadTuDi();}catch(e){$('#questMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  clearTimeout(window.questRefreshTimer); window.questRefreshTimer=setTimeout(loadQuests,Math.max(1000,Number(d.nextRefreshMs||300000)+300));
  }catch(e){const area=$('#questsArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
@@ -150,8 +155,8 @@ async function loadCodex(){
  try{
   const [r,b]=await Promise.all([api('/api/linh-can-bang',{headers:authHeaders()}),api('/api/linh-thu-bang',{headers:authHeaders()})]);
   const cr=$('#linhCanBangArea'), br=$('#linhThuBangArea');
-  if(cr)cr.innerHTML=r.rows.map(x=>`<article class="codex-card"><span class="codex-icon">🌿</span><div><span class="eyebrow">${esc(x.rarity)}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>Phụ trợ: ${esc(x.support)}</small></div></article>`).join('');
-  if(br)br.innerHTML=b.rows.map(x=>`<article class="codex-card"><span class="codex-icon">🐉</span><div><span class="eyebrow">${esc(x.rarity)}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>Thuộc tính: ${esc(x.attributes)}</small></div></article>`).join('');
+  if(cr)cr.innerHTML=r.rows.length?r.rows.map((x,i)=>`<article class="codex-card ranked-codex"><span class="codex-rank">#${i+1}</span><span class="codex-icon">🌿</span><div><span class="eyebrow">${esc(x.rarity)} · ${Number(x.owner_count||0)} người sở hữu</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>Phụ trợ: ${esc(x.support)}</small><small class="owners">Đạo hữu: ${esc(x.owners||'—')}</small></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có đệ tử sở hữu linh căn.</p></div>`;
+  if(br)br.innerHTML=b.rows.length?b.rows.map((x,i)=>`<article class="codex-card ranked-codex"><span class="codex-rank">#${i+1}</span><span class="codex-icon">🐉</span><div><span class="eyebrow">${esc(x.rarity)} · ${Number(x.owner_count||0)} người sở hữu</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>Thuộc tính: ${esc(x.attributes)}</small><small class="owners">Đạo hữu: ${esc(x.owners||'—')}</small></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có đệ tử sở hữu linh thú.</p></div>`;
  }catch(e){}
 }
 
