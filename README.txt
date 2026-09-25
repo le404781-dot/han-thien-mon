@@ -20,3 +20,6 @@ DATABASE_URL=<Internal Database URL của PostgreSQL>
 NODE_ENV=production
 
 Lưu ý: không đưa DATABASE_URL lên GitHub hoặc chia sẻ công khai.
+
+
+v2.8 cập nhật: Tụ Di Giới 30 ô chứa vật phẩm; đan dược/pháp bảo mua thành công tự động vào Tụ Di Giới; random Linh Căn + Linh Thú; mua Tàng Bảo Các dùng trực tiếp linh thạch và chặn khi kho đầy.

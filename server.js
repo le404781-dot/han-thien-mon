@@ -105,6 +105,9 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_beast TEXT;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS storage_capacity INTEGER NOT NULL DEFAULT 30;
     UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0), realm_tier=COALESCE(realm_tier,1);
 
     CREATE TABLE IF NOT EXISTS treasure_items (
@@ -229,11 +232,28 @@ app.use(express.static(__dirname));
 function hashPassword(password, salt) { return crypto.scryptSync(password, salt, 64).toString('hex'); }
 function safeUser(user) { return { id:user.id, username:user.username, displayName:user.display_name, createdAt:user.created_at }; }
 
+
+const SPIRIT_ROOTS = [
+  'Thiên Linh Căn','Kim Linh Căn','Mộc Linh Căn','Thủy Linh Căn','Hỏa Linh Căn','Thổ Linh Căn',
+  'Băng Linh Căn','Lôi Linh Căn','Phong Linh Căn','Âm Dương Linh Căn','Ngũ Hành Linh Căn','Biến Dị Lôi Hỏa Linh Căn'
+];
+const SPIRIT_BEASTS = [
+  'Hàn Ngọc Hồ','Thanh Vân Hạc','Lôi Ảnh Lang','Xích Viêm Hổ','Huyền Quy','Bạch Vũ Ưng',
+  'Cửu U Miêu','Kim Giáp Tê','Tử Điện Điêu','Thanh Mộc Linh Lộc','Huyền Băng Ly','Xích Kim Viên',
+  'Phong Linh Hồ','U Minh Lang','Bích Nhãn Xà','Vân Hải Kình'
+];
+function randomFrom(list){ return list[crypto.randomInt(0,list.length)]; }
+function randomCultivationGifts(){ return {root:randomFrom(SPIRIT_ROOTS),beast:randomFrom(SPIRIT_BEASTS)}; }
+
 async function ensureProfile(userId) {
   await query('INSERT INTO profiles(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING', [userId]);
-  const sp=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[userId])).rows[0].spirit_power;
-  const stage=stageFor(sp);
-  await query(`UPDATE profiles SET rank=$2, realm_tier=$3, updated_at=NOW() WHERE user_id=$1`, [userId, stage.realm, stage.tier]);
+  const p=(await query('SELECT spirit_power,spirit_root,spirit_beast FROM profiles WHERE user_id=$1',[userId])).rows[0];
+  const gift=randomCultivationGifts();
+  const root=p.spirit_root || gift.root;
+  const beast=p.spirit_beast || gift.beast;
+  const stage=stageFor(Number(p.spirit_power)||0);
+  await query(`UPDATE profiles SET rank=$2, realm_tier=$3, spirit_root=COALESCE(spirit_root,$4), spirit_beast=COALESCE(spirit_beast,$5), storage_capacity=COALESCE(storage_capacity,30), updated_at=NOW() WHERE user_id=$1`,
+    [userId, stage.realm, stage.tier, root, beast]);
 }
 async function ensureAchievements(userId, spirit) {
   await query(`INSERT INTO achievements(user_id,title,description,points) VALUES($1,'Nhập môn Hàn Thiên','Đã ghi danh và bước qua sơn môn.',10) ON CONFLICT (user_id,title) DO NOTHING`, [userId]);
@@ -320,7 +340,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const stage=stageFor(p.spirit_power);
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
-    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power)}});
+    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,spiritBeast:p.spirit_beast,storageCapacity:Number(p.storage_capacity)||30}});
   } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
 });
 
@@ -429,6 +449,16 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
       return res.status(400).json({error:`Linh thạch không đủ. Cần ${Number(item.price).toLocaleString('vi-VN')} 💎, hiện có ${Number(p.spirit_stones).toLocaleString('vi-VN')} 💎.`});
     }
 
+    const capR=await client.query(`SELECT COALESCE(storage_capacity,30)::int AS capacity,
+      COALESCE((SELECT SUM(quantity) FROM inventory WHERE user_id=$1),0)::int AS used
+      FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
+    const capacity=Number(capR.rows[0]?.capacity)||30;
+    const used=Number(capR.rows[0]?.used)||0;
+    if(used>=capacity){
+      await client.query('ROLLBACK');
+      return res.status(400).json({error:`Tụ Di Giới đã đầy (${used}/${capacity}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
+    }
+
     const newStones=Number(p.spirit_stones)-Number(item.price);
     let newSpirit=Number(p.spirit_power)||0;
     if(Number(item.spirit_gain)>0)newSpirit+=Number(item.spirit_gain);
@@ -458,6 +488,27 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{
     console.error('Treasure purchase error:',e);
     res.status(500).json({error:'Không thể mua vật phẩm lúc này. Vui lòng thử lại.'});
   } finally{client.release();}
+});
+
+app.get('/api/tu-di-gioi',auth,async(req,res)=>{
+  try{
+    await ensureProfile(req.session.user_id);
+    const p=(await query('SELECT storage_capacity,spirit_root,spirit_beast FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const r=await query(`SELECT ti.id,ti.name,ti.category,ti.description,i.quantity
+      FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+      WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC`,[req.session.user_id]);
+    const count=r.rows.reduce((n,x)=>n+Number(x.quantity||0),0);
+    res.json({rows:r.rows,used:count,capacity:Number(p.storage_capacity)||30,spiritRoot:p.spirit_root,spiritBeast:p.spirit_beast});
+  }catch(e){res.status(500).json({error:'Không thể mở Tụ Di Giới.'});}
+});
+
+app.post('/api/random-gifts',auth,async(req,res)=>{
+  try{
+    await ensureProfile(req.session.user_id);
+    const gift=randomCultivationGifts();
+    const r=await query(`UPDATE profiles SET spirit_root=$2,spirit_beast=$3,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_root,spirit_beast`,[req.session.user_id,gift.root,gift.beast]);
+    res.json({ok:true,spiritRoot:r.rows[0].spirit_root,spiritBeast:r.rows[0].spirit_beast});
+  }catch(e){res.status(500).json({error:'Không thể ngẫu nhiên linh căn và linh thú.'});}
 });
 
 app.get('/api/inventory',auth,async(req,res)=>{

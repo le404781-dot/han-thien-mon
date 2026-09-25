@@ -35,7 +35,7 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadQuests();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadChat();await loadLeaderboard();await loadTreasure();await loadTuDi();await loadQuests();}
  catch{localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}
 }
 function renderGuestAreas(){
@@ -52,9 +52,11 @@ async function loadProfile(){
 }
 function renderProfile(p){
  $('#profileArea').innerHTML=`<div class="profile-grid">
- <article class="profile-card profile-main"><div class="profile-avatar">${esc(p.avatar)}</div><div class="profile-copy"><span class="eyebrow">${esc(p.position)}</span><h3>${esc(p.display_name)}</h3><p class="profile-title">${esc(p.stage)} · ${esc(p.title)}</p><p class="muted">@${esc(p.username)} · Gia nhập ${fmtDate(p.created_at)}</p><p>${esc(p.bio||'Chưa viết lời tựa cho đạo tâm của mình.')}</p><div class="tags"><span class="tag">${esc(p.sect)}</span><span class="tag">${esc(p.hobby||'Đang tu hành')}</span></div></div><button class="btn small edit-profile" id="editProfileBtn">Sửa hồ sơ</button></article>
- <article class="profile-card profile-stats"><div><span>Linh lực</span><b>${Number(p.spirit_power).toLocaleString('vi-VN')}</b></div><div><span>Linh thạch</span><b class="stone-value">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</b></div><div><span>Thành tích</span><b>${p.achievement_points}</b></div></article></div><div class="attribute-panel"><div class="attribute-head"><span class="eyebrow">☯ THUỘC TÍNH ĐỆ TỬ</span><h3>Bảng thuộc tính</h3><small>Thuộc tính tăng theo linh lực, cảnh giới và tầng.</small></div><div class="attribute-grid">${[['Công lực','⚔',p.attributes?.congLuc],['Phòng thủ','🛡',p.attributes?.phongThu],['Thân pháp','💨',p.attributes?.thanPhap],['Ngộ tính','☯',p.attributes?.ngoTinh],['Khí vận','✦',p.attributes?.khiVan]].map(x=>`<div class="attribute-item"><span>${x[1]}</span><div><b>${x[0]}</b><strong>${Number(x[2]||0).toLocaleString('vi-VN')}</strong></div></div>`).join('')}</div></div>`;
+ <article class="profile-card profile-main"><div class="profile-avatar">${esc(p.avatar)}</div><div class="profile-copy"><span class="eyebrow">${esc(p.position)}</span><h3>${esc(p.display_name)}</h3><p class="profile-title">${esc(p.stage)} · ${esc(p.title)}</p><p class="muted">@${esc(p.username)} · Gia nhập ${fmtDate(p.created_at)}</p><div class="tags"><span class="tag">🌿 Linh căn: ${esc(p.spiritRoot||'Chưa định')}</span><span class="tag">🐉 Linh thú: ${esc(p.spiritBeast||'Chưa định')}</span></div><p>${esc(p.bio||'Chưa viết lời tựa cho đạo tâm của mình.')}</p><div class="tags"><span class="tag">${esc(p.sect)}</span><span class="tag">${esc(p.hobby||'Đang tu hành')}</span></div></div><button class="btn small edit-profile" id="editProfileBtn">Sửa hồ sơ</button></article>
+ <article class="profile-card profile-stats"><div><span>Linh lực</span><b>${Number(p.spirit_power).toLocaleString('vi-VN')}</b></div><div><span>Linh thạch</span><b class="stone-value">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</b></div><div><span>Thành tích</span><b>${p.achievement_points}</b></div></article></div><div class="attribute-panel"><div class="attribute-head"><span class="eyebrow">☯ THUỘC TÍNH ĐỆ TỬ</span><h3>Bảng thuộc tính</h3><small>Thuộc tính tăng theo linh lực, cảnh giới và tầng.</small></div><div class="attribute-grid">${[['Công lực','⚔',p.attributes?.congLuc],['Phòng thủ','🛡',p.attributes?.phongThu],['Thân pháp','💨',p.attributes?.thanPhap],['Ngộ tính','☯',p.attributes?.ngoTinh],['Khí vận','✦',p.attributes?.khiVan]].map(x=>`<div class="attribute-item"><span>${x[1]}</span><div><b>${x[0]}</b><strong>${Number(x[2]||0).toLocaleString('vi-VN')}</strong></div></div>`).join('')}</div></div><div class="random-gifts-panel"><div><span class="eyebrow">🎲 DUYÊN NGẪU NHIÊN</span><h3>Ngẫu nhiên Linh Căn & Linh Thú</h3><p>Khởi tạo một cặp linh căn và linh thú mới để tăng sự đa dạng của đệ tử.</p></div><button class="btn small primary" id="randomGiftsBtn">🎲 Ngẫu nhiên</button><div id="randomGiftsMsg" class="train-msg"></div></div>`;
  $('#editProfileBtn').onclick=openProfileEditor;
+ $('#randomGiftsBtn').onclick=async()=>{const b=$('#randomGiftsBtn');const msg=$('#randomGiftsMsg');b.disabled=true;try{const x=await api('/api/random-gifts',{method:'POST',headers:authHeaders(),body:'{}'});msg.textContent=`🌿 ${x.spiritRoot} · 🐉 ${x.spiritBeast}`;await loadProfile();}catch(e){msg.textContent='❌ '+e.message;b.disabled=false;}};
+
 }
 function openProfileEditor(){
  const p=currentProfile;
@@ -95,9 +97,18 @@ async function loadTreasure(){
     const buttonText=isLocked?'🔒 Cần '+esc(realmNames[Number(i.min_realm)]):canBuy?'💎 Mua':'Thiếu '+Number(price-stoneCount).toLocaleString('vi-VN')+' 💎';
     return `<article class="treasure-card ${isLocked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đã sở hữu: ${Number(i.quantity||0)} · Giá: 💎 ${price.toLocaleString('vi-VN')}</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${isLocked||!canBuy?'disabled':''}>${buttonText}</button></article>`;
   }).join('')}</div><div id="treasureMsg" class="train-msg"></div>`;
-  $('#buyStonesBtn').onclick=async()=>{const b=$('#buyStonesBtn');b.disabled=true;try{const x=await api('/api/treasure/buy-stones',{method:'POST',headers:authHeaders(),body:'{}'});$('#treasureMsg').textContent=`Đã đổi 500 linh lực lấy 100 linh thạch. Linh lực còn ${Number(x.spirit).toLocaleString('vi-VN')}.`;await loadProfile();await loadTreasure();}catch(e){$('#treasureMsg').textContent=e.message;b.disabled=false;}};
-  document.querySelectorAll('.buy-item').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/treasure/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id)})});$('#treasureMsg').textContent=`✅ Đã mua ${x.item}. Trừ linh thạch thành công. Kho còn ${Number(x.spiritStones).toLocaleString('vi-VN')} 💎.`;await loadProfile();await loadTreasure();}catch(e){$('#treasureMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  $('#buyStonesBtn').onclick=async()=>{const b=$('#buyStonesBtn');b.disabled=true;try{const x=await api('/api/treasure/buy-stones',{method:'POST',headers:authHeaders(),body:'{}'});$('#treasureMsg').textContent=`Đã đổi 500 linh lực lấy 100 linh thạch. Linh lực còn ${Number(x.spirit).toLocaleString('vi-VN')}.`;await loadProfile();await loadTreasure();await loadTuDi();}catch(e){$('#treasureMsg').textContent=e.message;b.disabled=false;}};
+  document.querySelectorAll('.buy-item').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/treasure/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id)})});$('#treasureMsg').textContent=`✅ Đã mua ${x.item}. Trừ linh thạch thành công. Kho còn ${Number(x.spiritStones).toLocaleString('vi-VN')} 💎.`;await loadProfile();await loadTreasure();await loadTuDi();}catch(e){$('#treasureMsg').textContent='❌ '+e.message;b.disabled=false;}});
  }catch(e){const area=$('#treasureArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
+}
+async function loadTuDi(){
+ try{
+  const d=await api('/api/tu-di-gioi',{headers:authHeaders()});
+  const area=$('#sumeruArea'); if(!area)return;
+  const rows=d.rows||[];
+  area.innerHTML=`<div class="treasure-wallet"><span>◈ Tụ Di Giới</span><strong>${d.used}/${d.capacity}</strong><small>🌿 ${esc(d.spiritRoot||'—')} · 🐉 ${esc(d.spiritBeast||'—')}</small></div>
+  <div class="inventory-grid">${rows.length?rows.map(i=>`<article class="inventory-card"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><b>Số lượng: ${Number(i.quantity||0)}</b></div></article>`).join(''):`<div class="empty-state compact"><h3>Tụ Di Giới đang trống</h3><p>Vật phẩm và đan dược mua thành công tại Tàng Bảo Các sẽ tự động được cất vào đây.</p></div>`}</div>`;
+ }catch(e){const area=$('#sumeruArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 async function loadQuests(){
  try{
