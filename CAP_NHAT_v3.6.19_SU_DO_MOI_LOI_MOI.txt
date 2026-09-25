@@ -1,0 +1,15 @@
+HÀN THIÊN MÔN v3.6.19 – SƯ ĐỒ: BÁI SƯ & MỜI NHẬP MÔN
+
+1. Mở hoàn chỉnh mục Sư Đồ trên giao diện.
+2. Môn nhân cảnh giới thấp hơn có thể gửi lời Bái sư tới môn nhân từ Luyện Hư trở lên.
+3. Môn nhân từ Luyện Hư trở lên có thể chủ động gửi Lời mời nhập môn tới môn nhân có cảnh giới thấp hơn.
+4. Hai loại lời mời có luồng chấp thuận/từ chối riêng, tương tự cơ chế Kết làm bằng hữu.
+5. Sư phụ vẫn bị giới hạn tối đa 2 đệ tử.
+6. Một môn nhân chỉ có thể có 1 sư phụ.
+7. Chỉ có thể thiết lập sư đồ khi cảnh giới sư phụ cao hơn cảnh giới đệ tử.
+8. Sau khi chấp thuận, quan hệ mentor_disciples được tạo trong transaction.
+9. Lời mời đang chờ được hiển thị trong mục Sư Đồ; lời đã gửi cũng được hiển thị.
+10. Hồ sơ thành viên có nút Bái sư hoặc Mời nhập môn tùy cảnh giới và quan hệ hiện tại.
+11. Giữ nguyên hệ thống bảo hộ đệ tử và xin phép khiêu chiến hiện có.
+
+LƯU Ý: Runtime schema tự thêm cột discipleship_requests.request_type khi server khởi động, không cần xóa dữ liệu cũ.

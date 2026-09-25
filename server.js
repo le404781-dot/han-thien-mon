@@ -440,6 +440,7 @@ async function initDb() {
       id BIGSERIAL PRIMARY KEY,
       disciple_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       mentor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      request_type TEXT NOT NULL DEFAULT 'disciple_to_mentor' CHECK(request_type IN ('disciple_to_mentor','mentor_to_disciple')),
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected','cancelled')),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       responded_at TIMESTAMPTZ,
@@ -447,6 +448,9 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_discipleship_requests_mentor ON discipleship_requests(mentor_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_discipleship_requests_disciple ON discipleship_requests(disciple_id,status,created_at DESC);
+    ALTER TABLE discipleship_requests ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'disciple_to_mentor';
+    UPDATE discipleship_requests SET request_type='disciple_to_mentor' WHERE request_type IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_discipleship_requests_type_status ON discipleship_requests(request_type,status,created_at DESC);
 
     CREATE TABLE IF NOT EXISTS mentor_disciples (
       id BIGSERIAL PRIMARY KEY,
@@ -2012,12 +2016,16 @@ app.get('/api/disciples',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id;
     const [mentor,disciples,incoming,outgoing,permissions,users]=await Promise.all([
-      query(`SELECT md.mentor_id,u.display_name AS mentor_name,p.rank,p.spirit_power,p.realm_tier FROM mentor_disciples md JOIN users u ON u.id=md.mentor_id JOIN profiles p ON p.user_id=md.mentor_id WHERE md.disciple_id=$1`,[uid]),
+      query(`SELECT md.mentor_id,u.display_name AS mentor_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title FROM mentor_disciples md JOIN users u ON u.id=md.mentor_id JOIN profiles p ON p.user_id=md.mentor_id WHERE md.disciple_id=$1`,[uid]),
       query(`SELECT md.disciple_id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title FROM mentor_disciples md JOIN users u ON u.id=md.disciple_id JOIN profiles p ON p.user_id=md.disciple_id WHERE md.mentor_id=$1 ORDER BY md.created_at`,[uid]),
-      query(`SELECT dr.id,dr.disciple_id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier FROM discipleship_requests dr JOIN users u ON u.id=dr.disciple_id JOIN profiles p ON p.user_id=u.id WHERE dr.mentor_id=$1 AND dr.status='pending' ORDER BY dr.created_at DESC`,[uid]),
-      query(`SELECT dr.id,dr.mentor_id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier FROM discipleship_requests dr JOIN users u ON u.id=dr.mentor_id JOIN profiles p ON p.user_id=u.id WHERE dr.disciple_id=$1 AND dr.status='pending' ORDER BY dr.created_at DESC`,[uid]),
+      query(`SELECT dr.id,dr.disciple_id,dr.mentor_id,dr.request_type,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title
+        FROM discipleship_requests dr JOIN users u ON u.id=dr.disciple_id JOIN profiles p ON p.user_id=u.id
+        WHERE dr.mentor_id=$1 AND dr.status='pending' ORDER BY dr.created_at DESC`,[uid]),
+      query(`SELECT dr.id,dr.disciple_id,dr.mentor_id,dr.request_type,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title
+        FROM discipleship_requests dr JOIN users u ON u.id=dr.mentor_id JOIN profiles p ON p.user_id=u.id
+        WHERE dr.disciple_id=$1 AND dr.status='pending' ORDER BY dr.created_at DESC`,[uid]),
       query(`SELECT cp.id,cp.disciple_id,cp.challenger_id,cp.mentor_id,cp.status,cp.created_at,du.display_name AS disciple_name,cu.display_name AS challenger_name FROM disciple_challenge_permissions cp JOIN users du ON du.id=cp.disciple_id JOIN users cu ON cu.id=cp.challenger_id WHERE cp.mentor_id=$1 AND cp.status='pending' ORDER BY cp.created_at DESC`,[uid]),
-      query(`SELECT u.id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY p.spirit_power DESC,u.id`,[uid])
+      query(`SELECT u.id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,p.title FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY p.spirit_power DESC,u.id`,[uid])
     ]);
     const me=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[uid])).rows[0];
     const st=stageFor(Number(me?.spirit_power)||0);
@@ -2045,6 +2053,31 @@ app.post('/api/disciples/request',auth,async(req,res)=>{
   }catch(e){console.error('disciples request:',e);res.status(500).json({error:'Không thể gửi lời bái sư.'});}
 });
 
+app.post('/api/disciples/invite',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id,discipleId=Number(req.body?.discipleId);
+    if(!Number.isInteger(discipleId)||discipleId<1||discipleId===uid)return res.status(400).json({error:'Đệ tử được mời không hợp lệ.'});
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const me=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];
+      const target=(await client.query('SELECT u.id,u.display_name,p.spirit_power FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1 FOR UPDATE',[discipleId])).rows[0];
+      if(!me||!target){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân.'});}
+      const ms=stageFor(Number(me.spirit_power)||0), ts=stageFor(Number(target.spirit_power)||0);
+      if(ms.realmIndex<5){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ từ Luyện Hư mới có thể gửi lời mời nhận đệ tử.'});}
+      if(ts.realmIndex>=ms.realmIndex){await client.query('ROLLBACK');return res.status(400).json({error:'Chỉ có thể mời môn nhân có cảnh giới thấp hơn sư phụ.'});}
+      const cap=await mentorCanTakeMore(client,uid);
+      if(!cap.ok){await client.query('ROLLBACK');return res.status(400).json({error:cap.error});}
+      if((await client.query('SELECT 1 FROM mentor_disciples WHERE disciple_id=$1',[discipleId])).rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Môn nhân này đã có sư phụ.'});}
+      const existing=(await client.query(`SELECT id,status,request_type FROM discipleship_requests WHERE disciple_id=$1 AND mentor_id=$2 AND status='pending'`,[discipleId,uid])).rows[0];
+      if(existing){await client.query('ROLLBACK');return res.status(409).json({error:'Đã có lời mời nhập môn đang chờ đối phương chấp thuận.'});}
+      const r=await client.query(`INSERT INTO discipleship_requests(disciple_id,mentor_id,request_type,status) VALUES($1,$2,'mentor_to_disciple','pending') RETURNING id`,[discipleId,uid]);
+      await client.query('COMMIT');
+      res.status(201).json({ok:true,id:r.rows[0].id,message:`Đã gửi lời mời nhận ${target.display_name} làm đệ tử. Chờ đối phương chấp thuận.`});
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+  }catch(e){console.error('disciples invite:',e);res.status(500).json({error:'Không thể gửi lời mời nhập môn.'});}
+});
+
 app.post('/api/disciples/respond',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
@@ -2062,6 +2095,33 @@ app.post('/api/disciples/respond',auth,async(req,res)=>{
     await client.query(`UPDATE discipleship_requests SET status='cancelled',responded_at=NOW() WHERE disciple_id=$1 AND id<>$2 AND status='pending'`,[r.disciple_id,id]);
     await client.query('COMMIT');res.json({ok:true,message:'Đã nhận môn nhân làm đệ tử. Đệ tử nhận bảo hộ của sư phụ.'});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('disciples respond:',e);res.status(500).json({error:'Không thể xử lý lời bái sư.'});}finally{client.release();}
+});
+
+app.post('/api/disciples/invite/respond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,id=Number(req.body?.requestId),action=String(req.body?.action||'');
+    if(!Number.isInteger(id)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu không hợp lệ.'});
+    await client.query('BEGIN');
+    const r=(await client.query(`SELECT * FROM discipleship_requests WHERE id=$1 AND disciple_id=$2 AND request_type='mentor_to_disciple' AND status='pending' FOR UPDATE`,[id,uid])).rows[0];
+    if(!r){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời nhập môn không còn hiệu lực.'});}
+    if(action==='reject'){
+      await client.query(`UPDATE discipleship_requests SET status='rejected',responded_at=NOW() WHERE id=$1`,[id]);
+      await client.query('COMMIT');return res.json({ok:true,message:'Đã từ chối lời mời nhập môn.'});
+    }
+    if((await client.query('SELECT 1 FROM mentor_disciples WHERE disciple_id=$1',[uid])).rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã có sư phụ.'});}
+    const cap=await mentorCanTakeMore(client,r.mentor_id);
+    if(!cap.ok){await client.query('ROLLBACK');return res.status(400).json({error:cap.error});}
+    const mp=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[r.mentor_id])).rows[0];
+    const dp=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];
+    if(!mp||!dp){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ sư phụ hoặc đệ tử.'});}
+    const ms=stageFor(Number(mp.spirit_power)||0), ds=stageFor(Number(dp.spirit_power)||0);
+    if(ms.realmIndex<5||ds.realmIndex>=ms.realmIndex){await client.query('ROLLBACK');return res.status(400).json({error:'Cảnh giới không còn phù hợp để xác lập quan hệ sư đồ.'});}
+    await client.query(`INSERT INTO mentor_disciples(mentor_id,disciple_id) VALUES($1,$2)`,[r.mentor_id,uid]);
+    await client.query(`UPDATE discipleship_requests SET status='accepted',responded_at=NOW() WHERE id=$1`,[id]);
+    await client.query(`UPDATE discipleship_requests SET status='cancelled',responded_at=NOW() WHERE disciple_id=$1 AND id<>$2 AND status='pending'`,[uid,id]);
+    await client.query('COMMIT');res.json({ok:true,message:'Đã chấp thuận nhập môn. Bạn nhận bảo hộ của sư phụ.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('disciples invite respond:',e);res.status(500).json({error:'Không thể xử lý lời mời nhập môn.'});}finally{client.release();}
 });
 
 app.post('/api/disciples/permission',auth,async(req,res)=>{
