@@ -108,3 +108,27 @@
 .challenge-result-text{text-align:right;color:var(--muted);font-size:.9rem}
 .challenge-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 @media(max-width:760px){.challenge-rules{grid-template-columns:1fr}.challenge-card{grid-template-columns:auto 1fr}.challenge-card-actions{grid-column:2;justify-content:flex-start}.challenge-history-row{grid-template-columns:auto 1fr}.challenge-result-text{text-align:left;grid-column:2}.challenge-debuff{align-items:flex-start}}
+
+/* Thú Đường + Linh Pháp */
+.spirit-shop-area{display:grid;gap:18px}
+.spirit-shop-summary{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:18px 20px;border:1px solid var(--gold);background:var(--surface);box-shadow:0 10px 28px rgba(38,50,44,.05)}
+.spirit-shop-summary h3{margin:3px 0;font:700 1.3rem 'Noto Serif SC';color:var(--jade)}
+.spirit-shop-summary small{color:var(--muted)}
+.spirit-shop-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.spirit-shop-card{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:start;padding:17px;border:1px solid var(--line);background:var(--surface);box-shadow:0 8px 24px rgba(38,50,44,.05)}
+.spirit-shop-card.locked{opacity:.72}
+.spirit-shop-icon{width:48px;height:48px;display:grid;place-items:center;border:1px solid var(--gold);background:var(--bg);font-size:1.7rem}
+.spirit-shop-copy{min-width:0}
+.spirit-shop-copy h3{margin:3px 0 5px;font:700 1.05rem 'Noto Serif SC';color:var(--jade)}
+.spirit-shop-copy p,.spirit-shop-copy small{display:block;color:var(--muted);font-size:.72rem;line-height:1.5}
+.spirit-shop-copy small+small{margin-top:3px}
+.spirit-shop-buy{display:grid;gap:8px;justify-items:end;text-align:right;white-space:nowrap}
+.spirit-shop-buy b{color:var(--gold)}
+.spirit-shop-note{padding:12px 14px;border:1px dashed var(--gold);color:var(--muted);font-size:.78rem;background:rgba(169,130,58,.05)}
+.shop-ranking{padding:18px;border:1px solid var(--line);background:var(--surface)}
+.shop-ranking-list{display:grid;gap:7px}
+.shop-ranking-row{display:grid;grid-template-columns:32px 30px minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);background:var(--bg)}
+.shop-ranking-row>span{font-size:1.15rem}.shop-ranking-row strong,.shop-ranking-row small{display:block}.shop-ranking-row small{color:var(--muted);font-size:.68rem}.shop-ranking-row em{font-style:normal;color:var(--muted);font-size:.66rem;text-align:right}
+@media(max-width:760px){.spirit-shop-grid{grid-template-columns:1fr}.spirit-shop-card{grid-template-columns:auto 1fr}.spirit-shop-buy{grid-column:2;justify-items:start;text-align:left}.spirit-shop-summary{flex-direction:column;align-items:flex-start}.shop-ranking-row{grid-template-columns:28px 28px minmax(0,1fr)}.shop-ranking-row em{grid-column:3;text-align:left}}
+
+.equipment-area{display:grid;gap:18px}.equipment-power{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:20px;border:1px solid var(--gold);background:var(--surface)}.equipment-power strong{font:800 1.7rem 'Noto Serif SC';color:var(--jade)}.equipment-slots{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.equipment-slot,.equipment-item{border:1px solid var(--line);background:var(--surface);padding:17px;box-shadow:0 8px 24px rgba(38,50,44,.05)}.equipment-slot h3,.equipment-item h3{margin:4px 0 7px;color:var(--jade);font:700 1.05rem 'Noto Serif SC'}.equipment-slot p,.equipment-item p{color:var(--muted);font-size:.76rem;line-height:1.5}.equipment-list{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.equipment-item .equip-meta{display:block;color:var(--gold);font-size:.72rem;margin:4px 0}.equipment-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.equipment-empty{padding:12px;border:1px dashed var(--gold);color:var(--muted);font-size:.78rem}@media(max-width:800px){.equipment-slots,.equipment-list{grid-template-columns:1fr}.equipment-power{align-items:flex-start;flex-direction:column}}
