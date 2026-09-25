@@ -1,0 +1,37 @@
+HÀN THIÊN MÔN v3.6.25 — FIX LỖI BÍ CẢNH / POSTGRESQL
+
+Đã sửa trực tiếp từ v3.6.24.
+
+1. Bổ sung runtime schema migration cho Bí Cảnh:
+- secret_realms
+- secret_realm_contributions
+- secret_realm_runs
+Các cột mới sẽ được tự động tạo nếu Render PostgreSQL đang dùng schema cũ.
+
+2. Sửa API GET /api/bicanh:
+- Không gọi sync từng Bí Cảnh bằng nhiều query có tham số.
+- Dọn Bí Cảnh hết hạn bằng 2 query rõ ràng.
+- Lấy danh sách Bí Cảnh bằng một query ổn định.
+- Tính contributed_total từ lịch sử đóng góp.
+- Trả lỗi PostgreSQL chi tiết hơn để dễ chẩn đoán nếu DB còn thiếu cấu trúc.
+
+3. Sửa biểu thức thời gian PostgreSQL trong Bí Cảnh:
+- Thay kiểu NOW()+($n||' minutes')::interval bằng ($n::double precision * INTERVAL '1 minute').
+- Tránh lỗi bind/kiểu tham số khi PostgreSQL/Render xử lý prepared statement.
+
+4. Không thay đổi luật gameplay Bí Cảnh:
+- 9 Bí Cảnh theo 9 đại cảnh giới.
+- Nhiều môn nhân có thể đóng góp linh thạch.
+- Đủ linh thạch thì mở cửa 60 phút.
+- Cảnh giới cao tiến vào Bí Cảnh thấp vẫn có nguy cơ phá vỡ linh áp.
+- Thành công/thất bại vẫn nhận cơ duyên hoặc debuff như trước.
+
+Đã kiểm tra cú pháp:
+node --check server.js: OK
+
+v3.6.26 - FIX MISSING COLUMN TRÊN RENDER
+- Bổ sung runtime migration cho secret_realms.created_at.
+- Bổ sung/chuẩn hóa các cột catalog mà Bí Cảnh dùng khi phát thưởng: treasure_items.min_realm và các cột mô tả; spirit_roots_catalog.min_realm và các cột mô tả; spirit_beasts_catalog.min_realm và các cột thuộc tính.
+- API GET /api/bicanh không còn dùng SELECT sr.* mà chọn rõ các cột cần thiết.
+- Log lỗi Bí Cảnh ghi thêm position/where/query để xác định chính xác lỗi PostgreSQL nếu DB cũ còn bất thường.
+- node --check server.js: OK.

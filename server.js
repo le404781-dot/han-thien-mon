@@ -137,6 +137,31 @@ async function ensureRuntimeSchema() {
     ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS debuff_until TIMESTAMPTZ;
     ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
     ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    -- v3.6.26: older Render databases may also have legacy catalog tables
+    -- without the columns used when a member enters/receives Bí Cảnh loot.
+    ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS id BIGSERIAL;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Vật phẩm';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS price INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS spirit_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS support TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm_tier INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS attack INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS defense INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS speed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS spirit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS skill TEXT NOT NULL DEFAULT '';
   `);
 }
 
@@ -2138,7 +2163,9 @@ app.get('/api/bicanh',auth,async(req,res)=>{
     await query(`UPDATE secret_realms SET status='funding',funded_stones=0,active_until=NULL WHERE status='active' AND active_until IS NOT NULL AND active_until<=NOW()`);
     await query(`UPDATE secret_realms SET status='funding',funded_stones=0,paused_until=NULL WHERE status='paused' AND paused_until IS NOT NULL AND paused_until<=NOW()`);
     const raw=(await query(`
-      SELECT sr.*,
+      SELECT sr.id,sr.name,sr.description,sr.required_realm_index,sr.required_realm_name,
+             sr.activation_cost,sr.funded_stones,sr.status,sr.active_until,sr.paused_until,
+             sr.danger_percent,sr.debuff_percent,sr.loot_tier,sr.created_at,
              COALESCE((SELECT SUM(src.amount) FROM secret_realm_contributions src WHERE src.realm_id=sr.id),0)::int AS contributed_total
       FROM secret_realms sr
       ORDER BY sr.required_realm_index ASC, sr.id ASC
@@ -2151,7 +2178,7 @@ app.get('/api/bicanh',auth,async(req,res)=>{
     }));
     res.json({realms,me:{...me,stage:stage.stage,realmIndex:stage.realmIndex}});
   }catch(e){
-    console.error('bicanh load:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,query:e?.query});
+    console.error('bicanh load:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,position:e?.position,where:e?.where,query:e?.query});
     res.status(500).json({error:`Không thể mở Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});
   }
 });
