@@ -1,0 +1,14 @@
+HÀN THIÊN MÔN v3.4 - BẢN ĐÃ SỬA
+
+Các lỗi đã rà soát và sửa:
+1. Hiển thị danh sách môn nhân: /api/data trước đây đọc nhầm users thay vì bảng members; nay hiển thị đúng dữ liệu thành viên tĩnh và tài khoản đăng ký.
+2. Tu luyện hằng ngày: /api/profile nay trả trainCount/maxDaily để giao diện biết số lượt còn lại và kích hoạt đúng chế độ tu luyện online sau khi đủ lượt.
+3. Tu luyện: nút Vận công không tự bật lại sau khi đã đủ lượt trong ngày.
+4. Thành tích: thêm khu vực hiển thị Huy hiệu tu hành để /api/achievements có nơi render.
+5. Cường hóa: Tu Di Giới được tính theo số ô vật phẩm (COUNT item slots), đồng bộ với logic Tàng Bảo Các, thay vì tổng số lượng.
+6. Kiểm tra cú pháp Node.js cho server.js và script.js: đạt.
+7. Kiểm tra đối chiếu API client/server: các endpoint frontend đang gọi đều có route tương ứng.
+
+Lưu ý triển khai:
+- Vẫn cần PostgreSQL và DATABASE_URL.
+- Bản này không thể kiểm thử giao dịch PostgreSQL thực tế nếu chưa kết nối database.

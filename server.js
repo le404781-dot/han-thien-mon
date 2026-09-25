@@ -424,13 +424,18 @@ app.get('/api/health',(req,res)=>res.json({ok:true,service:'Hàn Thiên Môn'}))
 app.get('/api/data',async(req,res)=>{
   try {
     const [m,mem,t,u] = await Promise.all([
-      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier
-             FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY u.id`),
+      query(`SELECT id,name,nick,emoji,role,bio,birthday,hobby,tags FROM members ORDER BY id`),
       query('SELECT icon,title,description FROM memories ORDER BY id'),
       query('SELECT year,title,description FROM timeline ORDER BY id'),
       query('SELECT COUNT(*)::int AS c FROM users')
     ]);
-    res.json({members:m.rows.map(x=>({...x,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier}/9 tầng`]})),memories:mem.rows,timeline:t.rows,userCount:u.rows[0].c});
+    const [accounts] = await Promise.all([
+      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier
+             FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY u.id`)
+    ]);
+    const staticMembers=m.rows.map(x=>({...x,tags:String(x.tags||'').split(',').map(v=>v.trim()).filter(Boolean)}));
+    const accountMembers=accounts.rows.map(x=>({...x,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true}));
+    res.json({members:[...staticMembers,...accountMembers],memories:mem.rows,timeline:t.rows,userCount:u.rows[0].c});
   } catch(e) { res.status(500).json({error:'Không thể tải dữ liệu.'}); }
 });
 
@@ -483,9 +488,13 @@ app.get('/api/profile',auth,async(req,res)=>{
     const stage=stageFor(p.spirit_power);
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
+    await touchDailyActivity(p.id);
+    const activity=(await query('SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1',[p.id])).rows[0];
+    const trainCount=String(activity?.activity_date||'').slice(0,10)===today ? Number(activity.train_count)||0 : 0;
+    const maxDaily=Math.max(2,10-stage.realmIndex);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30}});
+    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:attributesFor(p.spirit_power),spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
   } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
 });
 
@@ -814,7 +823,7 @@ app.post('/api/enhance/roll',auth,async(req,res)=>{
     const poolItems=[['Linh Phù Cường Hóa',55],['Tinh Thạch Cường Hóa',28],['Huyền Thiết Cường Hóa',12],['Thiên Đạo Cường Hóa Thạch',5]];
     const total=poolItems.reduce((n,x)=>n+x[1],0); let n=crypto.randomInt(1,total+1), chosen=poolItems[0][0]; for(const x of poolItems){n-=x[1];if(n<=0){chosen=x[0];break;}}
     const item=(await client.query('SELECT id,name,description FROM treasure_items WHERE name=$1',[chosen])).rows[0];
-    const used=Number((await client.query('SELECT COALESCE(SUM(quantity),0)::int AS used FROM inventory WHERE user_id=$1',[req.session.user_id])).rows[0].used); const cap=Number((await client.query('SELECT storage_capacity FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0].storage_capacity)||30;
+    const used=Number((await client.query('SELECT COUNT(*)::int AS used FROM inventory WHERE user_id=$1 AND quantity>0',[req.session.user_id])).rows[0].used); const cap=Number((await client.query('SELECT storage_capacity FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0].storage_capacity)||30;
     if(used>=cap){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}).`});}
     const nr=(await client.query(`UPDATE profiles SET spirit_power=spirit_power-$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,[req.session.user_id,cost])).rows[0];
     const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW() RETURNING quantity`,[req.session.user_id,item.id]);
