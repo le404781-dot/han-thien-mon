@@ -146,6 +146,27 @@ function stageFor(spirit) {
 }
 function rankFor(spirit) { return RANKS[realmIndexFor(spirit)]; }
 
+const TECHNIQUE_GRADES = ['Hạ Phẩm','Trung Phẩm','Thượng Phẩm'];
+function techniqueSlots(realmIndex){ return Math.min(18, 2 + Math.floor(Math.max(0,Number(realmIndex)||0)/2)); }
+
+function techniquePowerFor(rows){ return (rows||[]).reduce((sum,x)=>sum+(Number(x.power_bonus)||0),0); }
+function techniqueTrainingBonusFor(rows){ return (rows||[]).reduce((sum,x)=>sum+(Number(x.training_bonus_percent)||0),0); }
+
+const MANSION_SEEDS = [
+  ['Tụ Linh Thảo Lư','Phàm','Động phủ sơ cấp, tụ linh khí chậm nhưng ổn định.',500,12,0],
+  ['Thanh Vân Động','Hạ Phẩm','Động phủ thanh vân, linh khí dày hơn sơn môn.',1500,30,1],
+  ['Hàn Nguyệt Phủ','Trung Phẩm','Hàn nguyệt linh tuyền liên tục hội tụ linh lực.',4000,70,2],
+  ['Kim Đan Linh Phủ','Thượng Phẩm','Linh mạch kim đan, tốc độ tích lũy linh lực rõ rệt.',9000,150,3],
+  ['Nguyên Anh Thiên Phủ','Hiếm','Thiên địa linh khí hội tụ, thích hợp đại tu sĩ.',20000,320,4],
+  ['Hóa Thần Tiên Phủ','Sử Thi','Tiên khí sơ hiện, linh lực tự động tăng mạnh.',45000,700,5],
+  ['Luyện Hư Hư Thiên Phủ','Sử Thi','Hư không linh mạch, linh lực cuồn cuộn không ngừng.',90000,1500,6],
+  ['Đại Thừa Đạo Phủ','Thần Thoại','Đạo vận bao phủ động phủ, tốc độ tụ linh cực cao.',180000,3200,7],
+  ['Độ Kiếp Thiên Phủ','Thần Thoại','Thiên môn linh phủ, linh lực dâng trào như đại kiếp.',360000,7000,8],
+  ['Tiên Giới Động Thiên','Tiên Phẩm','Động thiên tiên giới, tiên khí liên tục hội tụ.',700000,15000,9],
+  ['Huyền Tiên Đạo Cung','Tiên Phẩm','Đạo cung huyền tiên, tiên khí tinh thuần.',1400000,32000,13],
+  ['Tiên Đế Thiên Cung','Chí Tôn','Thiên cung tối cao, tiên khí và đại đạo cùng hội tụ.',3000000,70000,17]
+];
+
 // Thưởng đột phá cảnh giới: mỗi lần bước sang một đại cảnh giới mới,
 // môn nhân nhận đúng số linh thạch tương ứng với chi phí khởi động bí cảnh của cảnh giới đó.
 // Dùng bảng unique để không thể nhận lặp do reload, retry hoặc nhiều request đồng thời.
@@ -234,6 +255,42 @@ async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_legends_updated_at ON legends(updated_at DESC);
+    CREATE TABLE IF NOT EXISTS cultivation_techniques (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      realm_index INTEGER NOT NULL,
+      realm_name TEXT NOT NULL,
+      grade TEXT NOT NULL,
+      description TEXT NOT NULL,
+      price_stones INTEGER NOT NULL CHECK(price_stones >= 0),
+      power_bonus INTEGER NOT NULL DEFAULT 0,
+      training_bonus_percent INTEGER NOT NULL DEFAULT 0,
+      ability TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS user_techniques (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      technique_id INTEGER NOT NULL REFERENCES cultivation_techniques(id) ON DELETE CASCADE,
+      learned_realm_index INTEGER NOT NULL DEFAULT 0,
+      learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,technique_id)
+    );
+    CREATE TABLE IF NOT EXISTS mansions (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      grade TEXT NOT NULL,
+      description TEXT NOT NULL,
+      price_stones INTEGER NOT NULL CHECK(price_stones >= 0),
+      spirit_per_hour INTEGER NOT NULL CHECK(spirit_per_hour > 0),
+      min_realm INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS user_mansions (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      mansion_id INTEGER NOT NULL REFERENCES mansions(id) ON DELETE RESTRICT,
+      active BOOLEAN NOT NULL DEFAULT FALSE,
+      last_tick_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS user_professions (
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -574,6 +631,45 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_activity_events_user_type_time ON activity_events(user_id,event_type,created_at);
+    CREATE TABLE IF NOT EXISTS cultivation_techniques (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      realm_index INTEGER NOT NULL,
+      realm_name TEXT NOT NULL,
+      grade TEXT NOT NULL,
+      description TEXT NOT NULL,
+      price_stones INTEGER NOT NULL CHECK(price_stones >= 0),
+      power_bonus INTEGER NOT NULL DEFAULT 0,
+      training_bonus_percent INTEGER NOT NULL DEFAULT 0,
+      ability TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_cultivation_techniques_realm ON cultivation_techniques(realm_index,price_stones,id);
+    CREATE TABLE IF NOT EXISTS user_techniques (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      technique_id INTEGER NOT NULL REFERENCES cultivation_techniques(id) ON DELETE CASCADE,
+      learned_realm_index INTEGER NOT NULL DEFAULT 0,
+      learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,technique_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_techniques_user ON user_techniques(user_id);
+    CREATE TABLE IF NOT EXISTS mansions (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      grade TEXT NOT NULL,
+      description TEXT NOT NULL,
+      price_stones INTEGER NOT NULL CHECK(price_stones >= 0),
+      spirit_per_hour INTEGER NOT NULL CHECK(spirit_per_hour > 0),
+      min_realm INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS user_mansions (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      mansion_id INTEGER NOT NULL REFERENCES mansions(id) ON DELETE RESTRICT,
+      active BOOLEAN NOT NULL DEFAULT FALSE,
+      last_tick_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_mansions_active ON user_mansions(active);
     CREATE TABLE IF NOT EXISTS ascension_tribulations (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 9),
@@ -642,6 +738,27 @@ async function initDb() {
     ['Cửu Thiên Long Tước','Linh thú','Linh thú hiếm cấp cao, mang huyết mạch long tước.',5000,0,5]
   ];
   for (const item of beastItems) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO NOTHING',item);
+
+  // Tàng Thư Các: mỗi đại cảnh giới có 3 phẩm công pháp, chỉ mở đến cảnh giới hiện tại.
+  for (let ri=0; ri<RANKS.length; ri++) {
+    for (let gi=0; gi<TECHNIQUE_GRADES.length; gi++) {
+      const grade=TECHNIQUE_GRADES[gi];
+      const suffix=['Nhập Môn','Chân Giải','Đạo Tạng'][gi];
+      const base=(ri+1)*50;
+      const mult=[1,2,4][gi];
+      const price=Math.max(100, (ri+1)*120*mult);
+      const training=2+ri+[0,2,5][gi];
+      const name=`${RANKS[ri].name} · ${suffix}`;
+      const desc=`Công pháp ${grade.toLowerCase()} dành cho ${RANKS[ri].name}. Học thành giúp tăng chiến lực và hiệu quả tu luyện.`;
+      const ability=`+${training}% hiệu quả vận công; +${base*mult} chiến lực.`;
+      await query(`INSERT INTO cultivation_techniques(name,realm_index,realm_name,grade,description,price_stones,power_bonus,training_bonus_percent,ability)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        ON CONFLICT(name) DO UPDATE SET realm_index=EXCLUDED.realm_index,realm_name=EXCLUDED.realm_name,grade=EXCLUDED.grade,description=EXCLUDED.description,price_stones=EXCLUDED.price_stones,power_bonus=EXCLUDED.power_bonus,training_bonus_percent=EXCLUDED.training_bonus_percent,ability=EXCLUDED.ability`,
+        [name,ri,RANKS[ri].name,grade,desc,price,base*mult,training,ability]);
+    }
+  }
+  for (const m of MANSION_SEEDS) await query(`INSERT INTO mansions(name,grade,description,price_stones,spirit_per_hour,min_realm) VALUES($1,$2,$3,$4,$5,$6)
+    ON CONFLICT(name) DO UPDATE SET grade=EXCLUDED.grade,description=EXCLUDED.description,price_stones=EXCLUDED.price_stones,spirit_per_hour=EXCLUDED.spirit_per_hour,min_realm=EXCLUDED.min_realm`,m);
 
   const secretRealmSeeds = [
     ['Thanh Vân Bí Cảnh','Bí cảnh sơ cấp, thích hợp Luyện Khí và Trúc Cơ; nguy hiểm thấp.',0,'Luyện Khí',500,8,5,0],
@@ -857,6 +974,25 @@ async function ensureProfile(userId) {
   if(legacy?.spirit_root){ const rr=(await query('SELECT id FROM spirit_roots_catalog WHERE name=$1',[legacy.spirit_root])).rows[0]; if(rr){ await query('INSERT INTO owned_spirit_roots(user_id,root_id,quantity) VALUES($1,$2,1) ON CONFLICT(user_id,root_id) DO NOTHING',[userId,rr.id]); if(!legacy.equipped_root_id) await query('UPDATE profiles SET equipped_root_id=$2 WHERE user_id=$1',[userId,rr.id]); }}
 }
 
+async function settleMansionIncome(client, userId){
+  const row=(await client.query(`SELECT um.active,um.last_tick_at,m.spirit_per_hour,m.name,m.grade
+    FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1 FOR UPDATE`,[userId])).rows[0];
+  if(!row) return {gain:0,active:false};
+  if(!row.active){ await client.query(`UPDATE user_mansions SET last_tick_at=NOW() WHERE user_id=$1`,[userId]); return {gain:0,active:false,name:row.name,grade:row.grade,rate:Number(row.spirit_per_hour)||0}; }
+  const elapsed=Math.max(0,Date.now()-new Date(row.last_tick_at).getTime());
+  const hours=Math.floor(elapsed/3600000);
+  if(hours<=0) return {gain:0,active:true,name:row.name,grade:row.grade,rate:Number(row.spirit_per_hour)||0};
+  const gain=hours*(Number(row.spirit_per_hour)||0);
+  const oldPower=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0]?.spirit_power||0;
+  const oldStage=stageFor(Number(oldPower));
+  const newPower=Number(oldPower)+gain;
+  const newStage=stageFor(newPower);
+  await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,updated_at=NOW() WHERE user_id=$1`,[userId,newPower,gain,newStage.realm,newStage.tier]);
+  const breakthroughRewards=await grantRealmBreakthroughRewards(client,userId,oldStage.realmIndex,newStage.realmIndex);
+  await client.query(`UPDATE user_mansions SET last_tick_at=last_tick_at+($2 * INTERVAL '1 hour') WHERE user_id=$1`,[userId,hours]);
+  return {gain,active:true,name:row.name,grade:row.grade,rate:Number(row.spirit_per_hour)||0,breakthroughRewards};
+}
+
 async function ensureAchievements(userId, spirit) {
   await query(`INSERT INTO achievements(user_id,title,description,points) VALUES($1,'Nhập môn Hàn Thiên','Đã ghi danh và bước qua sơn môn.',10) ON CONFLICT (user_id,title) DO NOTHING`, [userId]);
   const milestones = [
@@ -1042,6 +1178,8 @@ app.get('/api/profile',auth,async(req,res)=>{
   try {
     await ensureRuntimeSchema();
     await ensureProfile(req.session.user_id);
+    const mansionClient=await pool.connect();
+    try{await mansionClient.query('BEGIN');await settleMansionIncome(mansionClient,req.session.user_id);await mansionClient.query('COMMIT');}catch(e){try{await mansionClient.query('ROLLBACK')}catch{};throw e;}finally{mansionClient.release();}
     const r=await query(`SELECT u.id,u.username,u.display_name,u.created_at,p.*,
       COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
       COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count
@@ -1058,11 +1196,15 @@ app.get('/api/profile',auth,async(req,res)=>{
       LEFT JOIN spirit_roots_catalog r ON r.id=p.equipped_root_id
       LEFT JOIN treasure_items a ON a.id=p.equipped_artifact_id
       WHERE p.user_id=$1`,[p.id])).rows[0]||{};
+    const techniqueRows=(await query(`SELECT ct.power_bonus,ct.training_bonus_percent,ct.name,ct.grade,ct.ability
+      FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[p.id])).rows;
+    const mansion=(await query(`SELECT um.active,m.id,m.name,m.grade,m.spirit_per_hour,um.last_tick_at FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1`,[p.id])).rows[0]||null;
     const baseAttr=attributesFor(p.spirit_power);
     const equipmentPower=(Number(eq.beast_power)||0)+(Number(eq.root_power)||0)+(Number(eq.artifact_power)||0);
+    const techniquePower=techniquePowerFor(techniqueRows);
     const secretDebuffActive=p.secret_realm_debuff_until && new Date(p.secret_realm_debuff_until)>new Date();
     const secretDebuffPct=secretDebuffActive?Math.max(0,Number(p.secret_realm_debuff_percent)||0):0;
-    const combatPower=Math.max(1,Math.round((Object.values(baseAttr).reduce((n,v)=>n+(Number(v)||0),0)+equipmentPower)*(1-secretDebuffPct/100)));
+    const combatPower=Math.max(1,Math.round((Object.values(baseAttr).reduce((n,v)=>n+(Number(v)||0),0)+equipmentPower+techniquePower)*(1-secretDebuffPct/100)));
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
     await touchDailyActivity(p.id);
@@ -1071,7 +1213,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const maxDaily=Math.max(2,10-stage.realmIndex);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower},equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
+    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower},techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:techniqueSlots(stage.realmIndex),mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -1089,6 +1231,97 @@ app.patch('/api/profile',auth,async(req,res)=>{
   } catch(e){res.status(500).json({error:'Không thể cập nhật hồ sơ.'});}
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TÀNG THƯ CÁC · Công pháp theo cảnh giới
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/codex',auth,async(req,res)=>{
+  try{
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const settled=await settleMansionIncome(client,req.session.user_id);
+      await client.query('COMMIT');
+      const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+      const st=stageFor(Number(p?.spirit_power)||0);
+      const rows=(await query(`SELECT ct.id,ct.name,ct.realm_index,ct.realm_name,ct.grade,ct.description,ct.price_stones,ct.power_bonus,ct.training_bonus_percent,ct.ability,
+        EXISTS(SELECT 1 FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id) AS learned
+        FROM cultivation_techniques ct WHERE ct.realm_index <= $2 ORDER BY ct.realm_index,ct.price_stones,ct.id`,[req.session.user_id,st.realmIndex])).rows;
+      res.json({rows,stage:st.stage,realmIndex:st.realmIndex,slots:techniqueSlots(st.realmIndex),used:rows.filter(x=>x.learned).length,spiritStones:Number(p?.spirit_stones)||0,mansionSettled:settled.gain||0});
+    }finally{client.release();}
+  }catch(e){console.error('codex load:',e);res.status(500).json({error:'Không thể mở Tàng Thư Các.'});}
+});
+
+app.post('/api/codex/learn',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const id=Number(req.body?.id); if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Công pháp không hợp lệ.'});
+    await client.query('BEGIN');
+    await settleMansionIncome(client,req.session.user_id);
+    const p=(await client.query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    const st=stageFor(Number(p?.spirit_power)||0);
+    const tech=(await client.query('SELECT * FROM cultivation_techniques WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    if(!tech){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy công pháp.'});}
+    if(st.realmIndex<Number(tech.realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Công pháp yêu cầu ${tech.realm_name}. Bạn hiện ở ${st.stage}.`});}
+    const learned=(await client.query('SELECT COUNT(*)::int AS c FROM user_techniques WHERE user_id=$1',[req.session.user_id])).rows[0].c;
+    if(learned>=techniqueSlots(st.realmIndex)){await client.query('ROLLBACK');return res.status(400).json({error:`${st.stage} chỉ được học tối đa ${techniqueSlots(st.realmIndex)} công pháp.`});}
+    if((await client.query('SELECT 1 FROM user_techniques WHERE user_id=$1 AND technique_id=$2',[req.session.user_id,id])).rowCount){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã học công pháp này.'});}
+    const price=Number(tech.price_stones)||0, stones=Number(p.spirit_stones)||0;
+    if(stones<price){await client.query('ROLLBACK');return res.status(400).json({error:`Linh thạch không đủ. Cần ${price.toLocaleString('vi-VN')} linh thạch.`});}
+    await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,price]);
+    await client.query('INSERT INTO user_techniques(user_id,technique_id,learned_realm_index) VALUES($1,$2,$3)',[req.session.user_id,id,st.realmIndex]);
+    await client.query('COMMIT');
+    res.json({ok:true,name:tech.name,price,powerBonus:Number(tech.power_bonus)||0,trainingBonus:Number(tech.training_bonus_percent)||0,ability:tech.ability,slots:techniqueSlots(st.realmIndex),used:learned+1,message:`Đã mua và học ${tech.name}. Chiến lực +${Number(tech.power_bonus||0).toLocaleString('vi-VN')}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('codex learn:',e);res.status(500).json({error:'Không thể mua và học công pháp.'});}finally{client.release();}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ĐỘNG PHỦ · mua theo phẩm cấp, tự động tích linh lực khi khởi động
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/mansion',auth,async(req,res)=>{
+  try{
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const settled=await settleMansionIncome(client,req.session.user_id);
+      await client.query('COMMIT');
+      const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+      const st=stageFor(Number(p?.spirit_power)||0);
+      const owned=(await query(`SELECT um.mansion_id,um.active,um.last_tick_at,m.name,m.grade,m.description,m.price_stones,m.spirit_per_hour,m.min_realm FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1`,[req.session.user_id])).rows[0]||null;
+      const mansions=(await query('SELECT * FROM mansions ORDER BY id')).rows;
+      res.json({mansions,owned,stage:st.stage,realmIndex:st.realmIndex,spiritPower:Number(p?.spirit_power)||0,spiritStones:Number(p?.spirit_stones)||0,settledGain:settled.gain||0});
+    }finally{client.release();}
+  }catch(e){console.error('mansion load:',e);res.status(500).json({error:'Không thể mở Động Phủ.'});}
+});
+
+app.post('/api/mansion/buy',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const id=Number(req.body?.id); if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Động phủ không hợp lệ.'});
+    await client.query('BEGIN');
+    const settled=await settleMansionIncome(client,req.session.user_id);
+    const p=(await client.query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    const m=(await client.query('SELECT * FROM mansions WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    if(!m){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy động phủ.'});}
+    const st=stageFor(Number(p?.spirit_power)||0);
+    if(st.realmIndex<Number(m.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`Động phủ yêu cầu ${RANKS[m.min_realm]?.name||'cảnh giới cao hơn'}.`});}
+    const owned=(await client.query('SELECT mansion_id FROM user_mansions WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    if(owned){if(Number(owned.mansion_id)>=Number(m.id)){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã sở hữu động phủ này hoặc phẩm cấp cao hơn.'});} if(Number(m.id)!==Number(owned.mansion_id)+1){await client.query('ROLLBACK');return res.status(400).json({error:'Phải mua động phủ theo thứ tự phẩm cấp từ thấp lên cao.'});}}
+    const price=Number(m.price_stones)||0, stones=Number(p.spirit_stones)||0;
+    if(stones<price){await client.query('ROLLBACK');return res.status(400).json({error:`Linh thạch không đủ. Cần ${price.toLocaleString('vi-VN')} linh thạch.`});}
+    await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,price]);
+    if(owned) await client.query('UPDATE user_mansions SET mansion_id=$2,active=FALSE,last_tick_at=NOW() WHERE user_id=$1',[req.session.user_id,id]);
+    else await client.query('INSERT INTO user_mansions(user_id,mansion_id,active,last_tick_at) VALUES($1,$2,FALSE,NOW())',[req.session.user_id,id]);
+    await client.query('COMMIT');
+    res.json({ok:true,mansion:m.name,grade:m.grade,price,spiritPerHour:Number(m.spirit_per_hour),message:`Mua ${m.name} thành công. Hãy khởi động động phủ để bắt đầu tự động tích linh lực.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('mansion buy:',e);res.status(500).json({error:'Không thể mua động phủ.'});}finally{client.release();}
+});
+
+app.post('/api/mansion/toggle',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN'); const owned=(await client.query(`SELECT um.active,m.name FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0]; if(!owned){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn chưa mua động phủ.'});} const settled=await settleMansionIncome(client,req.session.user_id); const active=!Boolean(owned.active); await client.query('UPDATE user_mansions SET active=$2,last_tick_at=NOW() WHERE user_id=$1',[req.session.user_id,active]); await client.query('COMMIT'); res.json({ok:true,active,gain:settled.gain||0,message:active?`Đã khởi động ${owned.name}. Vận công bị khóa hoàn toàn.`:`Đã ngưng ${owned.name}. Có thể vận công trở lại.`});}
+  catch(e){try{await client.query('ROLLBACK')}catch{};console.error('mansion toggle:',e);res.status(500).json({error:'Không thể thay đổi trạng thái động phủ.'});}finally{client.release();}
+});
 
 app.get('/api/ascension',auth,async(req,res)=>{
   try{
@@ -1137,6 +1370,8 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
   try {
     await client.query('BEGIN');
     const userId=req.session.user_id;
+    const mansionState=await settleMansionIncome(client,userId);
+    if(mansionState.active){await client.query('ROLLBACK');return res.status(423).json({error:`Động phủ ${mansionState.name} đang khởi động. Vận công bị khóa hoàn toàn cho đến khi bạn ngưng động phủ.`});}
     const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const aR=await client.query('SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1 FOR UPDATE',[userId]);
     let trainCount=0;
@@ -1147,9 +1382,11 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     const currentStage=stageFor(Number(prof.spirit_power)||0);
     const maxDaily=Math.max(2,10-currentStage.realmIndex);
     if(trainCount>=maxDaily){await client.query('ROLLBACK');return res.status(429).json({error:`Hôm nay đã vận công ${trainCount}/${maxDaily} lần. Cảnh giới càng cao càng khó tu luyện; hãy quay lại ngày mai.`,trainCount,maxDaily});}
+    const techRows=(await client.query(`SELECT ct.training_bonus_percent FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1`,[userId])).rows;
+    const techniqueTrainingBonus=techniqueTrainingBonusFor(techRows);
     const baseMax=Math.max(28,72-currentStage.realmIndex*5-currentStage.tier*2);
     const baseMin=Math.max(12,Math.floor(baseMax*0.55));
-    const rawGain=crypto.randomInt(baseMin,baseMax+1); const gain=Math.max(1,Math.round(rawGain*(1+rarityBonus(prof.spirit_root_rarity))));
+    const rawGain=crypto.randomInt(baseMin,baseMax+1); const gain=Math.max(1,Math.round(rawGain*(1+rarityBonus(prof.spirit_root_rarity)+techniqueTrainingBonus/100)));
     const r=await client.query('UPDATE profiles SET spirit_power=spirit_power+$2, experience=experience+$2, updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,experience',[userId,gain]);
     const spirit=r.rows[0].spirit_power; const stage=stageFor(spirit);
     const breakthroughRewards=await grantRealmBreakthroughRewards(client,userId,currentStage.realmIndex,stage.realmIndex);
@@ -1172,6 +1409,8 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
     const client=await pool.connect();
     try{
       await client.query('BEGIN');
+      const mansionState=await settleMansionIncome(client,req.session.user_id);
+      if(mansionState.active){await client.query('COMMIT');return res.json({mode:'mansion',active:true,gain:mansionState.gain,mansion:mansionState.name,message:`Động phủ ${mansionState.name} đang hoạt động; vận công online bị khóa.`});}
       const p=(await client.query(`SELECT spirit_power,last_online_at,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
       const st=stageFor(Number(p.spirit_power)||0);
       const maxDaily=Math.max(2,10-st.realmIndex);
@@ -1188,7 +1427,8 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       const elapsed=Math.max(0,Date.now()-last);
       const minutes=Math.floor(elapsed/60000);
       const dailyCap=600;
-      const rate=1+st.realmIndex;
+      const techRows=(await client.query(`SELECT ct.training_bonus_percent FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1`,[req.session.user_id])).rows;
+      const rate=(1+st.realmIndex)*(1+techniqueTrainingBonusFor(techRows)/100);
       const gain=Math.max(0,Math.min(minutes*rate,dailyCap-earned));
       let spirit=Number(p.spirit_power)||0;
       let breakthroughRewards=[];

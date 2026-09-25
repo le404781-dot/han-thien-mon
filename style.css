@@ -180,3 +180,31 @@
 .disciple-gift-select{flex:1 1 220px;min-width:0;padding:9px;border:1px solid rgba(80,100,80,.3);border-radius:9px;background:#fffdf5;color:inherit}
 .disciple-gift-qty{width:76px;padding:9px;border:1px solid rgba(80,100,80,.3);border-radius:9px;background:#fffdf5;color:inherit}
 @media(max-width:600px){.disciple-gift-select{flex-basis:100%}.disciple-gift-qty{width:78px}.disciple-gift-row .btn{flex:1}}
+
+/* v3.6.22 · Tàng Thư Các + Động Phủ */
+.codex-area,.mansion-area{display:grid;gap:18px}
+.codex-summary,.mansion-summary{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:18px;align-items:center;padding:20px;border:1px solid var(--gold);background:var(--surface);box-shadow:0 10px 28px rgba(38,50,44,.05)}
+.codex-summary h3,.mansion-summary h3{margin:4px 0;font:700 1.35rem 'Noto Serif SC';color:var(--jade)}
+.codex-summary p,.mansion-summary p{margin:5px 0 0;color:var(--muted);font-size:.78rem;line-height:1.55}
+.codex-summary>div:last-of-type,.mansion-summary>div:nth-child(2){display:flex;flex-direction:column;gap:4px;padding:10px 14px;border:1px solid var(--line);background:var(--bg);min-width:120px}
+.codex-summary strong,.mansion-summary strong{font-size:1.1rem}
+.codex-grid,.mansion-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.codex-card,.mansion-card{padding:18px;border:1px solid var(--line);background:var(--surface);box-shadow:0 8px 24px rgba(38,50,44,.05);display:flex;flex-direction:column;gap:8px}
+.codex-card.learned,.mansion-card.owned{border-color:var(--gold);box-shadow:0 8px 26px rgba(169,130,58,.1)}
+.codex-card.locked,.mansion-card.locked{opacity:.58}
+.codex-top,.mansion-top{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.codex-grade{font-size:.68rem;font-weight:900;letter-spacing:.08em;color:#8a3d36}
+.codex-card h3,.mansion-card h3{margin:2px 0;font:700 1.08rem 'Noto Serif SC';color:var(--jade)}
+.codex-card p,.mansion-card p{margin:0;color:var(--muted);font-size:.74rem;line-height:1.55;min-height:54px}
+.codex-card small,.mansion-card small{color:var(--muted);font-size:.7rem;line-height:1.5}
+.codex-meta,.mansion-meta{display:flex;flex-wrap:wrap;gap:7px;margin:4px 0}
+.codex-meta span,.mansion-meta span{padding:5px 8px;border:1px solid var(--line);font-size:.66rem;background:var(--bg)}
+.codex-card .btn,.mansion-card .btn{margin-top:auto}
+.mansion-top{justify-content:flex-start}.mansion-top>span{font-size:1.9rem}
+.mansion-summary .btn{white-space:nowrap}
+.profile-technique-panel,.profile-mansion-panel{margin-top:18px;border:1px solid var(--line,#d8d2bd);background:rgba(255,255,255,.52);padding:18px;border-radius:14px}
+.profile-technique-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:13px}
+.profile-technique-list>div{display:flex;flex-direction:column;gap:3px;padding:11px;border:1px dashed var(--line);background:rgba(250,248,239,.75)}
+.profile-technique-list b{font-size:.85rem}.profile-technique-list span,.profile-technique-list small{font-size:.7rem;color:var(--muted)}
+@media(max-width:900px){.codex-grid,.mansion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.codex-summary,.mansion-summary{grid-template-columns:1fr auto}}
+@media(max-width:650px){.codex-grid,.mansion-grid,.profile-technique-list{grid-template-columns:1fr}.codex-summary,.mansion-summary{grid-template-columns:1fr}.codex-summary>div:last-of-type,.mansion-summary>div:nth-child(2){width:100%}.mansion-summary .btn{width:100%}}

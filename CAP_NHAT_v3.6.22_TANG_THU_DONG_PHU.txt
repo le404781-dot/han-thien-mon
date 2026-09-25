@@ -1,0 +1,30 @@
+HÀN THIÊN MÔN v3.6.22
+
+1. TÀNG THƯ CÁC
+- Thêm bảng cultivation_techniques và user_techniques.
+- Mỗi đại cảnh giới có 3 phẩm công pháp: Hạ Phẩm, Trung Phẩm, Thượng Phẩm.
+- Công pháp được xếp từ cảnh giới thấp đến cao và chỉ hiển thị tới cảnh giới hiện tại.
+- Mỗi cảnh giới có số ô học công pháp giới hạn; mua và học đồng thời trong một giao dịch PostgreSQL.
+- Công pháp cộng chiến lực và tăng % hiệu quả vận công theo công năng.
+- Không thể học công pháp vượt cảnh giới hoặc học trùng.
+
+2. ĐỘNG PHỦ
+- Thêm bảng mansions và user_mansions.
+- 12 phẩm cấp từ Phàm tới Chí Tôn/Tiên Phẩm, mua tuần tự từ thấp lên cao.
+- Mỗi động phủ có tốc độ tụ linh riêng theo giờ.
+- Khi khởi động, hệ thống tính linh lực tích lũy theo thời gian đã trôi qua và cộng vào hồ sơ khi người dùng mở/chạm vào hệ thống.
+- Có thể Ngưng/Khởi động động phủ.
+- Khi động phủ đang khởi động, server khóa hoàn toàn /api/cultivation/train và /api/cultivation/online.
+- Khi ngưng động phủ, có thể vận công lại.
+- Nếu tích lũy linh lực làm đột phá đại cảnh giới, hệ thống cập nhật cảnh giới và thưởng đột phá tương ứng.
+
+3. HỒ SƠ
+- Hiển thị công pháp đã học, tổng chiến lực từ công pháp.
+- Hiển thị động phủ hiện tại, trạng thái và tốc độ tụ linh.
+
+4. DATABASE
+- Schema mới dùng CREATE TABLE IF NOT EXISTS/UPSERT, không yêu cầu xóa database cũ.
+- Seed tự động công pháp và động phủ khi server khởi động.
+
+Kiểm tra cú pháp Node.js: OK.
+Lưu ý: chưa chạy giao dịch PostgreSQL trực tiếp trên Render trong môi trường build này vì không có DATABASE_URL runtime tại đây.
