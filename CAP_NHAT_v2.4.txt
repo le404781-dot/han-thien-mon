@@ -1,0 +1,16 @@
+HÀN THIÊN MÔN v2.4
+
+Cập nhật từ bản người dùng gửi:
+- Cửu đại cảnh giới: Luyện Khí, Trúc Cơ, Kim Đan, Nguyên Anh, Hóa Thần, Luyện Hư, Hợp Thể, Đại Thừa, Độ Kiếp.
+- Mỗi cảnh giới có Nhất Tầng -> Cửu Tầng.
+- Cảnh giới/tầng được tính theo linh lực và lưu vào PostgreSQL.
+- Linh thạch: mỗi ngày nhận 100 linh thạch.
+- Tàng Bảo Các: dùng linh thạch mua đan dược và pháp bảo.
+- Một số vật phẩm yêu cầu cảnh giới tối thiểu.
+- Đan dược mua xong cộng linh lực ngay; pháp bảo được lưu trong túi vật phẩm.
+- Có migration tự động bằng ALTER TABLE, không cần tạo database mới.
+
+DEPLOY:
+1. Giữ nguyên DATABASE_URL/database hiện tại.
+2. Upload/commit toàn bộ file ở thư mục gốc này lên GitHub.
+3. Render -> Manual Deploy -> Deploy latest commit.

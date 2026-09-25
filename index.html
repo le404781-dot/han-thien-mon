@@ -1,20 +1,78 @@
 <!DOCTYPE html>
-<html lang="vi"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><meta name="description" content="Hàn Thiên Môn — sơn môn tiên hiệp, tu luyện, bí cảnh, linh thú và chat tổng."><title>Hàn Thiên Môn | Tiên Hiệp</title><link rel="stylesheet" href="style.css"></head>
-<body><div class="mist mist-a"></div><div class="mist mist-b"></div>
-<header class="topbar"><a class="brand" href="#home"><span class="brand-seal">寒</span><span>Hàn Thiên Môn<small>寒天門 · SƠN MÔN</small></span></a><nav id="nav"><a href="#home">Sơn môn</a><a href="#cultivation">Tu luyện</a><a href="#missions">Nhiệm vụ</a><a href="#caves">Bí cảnh</a><a href="#members">Đệ tử</a><a href="#memories">Ký ức</a><a href="#hall">Đạo trường</a></nav><div class="top-actions"><span id="userBadge" class="user-badge hidden"></span><button id="accountBtn" class="seal-btn">☯ Đăng nhập</button><button id="themeBtn" class="icon-btn">☾</button><button id="menuBtn" class="icon-btn menu-btn">☰</button></div></header>
+<html lang="vi">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Hàn Thiên Môn — sơn môn tiên hiệp, hồ sơ đệ tử, cửu đại cảnh giới, linh thạch, Tàng Bảo Các, chat tổng và ký ức.">
+<title>Hàn Thiên Môn | 寒天門</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="mist mist-a"></div><div class="mist mist-b"></div>
+<header class="topbar">
+  <a class="brand" href="#home"><span class="brand-seal">寒</span><span>Hàn Thiên Môn<small>寒天門 · SƠN MÔN</small></span></a>
+  <nav id="nav"><a href="#home">Sơn môn</a><a href="#profile">Hồ sơ</a><a href="#cultivation">Tu luyện</a><a href="#treasure">Tàng Bảo Các</a><a href="#sect">Môn phái</a><a href="#chat">Chat tổng</a><a href="#gallery">Ký ức</a><a href="#leaderboard">Thành tích</a></nav>
+  <div class="top-actions"><span id="userBadge" class="user-badge hidden"></span><button id="accountBtn" class="seal-btn">☯ Đăng nhập</button><button id="themeBtn" class="icon-btn">☾</button><button id="menuBtn" class="icon-btn menu-btn">☰</button></div>
+</header>
 <main id="home">
-<section class="hero"><div class="hero-content"><span class="eyebrow">☁ THIÊN ĐẠO · SƠN MÔN · 2026</span><h1>HÀN THIÊN<br><span>MÔN</span></h1><p class="hero-sub">Một phương trời tiên hiệp dành cho những người đồng hành. Tu luyện đạo pháp, hành nhiệm vụ, nhập bí cảnh và cùng nhau viết nên môn sử.</p><div class="hero-actions"><a class="btn primary" href="#cultivation">Bắt đầu tu luyện</a><a class="btn ghost" href="#caves">Khám phá bí cảnh</a></div><div class="stats"><div><b id="memberCount">0</b><span>Đệ tử</span></div><div><b id="memoryCount">0</b><span>Ký ức</span></div><div><b>9</b><span>Tầng cảnh giới</span></div></div></div><div class="hero-card"><div class="seal-xl">寒</div><div class="cloud-ring"></div><span class="card-kicker">寒天門</span><h3>Nhất niệm nhập tiên môn</h3><p>“Đồng hành vạn dặm, chẳng phụ một đời tri kỷ.”</p><div class="card-line"></div></div></section>
+<section class="hero">
+ <div class="hero-content">
+  <span class="eyebrow">☁ THIÊN ĐẠO · SƠN MÔN · 2026</span>
+  <h1>HÀN THIÊN<br><span>MÔN</span></h1>
+  <p class="hero-sub">Một phương trời tiên hiệp dành cho những người đồng hành. Lưu danh đệ tử, tu luyện linh lực, kết giao đạo hữu và cùng nhau viết nên môn sử.</p>
+  <div class="hero-actions"><a class="btn primary" href="#profile">Nhập môn</a><a class="btn ghost" href="#gallery">Xem ký ức</a></div>
+  <div class="stats"><div><b id="memberCount">0</b><span>Đệ tử</span></div><div><b id="memoryCount">0</b><span>Ký ức</span></div><div><b id="userCount">0</b><span>Đạo hữu</span></div></div>
+ </div>
+ <div class="hero-card"><div class="seal-xl">寒</div><div class="cloud-ring"></div><span class="card-kicker">寒天門</span><h3>Nhất niệm nhập tiên môn</h3><p>“Đồng hành vạn dặm, chẳng phụ một đời tri kỷ.”</p><div class="card-line"></div></div>
+</section>
 
-<section id="cultivation" class="section"><div class="section-head"><div><span class="eyebrow">☯ TU LUYỆN ĐẠO TRÀNG</span><h2>Con đường cửu tầng</h2></div></div><div id="cultivationPanel" class="panel-grid"><div class="empty-state">Đăng nhập để xem đạo hạnh của ngươi.</div></div></section>
-<section id="missions" class="section alt"><div class="section-head"><div><span class="eyebrow">⚔ TÔNG MÔN NHIỆM VỤ</span><h2>Nhiệm vụ tông môn</h2><p class="muted">Mỗi ngày hoàn thành nhiệm vụ để mở thêm lượt tu luyện và nhận linh thạch.</p></div></div><div id="missionGrid" class="cards-grid"></div></section>
-<section id="caves" class="section"><div class="section-head"><div><span class="eyebrow">◈ BÍ CẢNH</span><h2>Thiên địa bí cảnh</h2><p class="muted">Mỗi bí cảnh mang lại linh lực và linh thạch. Cảnh giới càng cao, bí cảnh càng sâu.</p></div></div><div id="caveGrid" class="cards-grid"></div></section>
-<section id="shop" class="section alt"><div class="section-head"><div><span class="eyebrow">◇ BẢO KHÍ CÁC</span><h2>Pháp bảo · Đan dược</h2><p class="muted">Dùng linh thạch nhận từ nhiệm vụ và bí cảnh để chuẩn bị cho khiêu chiến.</p></div></div><div id="shopGrid" class="cards-grid"></div></section>
-<section id="beast" class="section"><div class="section-head"><div><span class="eyebrow">🐉 LINH THÚ CÁC</span><h2>Thu phục linh thú</h2><p class="muted">Mỗi linh thú yêu cầu cảnh giới khác nhau và ban một hiệu ứng riêng.</p></div></div><div id="beastGrid" class="cards-grid"></div></section>
-<section id="challenge" class="section alt"><div class="section-head"><div><span class="eyebrow">⚔ KHIÊU CHIẾN</span><h2>Đấu pháp</h2><p class="muted">Đạt Nhị Tầng để mở khiêu chiến. Pháp bảo và linh lực giúp tăng chiến lực.</p></div></div><div class="challenge-box"><div><div class="eyebrow">ĐỐI THỦ HÔM NAY</div><h3 id="enemyPower">120</h3><p class="muted">chiến lực</p></div><button class="btn primary" id="challengeBtn">⚔ Xuất chiến</button><div id="challengeMsg" class="result-msg"></div></div></section>
-<section id="members" class="section"><div class="section-head"><div><span class="eyebrow">☯ ĐỆ TỬ BẢNG</span><h2>Danh sách môn nhân</h2></div><input id="searchInput" class="search" type="search" placeholder="⌕ Tìm đạo hiệu, biệt danh..."></div><div id="membersGrid" class="members-grid"></div></section>
-<section id="memories" class="section alt"><div class="section-head"><div><span class="eyebrow">◈ TÀNG KINH CÁC</span><h2>Ký ức lưu ảnh</h2></div></div><div id="galleryGrid" class="gallery-grid"></div></section>
-<section id="timeline" class="section"><div class="section-head"><div><span class="eyebrow">☯ MÔN SỬ</span><h2>Hành trình Hàn Thiên</h2></div></div><div id="timelineList" class="timeline"></div></section>
-<section id="hall" class="section alt"><div class="section-head"><div><span class="eyebrow">✦ ĐẠO TRƯỜNG</span><h2>Chat tổng · Bảng thành tích</h2><p class="muted">Đạo hữu đã nhập môn có thể trò chuyện và lưu thành tích tu luyện.</p></div></div><div class="hall-grid"><div class="chat-card"><div id="chatList" class="chat-list"></div><form id="chatForm" class="chat-form"><input id="chatInput" maxlength="300" placeholder="Truyền âm vào chat tổng..." autocomplete="off"><button class="btn primary">Gửi</button></form></div><div class="rank-card"><div class="rank-head"><span>🏆</span><b>Bảng thành tích</b></div><div id="leaderboard"></div></div></div></section>
-<section class="join-section"><div><span class="eyebrow">✦ NHẬP MÔN</span><h2>Ghi danh vào Hàn Thiên Môn</h2><p>Tạo tài khoản để lưu cảnh giới, linh lực, linh thạch, vật phẩm, linh thú và thành tích trong PostgreSQL.</p></div><button class="btn primary" id="joinBtn">Đăng ký môn nhân</button></section>
-</main><footer><p>寒天門 · Hàn Thiên Môn · Giữ đạo tâm, giữ tình bằng hữu.</p><button id="topBtn" class="btn small">↑ Về sơn môn</button></footer>
-<dialog id="memberModal"><button class="modal-close" id="modalClose">×</button><div id="modalContent"></div></dialog><dialog id="accountModal"><button class="modal-close" id="accountClose">×</button><div id="accountContent"></div></dialog><script src="script.js"></script></body></html>
+<section id="profile" class="section">
+ <div class="section-head"><div><span class="eyebrow">☯ ĐỆ TỬ LỤC</span><h2>Hồ sơ đệ tử</h2></div></div>
+ <div id="profileArea" class="profile-area"></div>
+</section>
+
+<section id="cultivation" class="section alt">
+ <div class="section-head"><div><span class="eyebrow">✦ TU LUYỆN · LINH LỰC</span><h2>Con đường tu hành</h2></div></div>
+ <div id="cultivationArea" class="cultivation-area"></div>
+</section>
+
+<section id="treasure" class="section">
+ <div class="section-head"><div><span class="eyebrow">💎 TÀNG BẢO CÁC · 藏寶閣</span><h2>Linh thạch & Bảo vật</h2></div></div>
+ <div id="treasureArea" class="treasure-area"><div class="empty-state compact"><h3>Đang mở Tàng Bảo Các...</h3></div></div>
+</section>
+
+<section id="sect" class="section">
+ <div class="section-head"><div><span class="eyebrow">☁ SƠN MÔN</span><h2>Hàn Thiên Môn · 寒天門</h2></div></div>
+ <div id="sectArea" class="sect-area"></div>
+</section>
+
+<section id="chat" class="section alt">
+ <div class="section-head"><div><span class="eyebrow">☯ TRUYỀN ÂM</span><h2>Chat tổng</h2></div><span class="live-pill">● TRỰC TUYẾN</span></div>
+ <div id="chatArea" class="chat-shell"></div>
+</section>
+
+<section id="members" class="section">
+ <div class="section-head"><div><span class="eyebrow">☯ ĐỆ TỬ BẢNG</span><h2>Danh sách môn nhân</h2></div><input id="searchInput" class="search" type="search" placeholder="⌕ Tìm đạo hiệu, biệt danh..."></div>
+ <div id="membersGrid" class="members-grid"></div>
+</section>
+
+<section id="leaderboard" class="section alt">
+ <div class="section-head"><div><span class="eyebrow">🏆 THIÊN BẢNG</span><h2>Bảng thành tích</h2></div></div>
+ <div id="leaderboardArea" class="leaderboard-area"></div>
+</section>
+
+<section id="gallery" class="section">
+ <div class="section-head"><div><span class="eyebrow">◈ TÀNG KINH CÁC</span><h2>Ký ức lưu danh</h2></div></div>
+ <div id="galleryGrid" class="gallery-grid"></div>
+</section>
+
+<section id="timeline" class="section alt">
+ <div class="section-head"><div><span class="eyebrow">☯ MÔN SỬ</span><h2>Hành trình Hàn Thiên</h2></div></div>
+ <div id="timelineList" class="timeline"></div>
+</section>
+
+<section class="join-section"><div><span class="eyebrow">✦ NHẬP MÔN</span><h2>Ghi danh vào Hàn Thiên Môn</h2><p>Tạo tài khoản để có hồ sơ đệ tử riêng, tu luyện linh lực, trò chuyện cùng đạo hữu và lưu thành tích trong PostgreSQL.</p></div><button class="btn primary" id="joinBtn">Đăng ký môn nhân</button></section>
+</main>
+<footer><p>寒天門 · Hàn Thiên Môn · Giữ đạo tâm, giữ tình bằng hữu.</p><button id="topBtn" class="btn small">↑ Về sơn môn</button></footer>
+<dialog id="memberModal"><button class="modal-close" id="modalClose">×</button><div id="modalContent"></div></dialog>
+<dialog id="accountModal"><button class="modal-close" id="accountClose">×</button><div id="accountContent"></div></dialog>
+<script src="script.js"></script>
+</body></html>

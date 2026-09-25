@@ -10,93 +10,393 @@ if (!DATABASE_URL) {
   console.error('Thiếu DATABASE_URL. Hãy tạo PostgreSQL và thêm biến môi trường DATABASE_URL trên Render.');
   process.exit(1);
 }
-const pool = new Pool({ connectionString: DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
-async function query(text, params=[]) { return pool.query(text, params); }
-function todayVN(){ return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  max: 5
+});
+
+async function query(text, params = []) { return pool.query(text, params); }
+
+// Cửu Đại Cảnh Giới — mỗi cảnh giới có 9 tầng.
+const RANKS = [
+  { name: 'Luyện Khí', min: 0, max: 999 },
+  { name: 'Trúc Cơ', min: 1000, max: 2999 },
+  { name: 'Kim Đan', min: 3000, max: 6999 },
+  { name: 'Nguyên Anh', min: 7000, max: 14999 },
+  { name: 'Hóa Thần', min: 15000, max: 29999 },
+  { name: 'Luyện Hư', min: 30000, max: 59999 },
+  { name: 'Hợp Thể', min: 60000, max: 119999 },
+  { name: 'Đại Thừa', min: 120000, max: 239999 },
+  { name: 'Độ Kiếp', min: 240000, max: Infinity }
+];
+const TIERS = ['Nhất Tầng','Nhị Tầng','Tam Tầng','Tứ Tầng','Ngũ Tầng','Lục Tầng','Thất Tầng','Bát Tầng','Cửu Tầng'];
+function realmIndexFor(spirit) {
+  return RANKS.map(r=>r.min).reduce((idx,min,i)=>spirit>=min?i:idx,0);
+}
+function stageFor(spirit) {
+  const ri=realmIndexFor(spirit);
+  const r=RANKS[ri];
+  if (!Number.isFinite(r.max)) {
+    const tier=Math.min(9, Math.floor((spirit-r.min)/30000)+1);
+    return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1]};
+  }
+  const span=r.max-r.min+1;
+  const tier=Math.min(9, Math.floor(((spirit-r.min)*9)/span)+1);
+  return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1]};
+}
+function rankFor(spirit) { return RANKS[realmIndexFor(spirit)]; }
+function progressFor(spirit) {
+  const r=rankFor(spirit), s=stageFor(spirit);
+  const nextRealm=RANKS[RANKS.findIndex(x=>x.name===r.name)+1];
+  let tierStart=r.min, tierEnd=Number.isFinite(r.max)?r.max:Infinity;
+  if (Number.isFinite(r.max)) {
+    const span=r.max-r.min+1;
+    tierStart=r.min+Math.floor(((s.tier-1)*span)/9);
+    tierEnd=r.min+Math.floor((s.tier*span)/9)-1;
+  } else {
+    tierStart=r.min+(s.tier-1)*30000;
+    tierEnd=s.tier<9?r.min+s.tier*30000-1:Infinity;
+  }
+  const percent=Number.isFinite(tierEnd)?Math.max(0,Math.min(100,Math.round(((spirit-tierStart+1)/(tierEnd-tierStart+1))*100))):Math.min(100,Math.round(((spirit-tierStart+1)/30000)*100));
+  return {rank:r.name,tier:s.tier,stage:s.stage,tierName:s.tierName,percent,next:nextRealm?.name||null,remaining:nextRealm?Math.max(0,nextRealm.min-spirit):0};
+}
+
+async function initDb() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      salt TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS members (
+      id SERIAL PRIMARY KEY, name TEXT NOT NULL, nick TEXT NOT NULL, emoji TEXT NOT NULL,
+      role TEXT NOT NULL, bio TEXT NOT NULL, birthday TEXT NOT NULL, hobby TEXT NOT NULL, tags TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memories (
+      id SERIAL PRIMARY KEY, icon TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS timeline (
+      id SERIAL PRIMARY KEY, year TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS profiles (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT 'Tân đệ tử',
+      sect TEXT NOT NULL DEFAULT 'Hàn Thiên Môn',
+      position TEXT NOT NULL DEFAULT 'Ngoại môn đệ tử',
+      rank TEXT NOT NULL DEFAULT 'Luyện Khí',
+      spirit_power INTEGER NOT NULL DEFAULT 0,
+      experience INTEGER NOT NULL DEFAULT 0,
+      bio TEXT NOT NULL DEFAULT '',
+      birthday TEXT NOT NULL DEFAULT '',
+      hobby TEXT NOT NULL DEFAULT '',
+      avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
+
+    CREATE TABLE IF NOT EXISTS treasure_items (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      price INTEGER NOT NULL CHECK(price >= 0),
+      spirit_gain INTEGER NOT NULL DEFAULT 0,
+      min_realm INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS inventory (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,item_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS achievements (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      points INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id, title)
+    );
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await query('INSERT INTO profiles(user_id) SELECT id FROM users ON CONFLICT (user_id) DO NOTHING');
+  const existingUsers = await query('SELECT id FROM users');
+  for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
+
+  const mc = await query('SELECT COUNT(*)::int AS c FROM members');
+  if (!mc.rows[0].c) {
+    const rows = [
+      ['Hội','Kính','😎','Người giữ vibe','Luôn xuất hiện với phong thái riêng và chiếc kính quen thuộc.','12/03','Âm nhạc • Đi chơi','Vui tính,Kính,Team chill'],
+      ['Phú','Đội trưởng','🧢','Captain của nhóm','Người thường xuyên khởi xướng những cuộc vui bất ngờ.','25/06','Game • Ăn uống','Leader,Năng động,Meme'],
+      ['Sương','Bá khí','👑','Nữ hoàng quyền lực','Bá khí hết sức có thể nhưng vẫn rất tình cảm với hội bạn.','09/09','Ảnh • Du lịch','Bá khí,Queen,Cute'],
+      ['Phấn','Aura Farming','✨','Chuyên gia tạo aura','Không cần nói nhiều, xuất hiện là đủ thu hút ánh nhìn.','18/11','Anime • Chụp ảnh','Aura,Anime,Cool']
+    ];
+    for (const r of rows) await query('INSERT INTO members(name,nick,emoji,role,bio,birthday,hobby,tags) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', r);
+  }
+  const mem = await query('SELECT COUNT(*)::int AS c FROM memories');
+  if (!mem.rows[0].c) {
+    for (const r of [['📸','Ngày đầu tụ họp','Một ngày đáng nhớ của cả nhóm'],['🍜','Kèo ăn uống','Đói là phải gọi nhau'],['🎮','Đêm game','Thắng thua không quan trọng, vui là chính'],['🌅','Chuyến đi','Một chuyến đi, hàng trăm câu chuyện'],['😂','Khoảnh khắc bất ổn','Không ai biết chuyện gì đang xảy ra'],['🫶','Best friends','Cùng nhau lưu lại thanh xuân']]) await query('INSERT INTO memories(icon,title,description) VALUES($1,$2,$3)', r);
+  }
+  const tl = await query('SELECT COUNT(*)::int AS c FROM timeline');
+  if (!tl.rows[0].c) {
+    for (const r of [['2024','Gặp nhau','Những thành viên đầu tiên bắt đầu kết nối.'],['2025','Thân hơn','Từ vài cuộc trò chuyện thành những kèo đi chơi đều đặn.'],['2026','Hàn Thiên Môn khai tông','Thêm nhiều thành viên, nhiều kỷ niệm và nhiều câu chuyện hơn.']]) await query('INSERT INTO timeline(year,title,description) VALUES($1,$2,$3)', r);
+  }
+
+  const ti = await query('SELECT COUNT(*)::int AS c FROM treasure_items');
+  if (!ti.rows[0].c) {
+    const items = [
+      ['Tụ Linh Đan','Đan dược','Tăng ngay 150 linh lực, thích hợp cho đệ tử mới nhập môn.',80,150,0],
+      ['Hàn Tuyết Đan','Đan dược','Tăng ngay 500 linh lực, ngưng tụ hàn khí trong đan điền.',220,500,1],
+      ['Kim Đan Ngọc Lộ','Đan dược','Tăng ngay 1200 linh lực, chỉ mở bán từ Kim Đan.',450,1200,2],
+      ['Hàn Thiên Kiếm','Pháp bảo','Pháp bảo trấn môn, lưu vào kho bảo vật của đệ tử.',700,0,2],
+      ['Ngọc Bội Hộ Tâm','Pháp bảo','Ngọc bội hộ thân, một món pháp bảo quý trong Tàng Bảo Các.',1000,0,3],
+      ['Cửu U Tiên Ấn','Pháp bảo','Ấn tín cổ xưa dành cho đại đạo giả.',2500,0,5]
+    ];
+    for (const item of items) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6)',item);
+  }
+}
+
+app.use(express.json({ limit: '200kb' }));
+app.use(express.static(__dirname));
 function hashPassword(password, salt) { return crypto.scryptSync(password, salt, 64).toString('hex'); }
 function safeUser(user) { return { id:user.id, username:user.username, displayName:user.display_name, createdAt:user.created_at }; }
 
-const realms = [
-  {tier:1,name:'Nhất Tầng',need:0,permission:'Đệ tử nhập môn',power:1},
-  {tier:2,name:'Nhị Tầng',need:120,permission:'Mở Tàng Kinh Các',power:2},
-  {tier:3,name:'Tam Tầng',need:300,permission:'Mở Nhiệm Vụ Đặc Biệt',power:3},
-  {tier:4,name:'Tứ Tầng',need:550,permission:'Mở Bí Cảnh sơ cấp',power:4},
-  {tier:5,name:'Ngũ Tầng',need:900,permission:'Mua pháp bảo trung phẩm',power:5},
-  {tier:6,name:'Lục Tầng',need:1350,permission:'Mở Linh Thú Các tầng 2',power:6},
-  {tier:7,name:'Thất Tầng',need:1900,permission:'Tham gia Khiêu Chiến cao cấp',power:7},
-  {tier:8,name:'Bát Tầng',need:2600,permission:'Mở Bí Cảnh cao cấp',power:8},
-  {tier:9,name:'Cửu Tầng',need:3500,permission:'Chưởng môn đặc quyền',power:9}
-];
-const missionPool = [
-  ['Thu thập linh thảo','Tìm 3 phần linh thảo quanh sơn môn.','🌿',80,35],
-  ['Tuần sơn','Tuần tra ba dãy núi và giữ đạo tâm.','🏔️',90,40],
-  ['Trấn thủ sơn môn','Giữ cổng môn phái trong một lượt tuần.','🗡️',110,50],
-  ['Chép kinh','Sao chép một thiên tâm pháp vào Tàng Kinh Các.','📜',70,30]
-];
-const beasts = [
-  ['Thanh Vũ Linh Hạc','🦢','Linh thú hộ hành, tăng 8% linh lực nhận được.',260,1],
-  ['Bạch Hồ Tuyết Ảnh','🦊','Tăng 1 lượt tu luyện sau khi hoàn thành nhiệm vụ.',520,3],
-  ['Huyền Quy','🐢','Giảm tổn thất khi khiêu chiến và tăng 15% thưởng.',900,5],
-  ['Thanh Long Ấu Thể','🐉','Linh thú hiếm, tăng mạnh chiến lực.',1800,8]
-];
-const items = [
-  ['Ngưng Linh Đan','pill','Đan dược tăng 80 linh lực khi sử dụng.','🧪',90],
-  ['Hồi Khí Đan','pill','Đan dược hồi 1 lượt tu luyện trong ngày.','⚗️',140],
-  ['Hàn Ngọc Kiếm','artifact','Pháp bảo sơ cấp, tăng chiến lực khi khiêu chiến.','⚔️',320],
-  ['Băng Tâm Bội','artifact','Pháp bảo phòng hộ, tăng phần thưởng bí cảnh.','💠',600],
-  ['Thiên Hàn Kiếm','artifact','Pháp bảo cao cấp dành cho cao tầng.', '🗡️',1200]
-];
-
-async function initDb(){
- await query(`
- CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, salt TEXT NOT NULL, display_name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
- CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at BIGINT NOT NULL);
- CREATE TABLE IF NOT EXISTS members (id SERIAL PRIMARY KEY, name TEXT NOT NULL, nick TEXT NOT NULL, emoji TEXT NOT NULL, role TEXT NOT NULL, bio TEXT NOT NULL, birthday TEXT NOT NULL, hobby TEXT NOT NULL, tags TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS memories (id SERIAL PRIMARY KEY, icon TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS timeline (id SERIAL PRIMARY KEY, year TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS cultivation_profiles (user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, tier INTEGER NOT NULL DEFAULT 1, spirit_power INTEGER NOT NULL DEFAULT 0, daily_cultivations INTEGER NOT NULL DEFAULT 0, daily_bonus_used BOOLEAN NOT NULL DEFAULT FALSE, daily_date TEXT NOT NULL DEFAULT '', spirit_stones INTEGER NOT NULL DEFAULT 100, challenge_wins INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
- CREATE TABLE IF NOT EXISTS sect_missions (id SERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL, spirit_reward INTEGER NOT NULL, power_reward INTEGER NOT NULL);
- CREATE TABLE IF NOT EXISTS user_missions (user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, mission_id INTEGER REFERENCES sect_missions(id) ON DELETE CASCADE, mission_date TEXT NOT NULL, completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id, mission_id, mission_date));
- CREATE TABLE IF NOT EXISTS items (id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, description TEXT NOT NULL, icon TEXT NOT NULL, price INTEGER NOT NULL, min_tier INTEGER NOT NULL DEFAULT 1);
- CREATE TABLE IF NOT EXISTS inventory (user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, item_id INTEGER REFERENCES items(id) ON DELETE CASCADE, quantity INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,item_id));
- CREATE TABLE IF NOT EXISTS beasts (id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, icon TEXT NOT NULL, description TEXT NOT NULL, price INTEGER NOT NULL, min_tier INTEGER NOT NULL DEFAULT 1);
- CREATE TABLE IF NOT EXISTS user_beasts (user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, beast_id INTEGER REFERENCES beasts(id) ON DELETE CASCADE, acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(user_id,beast_id));
- CREATE TABLE IF NOT EXISTS cave_runs (user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, cave_name TEXT NOT NULL, cave_date TEXT NOT NULL, PRIMARY KEY(user_id,cave_name,cave_date));
- CREATE TABLE IF NOT EXISTS chat_messages (id BIGSERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, message TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
- CREATE TABLE IF NOT EXISTS achievements (id SERIAL PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, title TEXT NOT NULL, description TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
- `);
- await query(`INSERT INTO sect_missions(title,description,icon,spirit_reward,power_reward) SELECT * FROM (VALUES ${missionPool.map((_,i)=>`($${i*5+1},$${i*5+2},$${i*5+3},$${i*5+4}::integer,$${i*5+5}::integer)`).join(',')}) AS x(title,description,icon,spirit_reward,power_reward) WHERE NOT EXISTS (SELECT 1 FROM sect_missions)`, missionPool.flat());
- await query(`INSERT INTO items(name,kind,description,icon,price,min_tier) VALUES ${items.map((_,i)=>`($${i*6+1},$${i*6+2},$${i*6+3},$${i*6+4},$${i*6+5}::integer,$${i*6+6}::integer)`).join(',')} ON CONFLICT(name) DO NOTHING`, items.flatMap((x,i)=>[...x,i===4?8:(x[1]==='artifact'&&x[4]>=600?5:1)]));
- await query(`INSERT INTO beasts(name,icon,description,price,min_tier) VALUES ${beasts.map((_,i)=>`($${i*5+1},$${i*5+2},$${i*5+3},$${i*5+4}::integer,$${i*5+5}::integer)`).join(',')} ON CONFLICT(name) DO NOTHING`, beasts.flat());
- const mc=await query('SELECT COUNT(*)::int c FROM members');
- if(!mc.rows[0].c){for(const r of [['Hội','Kính','😎','Người giữ vibe','Luôn xuất hiện với phong thái riêng và chiếc kính quen thuộc.','12/03','Âm nhạc • Đi chơi','Vui tính,Kính,Team chill'],['Phú','Đội trưởng','🧢','Captain của nhóm','Người thường xuyên khởi xướng những cuộc vui bất ngờ.','25/06','Game • Ăn uống','Leader,Năng động,Meme'],['Sương','Bá khí','👑','Nữ hoàng quyền lực','Bá khí hết sức có thể nhưng vẫn rất tình cảm với hội bạn.','09/09','Ảnh • Du lịch','Bá khí,Queen,Cute'],['Phấn','Aura Farming','✨','Chuyên gia tạo aura','Không cần nói nhiều, xuất hiện là đủ thu hút ánh nhìn.','18/11','Anime • Chụp ảnh','Aura,Anime,Cool']]) await query('INSERT INTO members(name,nick,emoji,role,bio,birthday,hobby,tags) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',r)}
- const mem=await query('SELECT COUNT(*)::int c FROM memories'); if(!mem.rows[0].c) for(const r of [['📸','Ngày đầu tụ họp','Một ngày đáng nhớ của cả nhóm'],['🍜','Kèo ăn uống','Đói là phải gọi nhau'],['🎮','Đêm game','Thắng thua không quan trọng, vui là chính'],['🌅','Chuyến đi','Một chuyến đi, hàng trăm câu chuyện'],['😂','Khoảnh khắc bất ổn','Không ai biết chuyện gì đang xảy ra'],['🫶','Best friends','Cùng nhau lưu lại thanh xuân']]) await query('INSERT INTO memories(icon,title,description) VALUES($1,$2,$3)',r);
- const tl=await query('SELECT COUNT(*)::int c FROM timeline'); if(!tl.rows[0].c) for(const r of [['2024','Gặp nhau','Những thành viên đầu tiên bắt đầu kết nối.'],['2025','Thân hơn','Từ vài cuộc trò chuyện thành những kèo đi chơi đều đặn.'],['2026','Hàn Thiên Môn khai tông','Thêm nhiều thành viên, nhiều kỷ niệm và nhiều câu chuyện hơn.']]) await query('INSERT INTO timeline(year,title,description) VALUES($1,$2,$3)',r);
+async function ensureProfile(userId) {
+  await query('INSERT INTO profiles(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING', [userId]);
+  const sp=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[userId])).rows[0].spirit_power;
+  const stage=stageFor(sp);
+  await query(`UPDATE profiles SET rank=$2, realm_tier=$3, updated_at=NOW() WHERE user_id=$1`, [userId, stage.realm, stage.tier]);
+}
+async function ensureAchievements(userId, spirit) {
+  await query(`INSERT INTO achievements(user_id,title,description,points) VALUES($1,'Nhập môn Hàn Thiên','Đã ghi danh và bước qua sơn môn.',10) ON CONFLICT (user_id,title) DO NOTHING`, [userId]);
+  const milestones = [
+    [100,'Linh lực sơ thành','Tích lũy 100 điểm linh lực.',20],
+    [1000,'Trúc Cơ nhập cảnh','Đột phá cảnh giới Trúc Cơ.',50],
+    [3000,'Kim Đan thành tựu','Kết thành Kim Đan.',100],
+    [7000,'Nguyên Anh xuất thế','Bước vào cảnh giới Nguyên Anh.',200],
+    [15000,'Hóa Thần đại đạo','Chạm tới cảnh giới Hóa Thần.',400]
+  ];
+  for (const [need,title,desc,points] of milestones) if (spirit >= need) await query('INSERT INTO achievements(user_id,title,description,points) VALUES($1,$2,$3,$4) ON CONFLICT (user_id,title) DO NOTHING',[userId,title,desc,points]);
 }
 
-app.use(express.json()); app.use(express.static(__dirname));
-async function auth(req,res,next){try{const token=req.headers.authorization?.replace(/^Bearer\s+/i,'');if(!token)return res.status(401).json({error:'Bạn chưa đăng nhập.'});const r=await query('SELECT s.*,u.username,u.display_name,u.created_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',[token,Date.now()]);if(!r.rows.length)return res.status(401).json({error:'Phiên đăng nhập đã hết hạn.'});req.session=r.rows[0];req.token=token;next()}catch(e){res.status(500).json({error:'Lỗi máy chủ.'})}}
-async function profile(userId){let r=await query('SELECT * FROM cultivation_profiles WHERE user_id=$1',[userId]);if(!r.rows.length){await query('INSERT INTO cultivation_profiles(user_id,daily_date) VALUES($1,$2)',[userId,todayVN()]);r=await query('SELECT * FROM cultivation_profiles WHERE user_id=$1',[userId]);}let p=r.rows[0];const d=todayVN();if(p.daily_date!==d){await query('UPDATE cultivation_profiles SET daily_cultivations=0,daily_bonus_used=false,daily_date=$2 WHERE user_id=$1',[userId,d]);p=(await query('SELECT * FROM cultivation_profiles WHERE user_id=$1',[userId])).rows[0];}return p;}
-function realmFor(tier){return realms[Math.max(0,Math.min(8,tier-1))]}
-async function userState(userId){const p=await profile(userId);const r=realmFor(p.tier);const inv=(await query(`SELECT i.name,i.kind,i.description,i.icon,inv.quantity FROM inventory inv JOIN items i ON i.id=inv.item_id WHERE inv.user_id=$1 AND inv.quantity>0 ORDER BY i.id`,[userId])).rows;const ub=(await query(`SELECT b.name,b.icon,b.description,b.price,b.min_tier FROM user_beasts u JOIN beasts b ON b.id=u.beast_id WHERE u.user_id=$1 ORDER BY u.acquired_at`,[userId])).rows;return {profile:p,realm:r,realms,inventory:inv,beasts:ub};}
+async function auth(req,res,next) {
+  try {
+    const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    if (!token) return res.status(401).json({error:'Bạn chưa đăng nhập.'});
+    const r = await query('SELECT s.*, u.username, u.display_name, u.created_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',[token,Date.now()]);
+    if (!r.rows.length) return res.status(401).json({error:'Phiên đăng nhập đã hết hạn.'});
+    req.session = r.rows[0]; req.token = token; next();
+  } catch(e) { res.status(500).json({error:'Lỗi máy chủ.'}); }
+}
 
 app.get('/api/health',(req,res)=>res.json({ok:true,service:'Hàn Thiên Môn'}));
-app.get('/api/data',async(req,res)=>{try{const[m,mem,t]=await Promise.all([query('SELECT * FROM members ORDER BY id'),query('SELECT icon,title,description FROM memories ORDER BY id'),query('SELECT year,title,description FROM timeline ORDER BY id')]);res.json({members:m.rows.map(x=>({...x,tags:x.tags.split(',')})),memories:mem.rows,timeline:t.rows,realms});}catch(e){res.status(500).json({error:'Không thể tải dữ liệu.'})}});
-app.post('/api/register',async(req,res)=>{try{const{username,password,displayName}=req.body||{};if(!username||!password||!displayName)return res.status(400).json({error:'Vui lòng nhập đầy đủ thông tin.'});if(!/^[a-zA-Z0-9_]{3,24}$/.test(username))return res.status(400).json({error:'Tên đăng nhập 3–24 ký tự, chỉ gồm chữ, số và _.'});if(String(password).length<6)return res.status(400).json({error:'Mật khẩu cần ít nhất 6 ký tự.'});const salt=crypto.randomBytes(16).toString('hex');const dn=displayName.trim().slice(0,40);const r=await query('INSERT INTO users(username,password_hash,salt,display_name) VALUES($1,$2,$3,$4) RETURNING id,username,display_name,created_at',[username.toLowerCase(),hashPassword(password,salt),salt,dn]);await profile(r.rows[0].id);res.status(201).json({user:safeUser(r.rows[0])});}catch(e){if(e.code==='23505')return res.status(409).json({error:'Tên đăng nhập đã tồn tại.'});res.status(500).json({error:'Không thể tạo tài khoản.'})}});
-app.post('/api/login',async(req,res)=>{try{const{username,password}=req.body||{};const r=await query('SELECT * FROM users WHERE username=$1',[String(username||'').toLowerCase()]);const user=r.rows[0];if(!user||hashPassword(String(password||''),user.salt)!==user.password_hash)return res.status(401).json({error:'Tên đăng nhập hoặc mật khẩu không đúng.'});await profile(user.id);const token=crypto.randomBytes(32).toString('hex');await query('INSERT INTO sessions(token,user_id,expires_at) VALUES($1,$2,$3)',[token,user.id,Date.now()+1000*60*60*24*7]);res.json({token,user:safeUser(user)})}catch(e){res.status(500).json({error:'Không thể đăng nhập.'})}});
-app.get('/api/me',auth,async(req,res)=>res.json({user:{id:req.session.user_id,username:req.session.username,displayName:req.session.display_name,createdAt:req.session.created_at},state:await userState(req.session.user_id)}));
-app.post('/api/logout',auth,async(req,res)=>{await query('DELETE FROM sessions WHERE token=$1',[req.token]);res.json({ok:true})});
-app.post('/api/members',auth,async(req,res)=>{try{const{name,nick,emoji='🧑‍🎨',role='Đệ tử',bio='',birthday='',hobby='',tags=[]}=req.body||{};if(!name||!nick)return res.status(400).json({error:'Thiếu tên hoặc biệt danh.'});const r=await query('INSERT INTO members(name,nick,emoji,role,bio,birthday,hobby,tags) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[name,nick,emoji,role,bio,birthday,hobby,Array.isArray(tags)?tags.join(','):String(tags)]);res.status(201).json({id:r.rows[0].id})}catch(e){res.status(500).json({error:'Không thể thêm môn nhân.'})}});
+app.get('/api/data',async(req,res)=>{
+  try {
+    const [m,mem,t,u] = await Promise.all([
+      query('SELECT * FROM members ORDER BY id'),
+      query('SELECT icon,title,description FROM memories ORDER BY id'),
+      query('SELECT year,title,description FROM timeline ORDER BY id'),
+      query('SELECT COUNT(*)::int AS c FROM users')
+    ]);
+    res.json({members:m.rows.map(x=>({...x,tags:x.tags.split(',')})),memories:mem.rows,timeline:t.rows,userCount:u.rows[0].c});
+  } catch(e) { res.status(500).json({error:'Không thể tải dữ liệu.'}); }
+});
 
-app.get('/api/game',auth,async(req,res)=>{try{const p=await profile(req.session.user_id);const missions=(await query(`SELECT m.*, EXISTS(SELECT 1 FROM user_missions um WHERE um.user_id=$1 AND um.mission_id=m.id AND um.mission_date=$2) completed FROM sect_missions m ORDER BY m.id`,[req.session.user_id,todayVN()])).rows;const shop=(await query('SELECT * FROM items ORDER BY price')).rows;const beastsList=(await query('SELECT * FROM beasts ORDER BY price')).rows;const chat=(await query(`SELECT c.id,c.message,c.created_at,u.display_name FROM chat_messages c JOIN users u ON u.id=c.user_id ORDER BY c.id DESC LIMIT 50`)).rows.reverse();const leaderboard=(await query(`SELECT u.display_name,p.tier,p.spirit_power,p.spirit_stones,p.challenge_wins FROM cultivation_profiles p JOIN users u ON u.id=p.user_id ORDER BY p.tier DESC,p.spirit_power DESC LIMIT 20`)).rows;res.json({state:await userState(req.session.user_id),missions,shop,beasts:beastsList,chat,leaderboard,realmPermissions:realms})}catch(e){console.error(e);res.status(500).json({error:'Không thể tải đạo trường.'})}});
-app.post('/api/cultivate',auth,async(req,res)=>{try{const p=await profile(req.session.user_id);if(p.daily_cultivations>=3&&!p.daily_bonus_used)return res.status(403).json({error:'Hôm nay đã hết lượt tu luyện thường. Hãy hoàn thành nhiệm vụ tông môn để mở thêm lượt tu luyện.'});if(p.daily_cultivations>=6)return res.status(403).json({error:'Hôm nay đã đạt giới hạn tu luyện. Hãy trở lại vào ngày mai.'});const gain=30+p.tier*5;const next=p.spirit_power+gain;let tier=p.tier;while(tier<9&&next>=realms[tier].need) tier++;await query('UPDATE cultivation_profiles SET spirit_power=$2,daily_cultivations=daily_cultivations+1,tier=$3 WHERE user_id=$1',[req.session.user_id,next,tier]);res.json({message:`Vận công thành công, nhận +${gain} linh lực.`,state:await userState(req.session.user_id)})}catch(e){res.status(500).json({error:'Không thể tu luyện.'})}});
-app.get('/api/missions',auth,async(req,res)=>{const d=todayVN();const r=await query(`SELECT m.*, EXISTS(SELECT 1 FROM user_missions um WHERE um.user_id=$1 AND um.mission_id=m.id AND um.mission_date=$2) completed FROM sect_missions m ORDER BY m.id`,[req.session.user_id,d]);res.json(r.rows)});
-app.post('/api/missions/:id/complete',auth,async(req,res)=>{try{const id=Number(req.params.id),d=todayVN();const m=(await query('SELECT * FROM sect_missions WHERE id=$1',[id])).rows[0];if(!m)return res.status(404).json({error:'Nhiệm vụ không tồn tại.'});const dayMission=await query('SELECT 1 FROM user_missions WHERE user_id=$1 AND mission_date=$2 LIMIT 1',[req.session.user_id,d]);if(dayMission.rows.length)return res.status(409).json({error:'Mỗi ngày chỉ cần hoàn thành một nhiệm vụ tông môn. Hãy trở về ngày mai.'});await query('INSERT INTO user_missions(user_id,mission_id,mission_date) VALUES($1,$2,$3)',[req.session.user_id,id,d]);const p=await profile(req.session.user_id);await query('UPDATE cultivation_profiles SET spirit_stones=spirit_stones+$2,spirit_power=spirit_power+$3,daily_bonus_used=true,daily_cultivations=3 WHERE user_id=$1',[req.session.user_id,m.spirit_reward,m.power_reward]);const np=await profile(req.session.user_id);res.json({message:`Hoàn thành nhiệm vụ: +${m.spirit_reward} linh thạch, +${m.power_reward} linh lực. Ba lượt tu luyện bổ sung đã được mở.`,state:await userState(req.session.user_id)})}catch(e){res.status(500).json({error:'Không thể nhận thưởng nhiệm vụ.'})}});
-app.post('/api/shop/buy',auth,async(req,res)=>{try{const itemId=Number(req.body?.itemId);const item=(await query('SELECT * FROM items WHERE id=$1',[itemId])).rows[0];const p=await profile(req.session.user_id);if(!item)return res.status(404).json({error:'Vật phẩm không tồn tại.'});if(p.tier<item.min_tier)return res.status(403).json({error:`Cần đạt ${realmFor(item.min_tier).name} mới được mua.`});if(p.spirit_stones<item.price)return res.status(400).json({error:'Không đủ linh thạch.'});await query('UPDATE cultivation_profiles SET spirit_stones=spirit_stones-$2 WHERE user_id=$1',[req.session.user_id,item.price]);await query(`INSERT INTO inventory(user_id,item_id,quantity) VALUES($1,$2,1) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1`,[req.session.user_id,item.id]);res.json({message:`Đã mua ${item.name}.`,state:await userState(req.session.user_id)})}catch(e){res.status(500).json({error:'Không thể mua vật phẩm.'})}});
-app.post('/api/beasts/buy',auth,async(req,res)=>{try{const id=Number(req.body?.beastId);const b=(await query('SELECT * FROM beasts WHERE id=$1',[id])).rows[0];const p=await profile(req.session.user_id);if(!b)return res.status(404).json({error:'Linh thú không tồn tại.'});if(p.tier<b.min_tier)return res.status(403).json({error:`Cần đạt ${realmFor(b.min_tier).name} mới có thể thu phục.`});if(p.spirit_stones<b.price)return res.status(400).json({error:'Không đủ linh thạch.'});const has=await query('SELECT 1 FROM user_beasts WHERE user_id=$1 AND beast_id=$2',[req.session.user_id,id]);if(has.rows.length)return res.status(409).json({error:'Bạn đã sở hữu linh thú này.'});await query('UPDATE cultivation_profiles SET spirit_stones=spirit_stones-$2 WHERE user_id=$1',[req.session.user_id,b.price]);await query('INSERT INTO user_beasts(user_id,beast_id) VALUES($1,$2)',[req.session.user_id,id]);res.json({message:`Thu phục ${b.name} thành công.`,state:await userState(req.session.user_id)})}catch(e){res.status(500).json({error:'Không thể mua linh thú.'})}});
-app.post('/api/cave',auth,async(req,res)=>{try{const p=await profile(req.session.user_id);const caves=[{name:'Bí Cảnh Thanh Vân',min:1,stone:100,power:35},{name:'Hàn Nguyệt Động Thiên',min:4,stone:220,power:70},{name:'Cửu U Bí Cảnh',min:8,stone:500,power:120}];const cave=caves.find(x=>x.name===req.body?.name);if(!cave)return res.status(404).json({error:'Bí cảnh không tồn tại.'});if(p.tier<cave.min)return res.status(403).json({error:`Cần đạt ${realmFor(cave.min).name} mới được vào bí cảnh này.`});const used=await query('SELECT 1 FROM cave_runs WHERE user_id=$1 AND cave_name=$2 AND cave_date=$3',[req.session.user_id,cave.name,todayVN()]);if(used.rows.length)return res.status(409).json({error:'Bí cảnh này đã được khai phá hôm nay. Hãy trở lại ngày mai.'});await query('INSERT INTO cave_runs(user_id,cave_name,cave_date) VALUES($1,$2,$3)',[req.session.user_id,cave.name,todayVN()]);const bonus=1;await query('UPDATE cultivation_profiles SET spirit_stones=spirit_stones+$2,spirit_power=spirit_power+$3 WHERE user_id=$1',[req.session.user_id,cave.stone*bonus,cave.power]);res.json({message:`Khám phá ${cave.name}: nhận ${cave.stone} linh thạch và ${cave.power} linh lực.`,state:await userState(req.session.user_id)})}catch(e){res.status(500).json({error:'Không thể vào bí cảnh.'})}});
-app.post('/api/challenge',auth,async(req,res)=>{try{const p=await profile(req.session.user_id);const inv=await query(`SELECT i.* , inv.quantity FROM inventory inv JOIN items i ON i.id=inv.item_id WHERE inv.user_id=$1 AND inv.quantity>0 AND i.kind='artifact'`,[req.session.user_id]);if(p.tier<2)return res.status(403).json({error:'Đạt Nhị Tầng mới được mở Khiêu Chiến.'});let power= p.tier*100 + p.spirit_power; if(inv.rows.length) power+=150; const enemy=Number(req.body?.enemyPower||p.tier*120); if(power<enemy)return res.status(400).json({error:`Chiến lực hiện tại ${power}, đối thủ ${enemy}. Hãy tu luyện hoặc dùng pháp bảo.`});const reward=120+p.tier*30;await query('UPDATE cultivation_profiles SET spirit_stones=spirit_stones+$2,challenge_wins=challenge_wins+1 WHERE user_id=$1',[req.session.user_id,reward]);res.json({message:`Khiêu chiến thành công, nhận ${reward} linh thạch.`,state:await userState(req.session.user_id)})}catch(e){res.status(500).json({error:'Không thể khiêu chiến.'})}});
-app.post('/api/chat',auth,async(req,res)=>{try{const msg=String(req.body?.message||'').trim().slice(0,300);if(!msg)return res.status(400).json({error:'Tin nhắn trống.'});await query('INSERT INTO chat_messages(user_id,message) VALUES($1,$2)',[req.session.user_id,msg]);const r=await query(`SELECT c.id,c.message,c.created_at,u.display_name FROM chat_messages c JOIN users u ON u.id=c.user_id ORDER BY c.id DESC LIMIT 50`);res.json({chat:r.rows.reverse()})}catch(e){res.status(500).json({error:'Không thể gửi tin nhắn.'})}});
-app.get('/api/leaderboard',async(req,res)=>{const r=await query(`SELECT u.display_name,p.tier,p.spirit_power,p.spirit_stones,p.challenge_wins FROM cultivation_profiles p JOIN users u ON u.id=p.user_id ORDER BY p.tier DESC,p.spirit_power DESC LIMIT 50`);res.json(r.rows)});
+app.post('/api/register',async(req,res)=>{
+  try {
+    const {username,password,displayName}=req.body||{};
+    if(!username||!password||!displayName)return res.status(400).json({error:'Vui lòng nhập đầy đủ thông tin.'});
+    if(!/^[a-zA-Z0-9_]{3,24}$/.test(username))return res.status(400).json({error:'Tên đăng nhập 3–24 ký tự, chỉ gồm chữ, số và _.'});
+    if(String(password).length<6)return res.status(400).json({error:'Mật khẩu cần ít nhất 6 ký tự.'});
+    const salt=crypto.randomBytes(16).toString('hex');
+    const dn=displayName.trim().slice(0,40);
+    if(!dn)return res.status(400).json({error:'Danh xưng không được để trống.'});
+    const r=await query('INSERT INTO users(username,password_hash,salt,display_name) VALUES($1,$2,$3,$4) RETURNING id,username,display_name,created_at',[username.toLowerCase(),hashPassword(password,salt),salt,dn]);
+    const user=r.rows[0];
+    await ensureProfile(user.id);
+    await ensureAchievements(user.id, 0);
+    res.status(201).json({user:safeUser(user)});
+  } catch(e){if(e.code==='23505')return res.status(409).json({error:'Tên đăng nhập đã tồn tại.'});res.status(500).json({error:'Không thể tạo tài khoản.'});}
+});
 
-initDb().then(()=>app.listen(PORT,()=>console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`))).catch(err=>{console.error('Không khởi tạo được database:',err);process.exit(1)});
+app.post('/api/login',async(req,res)=>{
+  try{
+    const {username,password}=req.body||{};
+    const r=await query('SELECT * FROM users WHERE username=$1',[String(username||'').toLowerCase()]);
+    const user=r.rows[0];
+    if(!user||hashPassword(String(password||''),user.salt)!==user.password_hash)return res.status(401).json({error:'Tên đăng nhập hoặc mật khẩu không đúng.'});
+    await ensureProfile(user.id);
+    const token=crypto.randomBytes(32).toString('hex');
+    await query('INSERT INTO sessions(token,user_id,expires_at) VALUES($1,$2,$3)',[token,user.id,Date.now()+1000*60*60*24*30]);
+    res.json({token,user:safeUser(user)});
+  }catch(e){res.status(500).json({error:'Không thể đăng nhập.'});}
+});
+app.get('/api/me',auth,async(req,res)=>res.json({user:{id:req.session.user_id,username:req.session.username,displayName:req.session.display_name,createdAt:req.session.created_at}}));
+app.post('/api/logout',auth,async(req,res)=>{await query('DELETE FROM sessions WHERE token=$1',[req.token]);res.json({ok:true});});
+
+app.get('/api/profile',auth,async(req,res)=>{
+  try {
+    await ensureProfile(req.session.user_id);
+    const r=await query(`SELECT u.id,u.username,u.display_name,u.created_at,p.*,
+      COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
+      COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count
+      FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[req.session.user_id]);
+    const p=r.rows[0];
+    await ensureAchievements(p.id,p.spirit_power);
+    const stage=stageFor(p.spirit_power);
+    const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
+    const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
+    res.json({profile:{...p,realm:stage.realm,tier:stage.tier,stage:stage.stage,canClaimStones:last!==today,progress:progressFor(p.spirit_power)}});
+  } catch(e){res.status(500).json({error:'Không thể tải hồ sơ.'});}
+});
+
+app.patch('/api/profile',auth,async(req,res)=>{
+  try {
+    const {displayName,title,sect,birthday,hobby,bio,avatar}=req.body||{};
+    if(displayName!==undefined){const dn=String(displayName).trim().slice(0,40);if(!dn)return res.status(400).json({error:'Danh xưng không được để trống.'});await query('UPDATE users SET display_name=$2 WHERE id=$1',[req.session.user_id,dn]);}
+    await ensureProfile(req.session.user_id);
+    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), birthday=COALESCE($4,birthday), hobby=COALESCE($5,hobby), bio=COALESCE($6,bio), avatar=COALESCE($7,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),avatar?.toString().slice(0,10)]);
+    res.json({ok:true});
+  } catch(e){res.status(500).json({error:'Không thể cập nhật hồ sơ.'});}
+});
+
+app.post('/api/cultivation/train',auth,async(req,res)=>{
+  try {
+    await ensureProfile(req.session.user_id);
+    const gain = crypto.randomInt(35, 81);
+    const r=await query('UPDATE profiles SET spirit_power=spirit_power+$2, experience=experience+$2, updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,experience',[req.session.user_id,gain]);
+    const spirit=r.rows[0].spirit_power;
+    const stage=stageFor(spirit);
+    await query('UPDATE profiles SET rank=$2, realm_tier=$3 WHERE user_id=$1',[req.session.user_id,stage.realm,stage.tier]);
+    await ensureAchievements(req.session.user_id,spirit);
+    res.json({gain,spirit,experience:r.rows[0].experience,progress:progressFor(spirit),rank:stage.realm,stage:stage.stage});
+  } catch(e){res.status(500).json({error:'Không thể vận công lúc này.'});}
+});
+
+
+app.get('/api/treasure',auth,async(req,res)=>{
+  try {
+    await ensureProfile(req.session.user_id);
+    const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const stage=stageFor(p.spirit_power);
+    const items=(await query(`SELECT ti.*,COALESCE(i.quantity,0)::int AS quantity
+      FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
+      ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
+    res.json({spiritStones:p.spirit_stones,realm:stage.realm,tier:stage.tier,items});
+  } catch(e){res.status(500).json({error:'Không thể mở Tàng Bảo Các.'});}
+});
+
+app.post('/api/spirit-stones/claim',auth,async(req,res)=>{
+  try {
+    const amount=100;
+    const r=await query(`UPDATE profiles
+      SET spirit_stones=spirit_stones+$2,
+          last_stone_claim=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+          updated_at=NOW()
+      WHERE user_id=$1
+        AND (last_stone_claim IS NULL OR last_stone_claim < (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)
+      RETURNING spirit_stones,last_stone_claim`,[req.session.user_id,amount]);
+    if(!r.rows.length)return res.status(409).json({error:'Hôm nay bạn đã nhận 100 linh thạch. Mai hãy quay lại nhận tiếp.'});
+    res.json({ok:true,amount,spiritStones:r.rows[0].spirit_stones,next:'Ngày mai'});
+  } catch(e){res.status(500).json({error:'Không thể nhận linh thạch hằng ngày.'});}
+});
+
+app.post('/api/treasure/buy',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try {
+    const itemId=Number(req.body?.itemId);
+    if(!Number.isInteger(itemId))return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
+    await client.query('BEGIN');
+    const itemR=await client.query('SELECT * FROM treasure_items WHERE id=$1 FOR UPDATE',[itemId]);
+    if(!itemR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy vật phẩm.'});}
+    const item=itemR.rows[0];
+    const pR=await client.query('SELECT * FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id]);
+    const p=pR.rows[0];
+    const stage=stageFor(p.spirit_power);
+    if(stage.realmIndex < item.min_realm){await client.query('ROLLBACK');return res.status(403).json({error:`Cần đạt ${RANKS[item.min_realm].name} mới có thể mua vật phẩm này.`});}
+    if(p.spirit_stones < item.price){await client.query('ROLLBACK');return res.status(400).json({error:`Linh thạch không đủ. Cần ${item.price}, hiện có ${p.spirit_stones}.`});}
+    await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2, updated_at=NOW() WHERE user_id=$1',[req.session.user_id,item.price]);
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW())
+      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[req.session.user_id,itemId]);
+    let newSpirit=p.spirit_power;
+    if(item.spirit_gain>0){
+      newSpirit+=item.spirit_gain;
+      const ns=stageFor(newSpirit);
+      await client.query('UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,newSpirit,item.spirit_gain,ns.realm,ns.tier]);
+    }
+    await client.query('COMMIT');
+    res.json({ok:true,item:item.name,spiritStones:p.spirit_stones-item.price,spirit:newSpirit,stage:stageFor(newSpirit).stage});
+  } catch(e){try{await client.query('ROLLBACK');}catch{};res.status(500).json({error:'Không thể mua vật phẩm lúc này.'});}
+  finally{client.release();}
+});
+
+app.get('/api/inventory',auth,async(req,res)=>{
+  try{const r=await query(`SELECT ti.name,ti.category,ti.description,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC`,[req.session.user_id]);res.json({rows:r.rows});}
+  catch(e){res.status(500).json({error:'Không thể tải túi vật phẩm.'});}
+});
+
+app.get('/api/leaderboard',async(req,res)=>{
+  try {
+    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,
+      COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
+      COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count
+      FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10) DESC, u.id ASC LIMIT 50`);
+    res.json({rows:r.rows});
+  } catch(e){res.status(500).json({error:'Không thể tải bảng thành tích.'});}
+});
+
+app.get('/api/achievements',auth,async(req,res)=>{
+  try { const r=await query('SELECT title,description,points,created_at FROM achievements WHERE user_id=$1 ORDER BY points DESC,id',[req.session.user_id]); res.json({rows:r.rows}); }
+  catch(e){res.status(500).json({error:'Không thể tải thành tích.'});}
+});
+
+app.get('/api/sect',async(req,res)=>{
+  try {
+    const count=await query('SELECT COUNT(*)::int AS c FROM profiles WHERE sect=$1',['Hàn Thiên Môn']);
+    res.json({name:'Hàn Thiên Môn',han:'寒天門',motto:'Giữ đạo tâm · Giữ tình bằng hữu',count:count.rows[0].c,positions:[['Tông chủ','Chưởng môn sơn môn'],['Hộ pháp','Giữ luật và hộ sơn'],['Nội môn đệ tử','Đệ tử đã lập đạo cơ'],['Ngoại môn đệ tử','Môn nhân mới nhập môn']]});
+  } catch(e){res.status(500).json({error:'Không thể tải môn phái.'});}
+});
+
+app.get('/api/chat',auth,async(req,res)=>{
+  try {
+    const r=await query(`SELECT c.id,c.message,c.created_at,u.display_name,p.title,p.rank,p.avatar FROM chat_messages c JOIN users u ON u.id=c.user_id JOIN profiles p ON p.user_id=u.id ORDER BY c.id DESC LIMIT 60`);
+    res.json({rows:r.rows.reverse()});
+  } catch(e){res.status(500).json({error:'Không thể tải chat tổng.'});}
+});
+app.post('/api/chat',auth,async(req,res)=>{
+  try {
+    const message=String(req.body?.message||'').trim().slice(0,500);
+    if(!message)return res.status(400).json({error:'Tin nhắn không được để trống.'});
+    const r=await query('INSERT INTO chat_messages(user_id,message) VALUES($1,$2) RETURNING id,created_at',[req.session.user_id,message]);
+    res.status(201).json({ok:true,...r.rows[0]});
+  } catch(e){res.status(500).json({error:'Không thể gửi tin nhắn.'});}
+});
+
+app.post('/api/members',auth,async(req,res)=>{
+  try{const {name,nick,emoji='🧑‍🎨',role='Đệ tử',bio='',birthday='',hobby='',tags=[]}=req.body||{};if(!name||!nick)return res.status(400).json({error:'Thiếu tên hoặc biệt danh.'});const r=await query('INSERT INTO members(name,nick,emoji,role,bio,birthday,hobby,tags) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[name,nick,emoji,role,bio,birthday,hobby,Array.isArray(tags)?tags.join(','):String(tags)]);res.status(201).json({id:r.rows[0].id});}catch(e){res.status(500).json({error:'Không thể thêm môn nhân.'});}
+});
+
+initDb().then(()=>app.listen(PORT,()=>console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`))).catch(err=>{console.error('Không khởi tạo được database:',err);process.exit(1);});
