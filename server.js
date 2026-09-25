@@ -20,6 +20,7 @@ const pool = new Pool({
 async function query(text, params = []) { return pool.query(text, params); }
 
 // Cửu Đại Cảnh Giới — mỗi cảnh giới có 9 tầng.
+const SPIRIT_TO_STONE_RATE = 100; // 100 linh lực = 1 linh thạch
 const RANKS = [
   { name: 'Luyện Khí', min: 0, max: 999 },
   { name: 'Trúc Cơ', min: 1000, max: 2999 },
@@ -288,6 +289,12 @@ async function initDb() {
     ['Thiên Đạo Cường Hóa Thạch','Vật phẩm tăng cường','Cường hóa thạch cực hiếm, tăng 30% hiệu quả cường hóa.',0,0,7]
   ];
   for (const item of enhanceItems) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO NOTHING',item);
+  const beastItems = [
+    ['Thanh Vân Lang','Linh thú','Linh thú phong hệ, tăng tốc độ hành động và có thể nuôi dưỡng lâu dài.',900,0,1],
+    ['Huyền Băng Hồ','Linh thú','Hồ ly băng linh, sở hữu hàn khí mạnh và khí tức ổn định.',1800,0,3],
+    ['Cửu Thiên Long Tước','Linh thú','Linh thú hiếm cấp cao, mang huyết mạch long tước.',5000,0,5]
+  ];
+  for (const item of beastItems) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO NOTHING',item);
   const qCount = await query('SELECT COUNT(*)::int AS c FROM sect_quests');
   if (!qCount.rows[0].c) {
     const quests = [
@@ -624,7 +631,7 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TÀNG BẢO CÁC 2.0 · mua vật phẩm bằng linh lực
+// TÀNG BẢO CÁC 2.1 · mua vật phẩm bằng linh thạch
 // ─────────────────────────────────────────────────────────────────────────────
 app.get('/api/treasury',auth,async(req,res)=>{
   try{
@@ -651,7 +658,7 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
       FROM treasure_items WHERE id=$1 FOR UPDATE`,[itemId]);
     if(!itemR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy vật phẩm.'});}
     const item=itemR.rows[0];
-    const pR=await client.query(`SELECT spirit_power,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
+    const pR=await client.query(`SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
     if(!pR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ đệ tử.'});}
     const p=pR.rows[0], stage=stageFor(Number(p.spirit_power)||0);
     if(stage.realmIndex<Number(item.min_realm)){
@@ -659,9 +666,10 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
       return res.status(403).json({error:`Vật phẩm yêu cầu ${RANKS[Number(item.min_realm)]?.name||'cảnh giới cao hơn'}. Bạn hiện ở ${stage.stage}.`});
     }
     const price=Math.max(0,Number(item.price)||0);
-    if(Number(p.spirit_power)<price){
+    const stones=Number(p.spirit_stones)||0;
+    if(stones<price){
       await client.query('ROLLBACK');
-      return res.status(400).json({error:`Linh lực không đủ. Cần ${price.toLocaleString('vi-VN')} linh lực.`});
+      return res.status(400).json({error:`Linh thạch không đủ. Cần ${price.toLocaleString('vi-VN')} linh thạch, hiện có ${stones.toLocaleString('vi-VN')}.`});
     }
     const capR=await client.query(`SELECT
       COALESCE(storage_capacity,30)::int AS capacity,
@@ -674,10 +682,8 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
       await client.query('ROLLBACK');
       return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}). Hãy dùng vật phẩm hoặc nâng dung lượng.`});
     }
-    const newSpirit=(Number(p.spirit_power)||0)-price+(Number(item.spirit_gain)||0);
-    const ns=stageFor(newSpirit);
-    await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,updated_at=NOW() WHERE user_id=$1`,
-      [req.session.user_id,newSpirit,Number(item.spirit_gain)||0,ns.realm,ns.tier]);
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,
+      [req.session.user_id,price]);
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW())
       ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,
       [req.session.user_id,itemId]);
@@ -690,12 +696,36 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
       stone_claim_count=CASE WHEN daily_activity.activity_date=${today} THEN daily_activity.stone_claim_count ELSE 0 END,
       activity_date=${today}`,[req.session.user_id]);
     await logActivityEvent(client,req.session.user_id,'buy');
+    const remaining=stones-price;
     await client.query('COMMIT');
-    res.json({ok:true,item:item.name,quantityAdded:1,spirit:newSpirit,spentSpirit:price,stage:ns.stage});
+    res.json({ok:true,item:item.name,category:item.category,quantityAdded:1,spiritStones:remaining,spentStones:price,stage:stage.stage,message:'Vật Phẩm đã được chuyển về bảng thuộc tính - mở bảng để xem'});
   }catch(e){
     try{await client.query('ROLLBACK')}catch{}
     console.error('treasury buy:',e);res.status(500).json({error:'Giao dịch Tàng Bảo Các thất bại. Vui lòng thử lại.'});
   }finally{client.release();}
+});
+
+app.post('/api/currency/exchange',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const stonesToBuy=Math.max(1,Math.min(100000,Number(req.body?.stones)||0));
+    if(!Number.isInteger(stonesToBuy)||stonesToBuy<1)return res.status(400).json({error:'Số linh thạch trao đổi không hợp lệ.'});
+    const spiritCost=stonesToBuy*SPIRIT_TO_STONE_RATE;
+    await client.query('BEGIN');
+    const r=await client.query(`SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
+    if(!r.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ đệ tử.'});}
+    const spirit=Number(r.rows[0].spirit_power)||0;
+    const stones=Number(r.rows[0].spirit_stones)||0;
+    if(spirit<spiritCost){
+      await client.query('ROLLBACK');
+      return res.status(400).json({error:`Không đủ linh lực. Cần ${spiritCost.toLocaleString('vi-VN')} linh lực để đổi ${stonesToBuy.toLocaleString('vi-VN')} linh thạch.`});
+    }
+    const nr=await client.query(`UPDATE profiles SET spirit_power=spirit_power-$2,spirit_stones=spirit_stones+$3,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,spirit_stones`,
+      [req.session.user_id,spiritCost,stonesToBuy]);
+    await client.query('COMMIT');
+    res.json({ok:true,rate:SPIRIT_TO_STONE_RATE,spentSpirit:spiritCost,receivedStones:stonesToBuy,spirit:Number(nr.rows[0].spirit_power),spiritStones:Number(nr.rows[0].spirit_stones)});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('currency exchange:',e);res.status(500).json({error:'Không thể trao đổi linh lực sang linh thạch.'});}
+  finally{client.release();}
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -945,8 +975,11 @@ app.post('/api/quests/:id/claim',auth,async(req,res)=>{
     const questId=Number(req.params.id); if(!Number.isInteger(questId))return res.status(400).json({error:'Nhiệm vụ không hợp lệ.'});
     const cycleKey=String(Math.floor(Date.now()/300000));
     await client.query('BEGIN');
-    const qR=await client.query(`SELECT q.*,COALESCE(q.display_name,q.name) AS visible_name,ti.name AS reward_item_name
-      FROM sect_quests q LEFT JOIN treasure_items ti ON ti.id=q.reward_item_id
+    // Lock only the quest row. PostgreSQL does not allow FOR UPDATE on the nullable side
+    // of a LEFT JOIN; reward item name is fetched with a scalar subquery instead.
+    const qR=await client.query(`SELECT q.*,COALESCE(q.display_name,q.name) AS visible_name,
+      (SELECT ti.name FROM treasure_items ti WHERE ti.id=q.reward_item_id) AS reward_item_name
+      FROM sect_quests q
       WHERE q.id=$1 AND q.active=true AND q.cycle_key=$2 FOR UPDATE`,[questId,cycleKey]);
     if(!qR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Nhiệm vụ đã hết chu kỳ. Hãy tải lại Nhiệm Vụ Đường.'});}
     const q=qR.rows[0];

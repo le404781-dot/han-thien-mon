@@ -1,0 +1,26 @@
+HÀN THIÊN MÔN v3.6.2 – HỆ TIỀN TỆ LINH THẠCH
+
+1. Tàng Bảo Các
+- Mua pháp khí, đan dược, vật phẩm tăng cường và linh thú bằng LINH THẠCH.
+- Không còn dùng linh lực để thanh toán vật phẩm.
+- Giao dịch mua dùng PostgreSQL transaction + khóa hồ sơ, đảm bảo trừ linh thạch và thêm vật phẩm cùng một giao dịch.
+- Nếu không đủ linh thạch, không thay đổi dữ liệu.
+- Khi mua thành công trả về thông báo: "Vật Phẩm đã được chuyển về bảng thuộc tính - mở bảng để xem".
+
+2. Đổi tiền tệ
+- Thêm API /api/currency/exchange.
+- Tỷ lệ cố định: 100 linh lực = 1 linh thạch.
+- Người chơi nhập số linh thạch muốn đổi; server tính linh lực cần dùng và thực hiện trong transaction.
+- Không đủ linh lực thì giao dịch bị rollback.
+
+3. Linh thú
+- Bổ sung 3 vật phẩm linh thú vào Tàng Bảo Các nếu database chưa có:
+  Thanh Vân Lang, Huyền Băng Hồ, Cửu Thiên Long Tước.
+- Giá và cảnh giới yêu cầu được lưu trong treasure_items.
+
+4. Cảnh giới
+- Tiếp tục kiểm tra min_realm ở server trước khi mua.
+
+5. Tương thích
+- Không xóa Tu Di Giới ở bản này theo yêu cầu mới nhất.
+- Không xóa dữ liệu inventory/profile hiện có.

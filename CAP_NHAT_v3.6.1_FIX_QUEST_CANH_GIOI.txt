@@ -1,0 +1,17 @@
+HÀN THIÊN MÔN v3.6.1 – FIX NHIỆM VỤ + MỞ KHÓA VẬT PHẨM THEO CẢNH GIỚI
+
+1. Sửa lỗi Nhiệm Vụ Đường:
+- Lỗi: "FOR UPDATE cannot be applied to the nullable side of an outer join".
+- Nguyên nhân: câu SELECT khóa cả LEFT JOIN reward item.
+- Đã sửa: chỉ khóa dòng sect_quests bằng FOR UPDATE; tên vật phẩm thưởng lấy bằng scalar subquery.
+- Giữ nguyên transaction và chống nhận thưởng trùng.
+
+2. Mở khóa Tàng Bảo Các theo CẢNH GIỚI:
+- Client trước đây so sánh min_realm với TẦNG tu luyện, gây khóa/mở sai vật phẩm.
+- Đã sửa: so sánh min_realm với CHỈ SỐ CẢNH GIỚI.
+- Cảnh giới: Luyện Khí → Trúc Cơ → Kim Đan → Nguyên Anh → Hóa Thần → Luyện Hư → Hợp Thể → Đại Thừa → Độ Kiếp.
+- Server vẫn kiểm tra cảnh giới bằng stage.realmIndex trước khi cho mua, nên client không thể bỏ qua khóa.
+
+3. Database:
+- Giữ migration inventory.updated_at của bản v3.6-fixed-database.
+- Không xóa dữ liệu database hiện tại.

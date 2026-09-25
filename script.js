@@ -105,20 +105,24 @@ async function loadTreasure(){
   const d=await api('/api/treasury',{headers:authHeaders()});
   const area=$('#treasureArea'); if(!area)return;
   const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp'];
-  area.innerHTML=`<div class="treasure-wallet"><span>☯ Linh lực hiện có</span><strong>${Number(d.spiritPower).toLocaleString('vi-VN')}</strong><small>${esc(d.realm)} · Tầng ${d.tier}/9 · Vật phẩm mua sẽ vào Tu Di Giới</small></div>
-  <div class="stone-exchange"><div><span class="eyebrow">🏯 TÀNG BẢO CÁC 2.0</span><h3>Mua bảo vật bằng linh lực</h3><p>Giao dịch được khóa an toàn trong máy chủ. Nếu mua thành công, linh lực và vật phẩm được cập nhật cùng một lần.</p></div><span class="tag">☯ An toàn giao dịch</span></div>
+  const currentRealmIndex=realmNames.indexOf(String(d.realm||''));
+  area.innerHTML=`<div class="treasure-wallet"><span>☯ Linh lực hiện có · 💎 Linh thạch</span><strong>${Number(d.spiritPower).toLocaleString('vi-VN')} · ${Number(d.spiritStones||0).toLocaleString('vi-VN')}</strong><small>${esc(d.realm)} · Tầng ${d.tier}/9 · 100 linh lực = 1 linh thạch</small></div>
+  <div class="stone-exchange"><div><span class="eyebrow">🏯 TÀNG BẢO CÁC 2.0</span><h3>Mua pháp khí, vật phẩm, linh thú bằng linh thạch</h3><p>Giao dịch dùng linh thạch. Linh lực chỉ dùng để đổi sang linh thạch theo tỷ lệ 100 linh lực = 1 linh thạch.</p></div><span class="tag">☯ An toàn giao dịch</span></div>
+  <div class="stone-exchange-box"><div><b>🔄 Đổi linh lực → linh thạch</b><small>100 linh lực = 1 linh thạch</small></div><input id="exchangeStonesQty" type="number" min="1" max="100000" value="10"><button id="exchangeStonesBtn" class="btn small primary">Đổi linh thạch</button></div>
   <div class="treasure-grid">${d.items.map(i=>{
-    const spirit=Number(d.spiritPower||0), price=Number(i.price||0);
-    const locked=Number(d.tier)-1<Number(i.min_realm);
-    const can=!locked&&spirit>=price;
-    const text=locked?'🔒 Cần '+esc(realmNames[Number(i.min_realm)]||'cảnh giới cao hơn'):can?'☯ Mua vật phẩm':'Thiếu '+Number(Math.max(0,price-spirit)).toLocaleString('vi-VN')+' linh lực';
-    return `<article class="treasure-card ${locked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đang có: ${Number(i.quantity||0)} · Giá: ☯ ${price.toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${locked||!can?'disabled':''}>${text}</button></article>`;
+    const stones=Number(d.spiritStones||0), price=Number(i.price||0);
+    const requiredRealmIndex=Number(i.min_realm)||0;
+    const locked=currentRealmIndex<requiredRealmIndex;
+    const can=!locked&&stones>=price;
+    const text=locked?'🔒 Cần '+esc(realmNames[requiredRealmIndex]||'cảnh giới cao hơn'):can?'💎 Mua vật phẩm':'Thiếu '+Number(Math.max(0,price-stones)).toLocaleString('vi-VN')+' linh thạch';
+    return `<article class="treasure-card ${locked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':i.category==='Linh thú'?'🐉':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đang có: ${Number(i.quantity||0)} · Giá: 💎 ${price.toLocaleString('vi-VN')} linh thạch</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${locked||!can?'disabled':''}>${text}</button></article>`;
   }).join('')}</div><p id="treasureMsg" class="train-msg"></p>`;
+  $('#exchangeStonesBtn').onclick=async()=>{const b=$('#exchangeStonesBtn');const qty=Number($('#exchangeStonesQty').value||0);b.disabled=true;try{const x=await api('/api/currency/exchange',{method:'POST',headers:authHeaders(),body:JSON.stringify({stones:qty})});$('#treasureMsg').textContent=`🔄 Đã đổi ${Number(x.spentSpirit).toLocaleString('vi-VN')} linh lực → ${Number(x.receivedStones).toLocaleString('vi-VN')} linh thạch.`;await Promise.all([loadProfile(),loadTreasure()]);}catch(e){$('#treasureMsg').textContent='❌ '+e.message;}finally{b.disabled=false;}};
   document.querySelectorAll('.buy-item').forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     try{
       const x=await api('/api/treasury/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id)})});
-      $('#treasureMsg').textContent=`✅ Đã mua ${x.item}. Trừ ${Number(x.spentSpirit||0).toLocaleString('vi-VN')} linh lực.`;
+      $('#treasureMsg').textContent=`✅ ${x.message||('Đã mua '+x.item)} · Trừ ${Number(x.spentStones||0).toLocaleString('vi-VN')} linh thạch.`;
       await Promise.all([loadProfile(),loadTreasure(),loadTuDi()]);
     }catch(e){$('#treasureMsg').textContent='❌ '+e.message;b.disabled=false;}
   });
