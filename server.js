@@ -158,6 +158,13 @@ async function initDb() {
     -- CREATE TABLE IF NOT EXISTS does not modify an existing inventory table.
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     UPDATE inventory SET updated_at=NOW() WHERE updated_at IS NULL;
+    -- Repair the inventory -> treasure_items FK on databases migrated from older versions.
+    -- Some old deployments retained a stale constraint definition/name. Recreate it safely.
+    DELETE FROM inventory i
+    WHERE NOT EXISTS (SELECT 1 FROM treasure_items ti WHERE ti.id=i.item_id);
+    ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_item_id_fkey;
+    ALTER TABLE inventory ADD CONSTRAINT inventory_item_id_fkey
+      FOREIGN KEY (item_id) REFERENCES treasure_items(id) ON DELETE CASCADE;
 
     CREATE TABLE IF NOT EXISTS market_listings (
       id BIGSERIAL PRIMARY KEY,
@@ -706,13 +713,21 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
     }
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,
       [req.session.user_id,price]);
+    // Use the locked catalog row's id, not the client-supplied id, for the FK write.
+    // This also makes the purchase resilient to stale frontend/catalog data.
+    const catalogId=Number(item.id);
+    const existsR=await client.query('SELECT 1 FROM treasure_items WHERE id=$1 FOR KEY SHARE',[catalogId]);
+    if(!existsR.rowCount){
+      await client.query('ROLLBACK');
+      return res.status(409).json({error:'Vật phẩm trong Tàng Bảo Các đã thay đổi. Hãy tải lại trang rồi mua lại.'});
+    }
     const invWrite=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at)
-      SELECT $1,ti.id,1,NOW() FROM treasure_items ti WHERE ti.id=$2
+      VALUES($1,$2,1,NOW())
       ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,
-      [req.session.user_id,itemId]);
+      [req.session.user_id,catalogId]);
     if(invWrite.rowCount!==1){
       await client.query('ROLLBACK');
-      return res.status(404).json({error:'Vật phẩm không còn tồn tại trong Tàng Bảo Các. Hãy tải lại trang rồi thử lại.'});
+      return res.status(500).json({error:'Không thể ghi vật phẩm vào kho. Linh thạch chưa bị trừ.'});
     }
     const today="(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date";
     await client.query(`INSERT INTO daily_activity(user_id,activity_date,buy_count,train_count,stone_claim_count)
