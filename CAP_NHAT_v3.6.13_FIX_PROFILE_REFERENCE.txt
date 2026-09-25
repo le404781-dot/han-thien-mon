@@ -1,0 +1,17 @@
+HÀN THIÊN MÔN v3.6.13 – FIX LỖI HỒ SƠ / VẬN CÔNG
+
+Lỗi Render xác định từ log:
+ReferenceError: secretRealmDebuffActive is not defined
+server.js:850:29
+
+Nguyên nhân:
+Biến được khai báo là secretDebuffActive nhưng response JSON lại dùng tên secretRealmDebuffActive không có khai báo.
+
+Đã sửa:
+- Đổi response thành secretRealmDebuffActive: secretDebuffActive.
+- Giữ secretRealmDebuffPercent và các dữ liệu chiến lực/debuff hiện tại.
+- Không xóa dữ liệu PostgreSQL.
+- Không thay đổi tài khoản, linh lực, linh thạch hoặc vật phẩm.
+
+Kiểm tra:
+- node --check server.js: OK
