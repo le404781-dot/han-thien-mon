@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.5.1 – SỬA GIAO DỊCH, NHIỆM VỤ ĐƯỜNG, MÔN NHÂN
+
+- Giao dịch vận công và nhận linh thạch chạy trong transaction.
+- Thêm activity_events để nhiệm vụ theo đúng chu kỳ 5 phút.
+- Claim nhiệm vụ chỉ nhận nhiệm vụ của chu kỳ hiện tại.
+- Mua vật phẩm ghi activity event trong cùng transaction.
+- Môn nhân hiển thị 1:1 với số tài khoản đã đăng ký; dữ liệu members mẫu không còn cộng vào quân số.
+- PostgreSQL tự tạo bảng activity_events khi khởi động.

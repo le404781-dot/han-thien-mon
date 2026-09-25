@@ -180,28 +180,6 @@ function accountSummary(){
  $('#accountContent').innerHTML=`<div class="account-box"><div class="avatar-mini">${esc(currentProfile.avatar)}</div><span class="eyebrow">ĐÃ NHẬP MÔN</span><h3>${esc(currentProfile.display_name)}</h3><p>${esc(currentProfile.stage||currentProfile.rank)} · ${esc(currentProfile.title)}</p><p>Linh lực: <b>${Number(currentProfile.spirit_power).toLocaleString('vi-VN')}</b></p><p>Linh thạch: <b>💎 ${Number(currentProfile.spirit_stones||0).toLocaleString('vi-VN')}</b></p><div class="account-actions"><button id="profileEditQuick" class="btn primary">Hồ sơ đệ tử</button><button id="logoutBtn" class="btn ghost">Rời phiên</button></div></div>`;
  $('#accountModal').showModal();$('#profileEditQuick').onclick=()=>{ $('#accountModal').close();openProfileEditor(); };$('#logoutBtn').onclick=logout;
 }
-
-async function initTestMode(){
- if(new URLSearchParams(location.search).get('test')!=='1' || !getToken())return;
- try{
-  const d=await api('/api/test-mode/status',{headers:authHeaders()});
-  if(!d.enabled)return;
-  const sec=$('#testMode'); if(!sec)return;
-  sec.classList.remove('hidden');
-  $('#runTestModeBtn').onclick=runTestMode;
- }catch{}
-}
-async function runTestMode(){
- const b=$('#runTestModeBtn'), area=$('#testModeResult');
- b.disabled=true; b.textContent='⏳ Đang kiểm thử...';
- area.innerHTML='<div class="test-running">Đang mở transaction và kiểm tra dữ liệu thật...</div>';
- try{
-  const d=await api('/api/test-mode/run',{method:'POST',headers:authHeaders(),body:'{}'});
-  area.innerHTML=`<div class="test-summary ${d.ok?'pass':'fail'}"><b>${d.ok?'✓ TEST PASS':'✕ TEST FAIL'}</b><span>${d.rolledBack?'Mọi thay đổi đã ROLLBACK.':'Cần kiểm tra database.'}</span></div><div class="test-list">${d.steps.map(x=>`<div class="test-row ${x.status==='PASS'?'pass':'fail'}"><strong>${x.status==='PASS'?'✓':'✕'} ${esc(x.name)}</strong><small>${esc(x.detail||'')}</small></div>`).join('')}</div><small class="muted">${new Date(d.finishedAt).toLocaleString('vi-VN')}</small>`;
- }catch(e){area.innerHTML=`<div class="test-summary fail"><b>✕ TEST FAIL</b><span>${esc(e.message)}</span></div>`;}
- finally{b.disabled=false;b.textContent='🧪 Chạy kiểm thử giao dịch';}
-}
-
 function openAccount(){if(getToken())accountSummary();else renderAuth('login');}
 function renderAuth(mode){
  const register=mode==='register';
@@ -221,5 +199,4 @@ $('#menuBtn').onclick=()=>$('#nav').classList.toggle('open');document.querySelec
 if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$('#themeBtn').textContent='☀';}
 
 loadData();loadSect();checkSession();
-setTimeout(initTestMode,700);
 setInterval(()=>{if(getToken())loadChat();},5000);
