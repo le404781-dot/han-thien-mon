@@ -790,17 +790,71 @@ async function loadArenaLive(){
  }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
 }
 
-async function loadMailbox(){
- const area=$('#mailboxArea'),badge=$('#mailboxBadge'); if(!area||!getToken())return;
- try{const d=await api('/api/mailbox',{headers:authHeaders()});
-  if(badge)badge.style.display=Number(d.unread||0)>0?'inline-flex':'none';
-  area.innerHTML=`<div class="mailbox-toolbar"><label><input id="mailboxToggle" type="checkbox" ${d.enabled?'checked':''}> 🔔 Nhận thông báo Hòm Thư</label><button id="mailboxReadAll" class="btn small ghost">Đánh dấu tất cả đã đọc</button><span>Chưa đọc: <b>${Number(d.unread||0)}</b></span></div><div class="mailbox-list">${(d.rows||[]).map(x=>`<article class="mail-item ${x.read_at?'':'unread'}" data-id="${x.id}"><div class="mail-icon">${x.type==='challenge'?'⚔️':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='chat_total'?'☯':'📬'}</div><div><b>${esc(x.title)}</b><p>${esc(x.message)}</p><small>${new Date(x.created_at).toLocaleString('vi-VN')}</small></div>${x.read_at?'':'<span class="mail-new">MỚI</span>'}</article>`).join('')||'<div class="empty-state compact"><p>Hòm thư đang tĩnh lặng.</p></div>'}</div>`;
-  $('#mailboxToggle').onchange=async e=>{try{await api('/api/mailbox/toggle',{method:'POST',headers:authHeaders(),body:JSON.stringify({enabled:e.target.checked})});}catch(err){e.target.checked=!e.target.checked;}};
-  $('#mailboxReadAll').onclick=async()=>{await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({})});await loadMailbox();};
-  document.querySelectorAll('.mail-item.unread').forEach(el=>el.onclick=async()=>{await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(el.dataset.id)})});await loadMailbox();});
- }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
+async function respondMailboxAction(id, type, actionData, actionBtn){
+  if(!actionData?.action || !actionData?.requestId && !actionData?.invitationId) return;
+  const endpoint=actionData.action==='friend'
+    ? '/api/friends/respond'
+    : actionData.action==='challenge'
+      ? '/api/challenges/online/respond'
+      : actionData.action==='bicanh_invite'
+        ? '/api/bicanh/invite/respond' : '';
+  if(!endpoint)return;
+  const body=actionData.action==='friend'
+    ? {requestId:Number(actionData.requestId),action}
+    : actionData.action==='challenge'
+      ? {requestId:Number(actionData.requestId),action}
+      : {invitationId:Number(actionData.invitationId),action};
+  actionBtn?.setAttribute('disabled','disabled');
+  try{
+    const result=await api(endpoint,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
+    const mail=document.querySelector(`.mail-item[data-id="${id}"]`);
+    if(mail){
+      const actions=mail.querySelector('.mail-actions');
+      if(actions) actions.innerHTML=`<span class="mail-result">✓ ${action==='accept'?'Đã chấp nhận':'Đã từ chối'}</span>`;
+      mail.classList.remove('unread');
+    }
+    await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(id)})});
+    await loadMailbox();
+    if(actionData.action==='challenge') await loadChallenges?.();
+    if(actionData.action==='friend'){ await loadFriends?.(); await loadData?.(); }
+    if(actionData.action==='bicanh_invite') await loadBicanh?.();
+  }catch(e){
+    if(actionBtn)actionBtn.removeAttribute('disabled');
+    const mail=document.querySelector(`.mail-item[data-id="${id}"]`);
+    const msg=mail?.querySelector('.mail-action-msg'); if(msg)msg.textContent='❌ '+e.message;
+  }
 }
 
+async function loadMailbox(){
+ const area=$('#mailboxArea'),badge=$('#mailboxBadge'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/mailbox',{headers:authHeaders()});
+  if(badge)badge.style.display=Number(d.unread||0)>0?'inline-flex':'none';
+  area.innerHTML=`<div class="mailbox-toolbar"><label><input id="mailboxToggle" type="checkbox" ${d.enabled?'checked':''}> 🔔 Nhận thông báo Hòm Thư</label><button id="mailboxReadAll" class="btn small ghost">Đánh dấu tất cả đã đọc</button><span>Chưa đọc: <b>${Number(d.unread||0)}</b></span></div><div class="mailbox-list">${(d.rows||[]).map(x=>{
+    const a=x.actionData||null;
+    const actionable=Boolean(a?.action && (a.requestId||a.invitationId) && !x.read_at);
+    const icon=x.type==='challenge'?'⚔️':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='chat_total'?'☯':'📬';
+    const buttons=actionable?`<div class="mail-actions"><button class="btn small primary mail-accept" data-id="${x.id}">✓ Đồng ý</button><button class="btn small ghost mail-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div>`:'';
+    return `<article class="mail-item ${x.read_at?'':'unread'} ${actionable?'mail-actionable':''}" data-id="${x.id}"><div class="mail-icon">${icon}</div><div class="mail-content"><b>${esc(x.title)}</b><p>${esc(x.message)}</p><small>${new Date(x.created_at).toLocaleString('vi-VN')}</small>${buttons}</div>${x.read_at?'':'<span class="mail-new">MỚI</span>'}</article>`;
+  }).join('')||'<div class="empty-state compact"><p>Hòm thư đang tĩnh lặng.</p></div>'}</div>`;
+  $('#mailboxToggle').onchange=async e=>{try{await api('/api/mailbox/toggle',{method:'POST',headers:authHeaders(),body:JSON.stringify({enabled:e.target.checked})});}catch(err){e.target.checked=!e.target.checked;}};
+  $('#mailboxReadAll').onclick=async()=>{await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({})});await loadMailbox();};
+  document.querySelectorAll('.mail-item.unread').forEach(el=>el.onclick=async ev=>{
+    if(ev.target.closest('.mail-actions'))return;
+    await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(el.dataset.id)})});await loadMailbox();
+  });
+  document.querySelectorAll('.mail-accept').forEach(btn=>btn.onclick=async ev=>{
+    ev.stopPropagation();
+    const id=Number(btn.dataset.id),row=(d.rows||[]).find(x=>Number(x.id)===id);
+    await respondMailboxAction(id,'accept',row?.actionData,btn);
+  });
+  document.querySelectorAll('.mail-reject').forEach(btn=>btn.onclick=async ev=>{
+    ev.stopPropagation();
+    const id=Number(btn.dataset.id),row=(d.rows||[]).find(x=>Number(x.id)===id);
+    await respondMailboxAction(id,'reject',row?.actionData,btn);
+  });
+ }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
+}
 async function loadChat(){
  if(!getToken())return;
  try{const d=await api('/api/chat',{headers:authHeaders()});renderChat(d.rows,d.elderSettings);}catch(e){if(getToken())$('#chatArea').innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}

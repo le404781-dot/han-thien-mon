@@ -828,6 +828,7 @@ async function initDb() {
       read_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS action_data TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_mailbox_user_unread ON mailbox_notifications(user_id,read_at,id DESC);
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS reward_grade TEXT NOT NULL DEFAULT 'Hạ Đẳng';
 
@@ -2843,7 +2844,7 @@ app.post('/api/bicanh/invite',auth,async(req,res)=>{
     if(stageFor(Number(me.spirit_power)||0).realmIndex<Number(realm.required_realm_index))return res.status(403).json({error:`Bạn phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể mời vào Bí Cảnh này.`});
     if(stageFor(Number(friend.spirit_power)||0).realmIndex<Number(realm.required_realm_index))return res.status(400).json({error:`Bằng Hữu phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể tham gia Bí Cảnh này.`});
     const r=await query(`INSERT INTO secret_realm_invitations(realm_id,inviter_id,invitee_id,status) VALUES($1,$2,$3,'pending') ON CONFLICT(realm_id,inviter_id,invitee_id) DO UPDATE SET status='pending',created_at=NOW(),responded_at=NULL RETURNING id`,[realmId,uid,friendId]);
-    await createMailboxNotification(friendId,'bicanh_invite','🌌 Mời vào Bí Cảnh',`Bạn được mời tham gia ${realm.name}.`,'#bicanh');
+    await createMailboxNotification(friendId,'bicanh_invite','🌌 Mời vào Bí Cảnh',`Bạn được mời tham gia ${realm.name}.`,'#bicanh',{action:'bicanh_invite',invitationId:Number(r.rows[0].id)});
     res.json({ok:true,id:r.rows[0].id,message:'Đã gửi lời mời tham gia Bí Cảnh cho Bằng Hữu.'});
   }catch(e){console.error('bicanh invite:',e);res.status(500).json({error:`Không thể gửi lời mời Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}
 });
@@ -3118,8 +3119,13 @@ app.patch('/api/elder-notification',auth,async(req,res)=>{
 });
 
 
-async function createMailboxNotification(userId,type,title,message,linkHash=''){
-  try{const on=(await query('SELECT mailbox_enabled FROM profiles WHERE user_id=$1',[userId])).rows[0]?.mailbox_enabled; if(on===false)return; await query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash) VALUES($1,$2,$3,$4,$5)`,[userId,type,title,message,linkHash||'']);}catch(e){console.error('mailbox notify:',e.message);}
+async function createMailboxNotification(userId,type,title,message,linkHash='',actionData=null){
+  try{
+    const on=(await query('SELECT mailbox_enabled FROM profiles WHERE user_id=$1',[userId])).rows[0]?.mailbox_enabled;
+    if(on===false)return;
+    const payload=actionData?JSON.stringify(actionData):'';
+    await query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data) VALUES($1,$2,$3,$4,$5,$6)`,[userId,type,title,message,linkHash||'',payload]);
+  }catch(e){console.error('mailbox notify:',e.message);}
 }
 async function notifyMany(userIds,type,title,message,linkHash=''){
   const ids=[...new Set(userIds.map(Number).filter(Boolean))];
@@ -3582,10 +3588,10 @@ app.get('/api/mailbox',auth,async(req,res)=>{
   try{
     await ensureMailboxSchema();
     const uid=req.session.user_id;
-    const rows=await query(`SELECT id,type,title,message,link_hash,read_at,created_at FROM mailbox_notifications WHERE user_id=$1 ORDER BY id DESC LIMIT 100`,[uid]);
+    const rows=await query(`SELECT id,type,title,message,link_hash,action_data,read_at,created_at FROM mailbox_notifications WHERE user_id=$1 ORDER BY id DESC LIMIT 100`,[uid]);
     const meta=await query(`SELECT mailbox_enabled,COALESCE((SELECT COUNT(*) FROM mailbox_notifications mn WHERE mn.user_id=p.user_id AND mn.read_at IS NULL),0)::int AS unread FROM profiles p WHERE p.user_id=$1`,[uid]);
     const m=meta.rows[0]||{};
-    res.json({rows:rows.rows,enabled:m.mailbox_enabled!==false,unread:Number(m.unread||0)});
+    res.json({rows:rows.rows.map(x=>({...x,actionData:(()=>{try{return x.action_data?JSON.parse(x.action_data):null}catch{return null}})()})),enabled:m.mailbox_enabled!==false,unread:Number(m.unread||0)});
   }catch(e){console.error('mailbox load:',e);res.status(500).json({error:'Không thể mở Hòm Thư: '+(process.env.NODE_ENV==='production'?'máy chủ chưa sẵn sàng.':e.message)});}
 });
 app.post('/api/mailbox/toggle',auth,async(req,res)=>{try{const enabled=Boolean(req.body?.enabled);await query('UPDATE profiles SET mailbox_enabled=$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,enabled]);res.json({ok:true,enabled});}catch(e){res.status(500).json({error:'Không thể đổi trạng thái Hòm Thư.'});}});
@@ -3733,7 +3739,7 @@ app.post('/api/challenges/online/request',auth,async(req,res)=>{
     const incoming=(await client.query(`SELECT id FROM challenge_requests WHERE challenger_id=$2 AND opponent_id=$1 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
     if(incoming){await client.query('ROLLBACK');return res.status(409).json({error:'Đối phương đã mở lôi đài với bạn. Hãy vào Khiêu Chiến để đồng thuận.'});}
     const r=await client.query(`INSERT INTO challenge_requests(challenger_id,opponent_id,mode,status) VALUES($1,$2,'online','pending') RETURNING id,created_at`,[uid,target]);
-    await createMailboxNotification(target,'challenge','⚔️ Lời mời Khiêu Chiến','Bạn nhận được lời mời bước vào Lôi Đài.','#challenge');
+    await createMailboxNotification(target,'challenge','⚔️ Lời mời Khiêu Chiến','Bạn nhận được lời mời bước vào Lôi Đài.','#challenge',{action:'challenge',requestId:Number(r.rows[0].id)});
     await client.query('COMMIT');
     res.status(201).json({ok:true,...r.rows[0],message:'Đã mở lôi đài. Chờ đối phương đồng thuận.'});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge request:',e);res.status(500).json({error:'Không thể mở lôi đài.'});}
@@ -3929,7 +3935,7 @@ app.post('/api/friends/request',auth,async(req,res)=>{
     }
     if(old?.status==='rejected') await query('DELETE FROM friend_requests WHERE id=$1',[old.id]);
     const r=await query(`INSERT INTO friend_requests(requester_id,addressee_id,status) VALUES($1,$2,'pending') RETURNING id,created_at`,[uid,target]);
-    await createMailboxNotification(target,'friend','🤝 Lời mời kết giao',`Môn nhân #${uid} gửi lời mời kết giao bằng hữu.`, '#profile');
+    await createMailboxNotification(target,'friend','🤝 Lời mời kết giao',`Môn nhân #${uid} gửi lời mời kết giao bằng hữu.`, '#profile',{action:'friend',requestId:Number(r.rows[0].id)});
     res.status(201).json({ok:true,...r.rows[0],message:'Đã gửi lời mời kết bằng hữu.'});
   }catch(e){console.error('friend request:',e);res.status(500).json({error:'Không thể gửi lời mời bằng hữu.'});}
 });

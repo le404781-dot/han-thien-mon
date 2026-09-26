@@ -1,0 +1,18 @@
+# Hàn Thiên Môn — v3.6.50
+
+## Giao diện
+- Chuyển tông màu sang giấy ngà, xanh ngọc, mực và kim nhạt; thêm lớp texture/rửa mực nhẹ theo phong cách thủy mặc tiên hiệp.
+- Làm mềm bo góc, bóng, nút và các panel để giao diện dễ nhìn hơn trên iPhone.
+- Tách rõ điều hướng **Đệ Tử Lục** và **Xuất Quan**.
+
+## Hòm Thư
+- Thư mời kết giao: có **Đồng ý / Từ chối** ngay trong Hòm Thư.
+- Thư mời Khiêu Chiến: có **Đồng ý / Từ chối** ngay trong Hòm Thư.
+- Thư mời Bí Cảnh: có **Đồng ý / Từ chối** ngay trong Hòm Thư.
+- Sau khi xử lý, thư được đánh dấu đã đọc và dữ liệu liên quan được tải lại.
+- Thêm `action_data` vào `mailbox_notifications`; server tự chạy `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, phù hợp DB PostgreSQL cũ.
+
+## Tương thích
+- Không thay đổi API cũ của kết giao, Khiêu Chiến và Bí Cảnh.
+- Không yêu cầu sửa dữ liệu người chơi hiện tại.
+- Có thể chạy bằng `npm install` rồi `npm start`.

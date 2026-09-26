@@ -535,3 +535,99 @@ body.focus-mode .focus-bar{display:flex}.focus-bar-label{max-width:220px;white-s
   .stats{margin-top:28px;padding-top:18px;gap:8px;display:grid;grid-template-columns:repeat(3,1fr)}
   .stats div{min-width:0}.stats b{font-size:1.55rem}.stats span{font-size:.61rem;letter-spacing:.04em}
 }
+
+/* ───────── TIÊN HIỆP THỦY MẶC · v3.6.50 ───────── */
+:root{
+  --ink:#29443e;
+  --ink-soft:#5f746b;
+  --mist-paper:#f6f1e5;
+  --wash:rgba(255,252,242,.72);
+  --wash-deep:rgba(219,226,215,.62);
+}
+body{
+  background:
+    radial-gradient(ellipse at 12% 18%,rgba(111,137,121,.13),transparent 27%),
+    radial-gradient(ellipse at 88% 76%,rgba(154,133,91,.10),transparent 30%),
+    linear-gradient(135deg,rgba(255,255,255,.2),transparent 42%),
+    var(--bg);
+}
+body:before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:-2;opacity:.18;
+  background-image:
+    radial-gradient(circle at 20% 30%,rgba(42,68,62,.18) 0 1px,transparent 1.5px),
+    radial-gradient(circle at 70% 60%,rgba(128,104,65,.12) 0 1px,transparent 1.5px);
+  background-size:19px 23px,27px 31px;
+  mix-blend-mode:multiply;
+}
+.topbar{
+  background:color-mix(in srgb,var(--paper) 86%,transparent);
+  border-bottom-color:rgba(126,112,79,.28);
+}
+.section,.hero-card,.tan-nhan-panel,.profile-card,.mailbox-area,.friends-panel{
+  position:relative;
+}
+.section:before,.hero-card:after{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.24;
+  background:
+    radial-gradient(ellipse at 8% 12%,rgba(52,82,72,.12),transparent 28%),
+    radial-gradient(ellipse at 92% 82%,rgba(144,116,66,.10),transparent 26%);
+  filter:blur(1px);
+}
+.section>*{position:relative;z-index:1}
+.section-head h2,.hero-card h3,.tan-nhan-copy h2{
+  font-family:'Noto Serif SC',serif;
+  letter-spacing:.02em;
+}
+.btn{border-radius:999px;box-shadow:0 5px 18px rgba(47,64,55,.07)}
+.primary{box-shadow:0 7px 22px rgba(40,78,71,.16)}
+/* Tách rõ Đệ Tử Lục và Xuất Quan */
+#profile{background:linear-gradient(180deg,rgba(250,247,237,.88),rgba(229,235,225,.58))}
+#xuatquan{background:
+  radial-gradient(ellipse at 50% 0%,rgba(113,143,124,.12),transparent 40%),
+  linear-gradient(180deg,rgba(226,233,224,.78),rgba(246,242,231,.82))}
+.xuatquan-tools{
+  display:flex;justify-content:space-between;align-items:center;gap:14px;
+  margin:0 0 16px;padding:12px 16px;border:1px solid rgba(116,128,111,.25);
+  border-radius:16px;background:rgba(255,252,242,.55);backdrop-filter:blur(8px);
+  color:var(--muted);font-size:.82rem;
+}
+@media(max-width:650px){.xuatquan-tools{align-items:flex-start;flex-direction:column}}
+/* Hòm Thư — phong cách thư tiên môn */
+.mailbox-area{
+  padding:18px;border:1px solid rgba(126,112,79,.26);border-radius:24px;
+  background:linear-gradient(145deg,rgba(255,252,243,.82),rgba(220,229,219,.55));
+  box-shadow:var(--shadow);overflow:hidden;
+}
+.mailbox-list{display:grid;gap:10px;margin-top:14px}
+.mail-item{
+  display:grid;grid-template-columns:auto 1fr auto;gap:13px;align-items:start;
+  padding:16px 17px;border:1px solid rgba(116,128,111,.20);border-radius:16px;
+  background:rgba(255,253,246,.68);transition:.2s;
+}
+.mail-item:hover{transform:translateY(-1px);border-color:rgba(169,130,58,.45)}
+.mail-item.unread{border-color:rgba(169,130,58,.42);box-shadow:0 8px 25px rgba(83,74,48,.07)}
+.mail-item.mail-actionable{padding-bottom:14px}
+.mail-content{min-width:0}
+.mail-content p{margin:4px 0;color:var(--muted);font-size:.86rem}
+.mail-content small{color:#8a887b;font-size:.7rem}
+.mail-icon{
+  width:42px;height:42px;display:grid;place-items:center;border-radius:50%;
+  background:rgba(232,228,208,.72);border:1px solid rgba(169,130,58,.25);font-size:1.15rem;
+}
+.mail-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:11px}
+.mail-actions .btn{font-size:.72rem;padding:7px 13px}
+.mail-result{font-size:.75rem;color:var(--jade);font-weight:800}
+.mail-action-msg{font-size:.72rem;color:var(--red)}
+.mail-new{
+  align-self:start;padding:4px 8px;border-radius:999px;background:rgba(142,48,44,.09);
+  color:var(--red);font-size:.62rem;font-weight:900;letter-spacing:.08em;
+}
+.mailbox-toolbar{
+  display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding-bottom:12px;
+  border-bottom:1px dashed rgba(116,128,111,.28);font-size:.78rem;color:var(--muted)
+}
+.mailbox-toolbar label{margin-right:auto}
+.mailbox-toolbar input{accent-color:var(--jade)}
+body.dark .mailbox-area{background:linear-gradient(145deg,rgba(28,43,39,.92),rgba(31,50,44,.78))}
+body.dark .mail-item{background:rgba(24,37,34,.72)}
+body.dark .xuatquan-tools{background:rgba(26,42,38,.68)}
