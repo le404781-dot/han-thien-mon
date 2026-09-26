@@ -89,6 +89,36 @@ async function ensureRuntimeSchema() {
       UNIQUE(user_id,beast_id)
     );
     ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS avatar TEXT;
+    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS unbound_quantity INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS acquisition_type TEXT NOT NULL DEFAULT 'bound';
+    CREATE TABLE IF NOT EXISTS spirit_beast_care (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,
+      happiness INTEGER NOT NULL DEFAULT 50,
+      anger INTEGER NOT NULL DEFAULT 20,
+      love INTEGER NOT NULL DEFAULT 50,
+      dislike INTEGER NOT NULL DEFAULT 20,
+      joy INTEGER NOT NULL DEFAULT 50,
+      pet_spirit INTEGER NOT NULL DEFAULT 0,
+      last_tick_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,beast_id)
+    );
+    CREATE TABLE IF NOT EXISTS spirit_beast_equipment (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,
+      slot TEXT NOT NULL,
+      item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
+      equipped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,beast_id,slot)
+    );
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_food_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_joy_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_slot TEXT;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_power INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS is_khoi_loi BOOLEAN NOT NULL DEFAULT FALSE;
     CREATE TABLE IF NOT EXISTS owned_spirit_roots (
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -112,6 +142,12 @@ async function ensureRuntimeSchema() {
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_food_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_joy_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_slot TEXT;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_power INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS is_khoi_loi BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
@@ -513,6 +549,38 @@ async function seedTienPhap(){
         [name,ri,RANKS[ri].name,grade,`Tiên pháp đối ứng ${RANKS[ri].name}, chỉ mở khi đạt đủ cảnh giới.`,price,power,training,`+${training}% hiệu quả tu luyện tiên pháp · +${power.toLocaleString('vi-VN')} chiến lực.`]);
     }
   }
+}
+
+
+async function seedDuocDuong(){
+  const items=[
+    ['Tụ Linh Đan','Dược Đường · Đan dược','Đan dược nhập môn, giúp linh lực tăng nhanh, dược tính ôn hòa.',80,180,0],
+    ['Trúc Cơ Linh Đan','Dược Đường · Đan dược','Đan dược dành cho tu sĩ Trúc Cơ, linh khí tinh thuần hơn Tụ Linh Đan.',260,650,1],
+    ['Kim Đan Ngọc Lộ','Dược Đường · Đan dược','Ngọc lộ cô đọng linh lực, thích hợp tu sĩ Kim Đan.',650,1800,2],
+    ['Nguyên Anh Huyền Đan','Dược Đường · Đan dược','Huyền đan nuôi dưỡng Nguyên Anh, dược lực thâm hậu.',1500,4200,3],
+    ['Hóa Thần Thiên Đan','Dược Đường · Đan dược','Thiên đan giúp Hóa Thần cảnh tích lũy linh lực.',4200,11000,4],
+    ['Luyện Hư Đạo Đan','Dược Đường · Đan dược','Đạo đan chứa linh vận hư không, chỉ mở từ Luyện Hư.',11000,28000,5],
+    ['Hợp Thể Thánh Đan','Dược Đường · Đan dược','Thánh đan hợp nhất thần hồn và linh lực, cực kỳ quý hiếm.',26000,65000,6],
+    ['Linh Cốc Thanh Tâm','Dược Đường · Linh thú thức ăn','Lương thực linh khí dành cho linh thú. Tăng linh lực và cảm xúc Hỉ.',40,0,0],
+    ['Huyết Ngọc Quả','Dược Đường · Linh thú thức ăn','Quả linh huyết khí, thích hợp linh thú chiến đấu.',120,0,1],
+    ['Cửu Diệp Linh Chi','Dược Đường · Linh thú thức ăn','Linh chi thượng phẩm, giúp linh thú hồi phục và sinh ra Ái.',320,0,3],
+    ['Linh Khôi Con Rối','Dược Đường · Khôi Lỗi','Khôi lỗi nhỏ mô phỏng linh thú, chuyên dùng để bồi dưỡng niềm vui.',100,0,0],
+    ['Ngân Nguyệt Khôi Lỗi','Dược Đường · Khôi Lỗi','Khôi lỗi ngân nguyệt dành cho linh thú trung giai.',450,0,2],
+    ['Thiên Cơ Khôi Lỗi','Dược Đường · Khôi Lỗi','Khôi lỗi Thiên Cơ có thể bồi dưỡng niềm vui cho linh thú cao giai.',1800,0,5],
+    ['Linh Thú Hộ Giáp · Nhất Giai','Dược Đường · Linh thú trang bị','Hộ giáp dành riêng cho linh thú Nhất Giai.',260,0,0],
+    ['Linh Thú Hộ Giáp · Tam Giai','Dược Đường · Linh thú trang bị','Hộ giáp dành riêng cho linh thú Tam Giai.',900,0,2],
+    ['Linh Thú Hộ Giáp · Lục Giai','Dược Đường · Linh thú trang bị','Hộ giáp dành riêng cho linh thú Lục Giai.',3200,0,5],
+    ['Linh Thú Linh Châu · Cửu Giai','Dược Đường · Linh thú trang bị','Linh châu tăng linh lực cho linh thú Cửu Giai.',9000,0,8]
+  ];
+  for(const [name,category,description,price,spirit_gain,min_realm] of items){
+    await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,price=EXCLUDED.price,spirit_gain=EXCLUDED.spirit_gain,min_realm=EXCLUDED.min_realm`,[name,category,description,price,spirit_gain,min_realm]);
+  }
+  const food={'Linh Cốc Thanh Tâm':[90,18],'Huyết Ngọc Quả':[220,12],'Cửu Diệp Linh Chi':[600,10]};
+  for(const [name,[gain,joy]] of Object.entries(food)) await query(`UPDATE treasure_items SET beast_food_gain=$2,beast_joy_gain=$3 WHERE name=$1`,[name,gain,joy]);
+  const puppets={'Linh Khôi Con Rối':18,'Ngân Nguyệt Khôi Lỗi':30,'Thiên Cơ Khôi Lỗi':45};
+  for(const [name,joy] of Object.entries(puppets)) await query(`UPDATE treasure_items SET beast_joy_gain=$2,is_khoi_loi=TRUE WHERE name=$1`,[name,joy]);
+  const gears={'Linh Thú Hộ Giáp · Nhất Giai':['armor',35,0],'Linh Thú Hộ Giáp · Tam Giai':['armor',90,2],'Linh Thú Hộ Giáp · Lục Giai':['armor',220,5],'Linh Thú Linh Châu · Cửu Giai':['core',360,8]};
+  for(const [name,[slot,power,ri]] of Object.entries(gears)) await query(`UPDATE treasure_items SET beast_gear_slot=$2,beast_gear_power=$3,beast_gear_min_realm=$4 WHERE name=$1`,[name,slot,power,ri]);
 }
 
 async function initDb() {
@@ -1056,6 +1124,7 @@ async function initDb() {
 
   // Chạy migration trước seed để DB cũ có đủ cột cho Tàng Thư Các/Động Phủ.
   await ensureRuntimeSchema();
+  await seedDuocDuong();
   await ensureTienPhapSchema();
   await seedTienPhap();
 
@@ -1546,8 +1615,10 @@ app.get('/api/data',async(req,res)=>{
     const legends=(await query(`SELECT l.id,l.user_id,l.title,l.content,l.realm_index,l.realm_name,l.realm_tier,l.created_at,l.updated_at,u.display_name AS author_name,u.username,p.avatar,p.position
       FROM legends l JOIN users u ON u.id=l.user_id JOIN profiles p ON p.user_id=u.id ORDER BY l.updated_at DESC,l.id DESC LIMIT 200`)).rows.map(x=>({...x,charLimit:legendCharLimit(x.realm_index)}));
     const [accounts] = await Promise.all([
-      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier,p.presence_status,p.last_seen_at
-             FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY u.id`)
+      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier,p.presence_status,p.last_seen_at,
+             b.name AS equipped_beast_name,b.beast_realm AS equipped_beast_realm,b.beast_realm_tier AS equipped_beast_realm_tier,
+             COALESCE((SELECT SUM(ti.beast_gear_power) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=u.id AND sbe.beast_id=p.equipped_beast_id),0)::int AS equipped_beast_gear_power
+             FROM users u JOIN profiles p ON p.user_id=u.id LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id ORDER BY u.id`)
     ]);
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
@@ -2409,6 +2480,91 @@ app.post('/api/quests/:id/claim',auth,async(req,res)=>{
   finally{client.release();}
 });
 
+
+function clampInt(v,min,max){return Math.max(min,Math.min(max,Math.round(Number(v)||0)));}
+async function ensureBeastCareRow(client,userId,beastId){
+  await client.query(`INSERT INTO spirit_beast_care(user_id,beast_id) VALUES($1,$2) ON CONFLICT(user_id,beast_id) DO NOTHING`,[userId,beastId]);
+}
+async function settleBeastCare(client,userId,beastId){
+  await ensureBeastCareRow(client,userId,beastId);
+  const r=(await client.query(`SELECT * FROM spirit_beast_care WHERE user_id=$1 AND beast_id=$2 FOR UPDATE`,[userId,beastId])).rows[0];
+  const minutes=Math.floor(Math.max(0,Date.now()-new Date(r.last_tick_at).getTime())/60000);
+  if(minutes<1)return r;
+  const moodScore=(Number(r.happiness)+Number(r.love)-Number(r.anger)-Number(r.dislike))/2;
+  const spiritGain=Math.round(minutes*moodScore/100);
+  const toward=(v)=>v<50?Math.min(50,v+Math.floor(minutes/30)):v>50?Math.max(50,v-Math.floor(minutes/30)):50;
+  const next={happiness:toward(Number(r.happiness)),anger:toward(Number(r.anger)),love:toward(Number(r.love)),dislike:toward(Number(r.dislike)),joy:Math.max(0,Number(r.joy)-Math.floor(minutes/45)),pet_spirit:Math.max(0,Number(r.pet_spirit)+spiritGain)};
+  await client.query(`UPDATE spirit_beast_care SET happiness=$3,anger=$4,love=$5,dislike=$6,joy=$7,pet_spirit=$8,last_tick_at=NOW(),updated_at=NOW() WHERE user_id=$1 AND beast_id=$2`,[userId,beastId,next.happiness,next.anger,next.love,next.dislike,next.joy,next.pet_spirit]);
+  return {...r,...next};
+}
+function bondChanceFor(userSpirit){
+  const st=stageFor(Number(userSpirit)||0);
+  return Math.min(95,Math.max(25,35+st.realmIndex*4+(st.tier-1)*2));
+}
+
+app.get('/api/duoc-duong',auth,async(req,res)=>{
+  try{
+    await ensureRuntimeSchema();
+    const p=(await query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const items=(await query(`SELECT id,name,category,description,price,spirit_gain,min_realm,beast_food_gain,beast_joy_gain,beast_gear_slot,beast_gear_power,beast_gear_min_realm,is_khoi_loi FROM treasure_items WHERE category LIKE 'Dược Đường%' ORDER BY min_realm,price,id`)).rows;
+    const stage=stageFor(Number(p?.spirit_power)||0);
+    const npcLines=['“Tiểu hữu, dược lực một phần, căn cơ một phần. Chớ tham đan mà quên luyện hóa.”','“Linh thú có tình, cũng có tâm. Cho chúng ăn đúng dược, vui thì linh lực tự sinh.”','“Trang bị cho linh thú phải thuận theo huyết mạch và cảnh giới, cưỡng ép chỉ tổ phản phệ.”','“Khôi Lỗi tuy vô tình, nhưng có thể làm linh thú vui lòng. Niềm vui cũng là một loại linh lực.”'];
+    res.json({items,profile:p||{},stage,npc:{name:'Dược Đồng · Mặc Ly',title:'Chấp sự Dược Đường',dialogue:npcLines[Math.floor(Date.now()/120000)%npcLines.length]}});
+  }catch(e){console.error('duoc duong:',e);res.status(500).json({error:'Không thể mở Dược Đường.'});}
+});
+app.post('/api/duoc-duong/buy',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN');const id=Number(req.body?.itemId),qty=clampInt(req.body?.quantity,1,99);if(!Number.isInteger(id)||id<1){await client.query('ROLLBACK');return res.status(400).json({error:'Dược phẩm không hợp lệ.'});}
+    const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND category LIKE 'Dược Đường%' FOR UPDATE`,[id])).rows[0];const p=(await client.query('SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    if(!item||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy dược phẩm hoặc hồ sơ.'});}
+    const ri=realmIndexOf(stageFor(Number(p.spirit_power)).realm);if(ri<Number(item.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`${item.name} yêu cầu ${RANKS[item.min_realm]?.name||'cảnh giới cao hơn'}.`});}
+    const total=Number(item.price)*qty;if(Number(p.spirit_stones)<total){await client.query('ROLLBACK');return res.status(400).json({error:`Không đủ linh thạch. Cần ${total.toLocaleString('vi-VN')}.`});}
+    const cap=Math.max(1,Number(p.storage_capacity)||30),used=Number((await client.query('SELECT COUNT(*)::int AS c FROM inventory WHERE user_id=$1 AND quantity>0',[req.session.user_id])).rows[0].c)||0,owned=Number((await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2',[req.session.user_id,id])).rows[0]?.quantity)||0;
+    if(used>=cap&&owned<=0){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}).`});}
+    await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,total]);
+    const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW() RETURNING quantity`,[req.session.user_id,id,qty]);
+    await client.query('COMMIT');res.json({ok:true,item:item.name,quantity:qty,totalQuantity:Number(ir.rows[0].quantity),spent:total,message:`Đã mua ${item.name} ×${qty}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('duoc buy:',e);res.status(500).json({error:'Mua dược thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}
+});
+
+app.get('/api/duong-thu',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN');const uid=req.session.user_id;
+    const owned=(await client.query(`SELECT o.beast_id FROM owned_spirit_beasts o WHERE o.user_id=$1 AND o.quantity>0`,[uid])).rows;for(const b of owned)await settleBeastCare(client,uid,Number(b.beast_id));
+    const rows=(await client.query(`SELECT o.beast_id,o.quantity,o.unbound_quantity,o.acquisition_type,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.min_realm,bc.happiness,bc.anger,bc.love,bc.dislike,bc.joy,bc.pet_spirit,COALESCE((SELECT json_agg(json_build_object('slot',sbe.slot,'itemId',sbe.item_id,'name',ti.name,'power',ti.beast_gear_power)) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=o.user_id AND sbe.beast_id=o.beast_id),'[]'::json) AS gear FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id JOIN spirit_beast_care bc ON bc.user_id=o.user_id AND bc.beast_id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.id`,[uid])).rows;
+    const p=(await client.query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[uid])).rows[0];const stage=stageFor(Number(p?.spirit_power)||0);await client.query('COMMIT');res.json({profile:p||{},stage,bondChance:bondChanceFor(Number(p?.spirit_power)||0),beasts:rows.map(x=>({...x,gear:Array.isArray(x.gear)?x.gear:[]}))});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('duong thu load:',e);res.status(500).json({error:'Không thể mở Dưỡng Thú.'});}finally{client.release();}
+});
+
+app.post('/api/duong-thu/bond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN');const uid=req.session.user_id,id=Number(req.body?.beastId);if(!Number.isInteger(id)||id<1){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thú không hợp lệ.'});}
+    const p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0],o=(await client.query('SELECT o.*,c.name FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 FOR UPDATE',[uid,id])).rows[0];if(!o||Number(o.unbound_quantity)<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thú này đã nhận chủ hoặc không có linh thú vô chủ.'});}
+    const chance=bondChanceFor(Number(p?.spirit_power)||0),roll=crypto.randomInt(1,101);if(roll>chance){await ensureBeastCareRow(client,uid,id);await client.query('UPDATE spirit_beast_care SET anger=LEAST(100,anger+6),dislike=LEAST(100,dislike+4),joy=GREATEST(0,joy-4),updated_at=NOW() WHERE user_id=$1 AND beast_id=$2',[uid,id]);await client.query('COMMIT');return res.json({ok:false,chance,roll,message:`${o.name} còn cảnh giác, nhận chủ thất bại. Tỷ lệ hiện tại ${chance}%.`});}
+    await client.query(`UPDATE owned_spirit_beasts SET unbound_quantity=GREATEST(0,unbound_quantity-1) WHERE user_id=$1 AND beast_id=$2`,[uid,id]);await ensureBeastCareRow(client,uid,id);await client.query('UPDATE spirit_beast_care SET love=LEAST(100,love+12),happiness=LEAST(100,happiness+10),dislike=GREATEST(0,dislike-8),joy=LEAST(100,joy+12),updated_at=NOW() WHERE user_id=$1 AND beast_id=$2',[uid,id]);await client.query('COMMIT');res.json({ok:true,chance,roll,message:`${o.name} đã nhận chủ! Tâm niệm tương thông, linh lực bắt đầu cộng hưởng.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('beast bond:',e);res.status(500).json({error:'Nhận chủ thất bại do lỗi hệ thống.'});}finally{client.release();}
+});
+
+app.post('/api/duong-thu/feed',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),itemId=Number(req.body?.itemId),qty=clampInt(req.body?.quantity,1,20);if(!Number.isInteger(beastId)||!Number.isInteger(itemId)){await client.query('ROLLBACK');return res.status(400).json({error:'Thông tin cho ăn không hợp lệ.'});}
+    const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND category='Dược Đường · Linh thú thức ăn' FOR UPDATE`,[itemId])).rows[0],o=(await client.query('SELECT quantity FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2 AND quantity>0 FOR UPDATE',[uid,beastId])).rows[0];if(!item||!o){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy thức ăn hoặc linh thú.'});}const inv=(await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[uid,itemId])).rows[0];if(!inv||Number(inv.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ thức ăn.'});}
+    await settleBeastCare(client,uid,beastId);const joy=Number(item.beast_joy_gain||5)*qty;await client.query('UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[uid,itemId,qty]);await client.query(`UPDATE spirit_beast_care SET happiness=LEAST(100,happiness+$3),love=LEAST(100,love+$4),anger=GREATEST(0,anger-$5),dislike=GREATEST(0,dislike-$5),joy=LEAST(100,joy+$4),pet_spirit=pet_spirit+$6,updated_at=NOW() WHERE user_id=$1 AND beast_id=$2`,[uid,beastId,joy,Math.ceil(joy*.6),Math.ceil(joy*.4),Number(item.beast_food_gain||0)*qty]);await client.query('COMMIT');res.json({ok:true,message:`Linh thú đã dùng ${item.name} ×${qty}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('beast feed:',e);res.status(500).json({error:'Cho linh thú ăn thất bại.'});}finally{client.release();}
+});
+
+app.post('/api/duong-thu/puppet',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),itemId=Number(req.body?.itemId);const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND is_khoi_loi=TRUE FOR UPDATE`,[itemId])).rows[0],o=(await client.query('SELECT quantity FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2 AND quantity>0 FOR UPDATE',[uid,beastId])).rows[0];if(!item||!o){await client.query('ROLLBACK');return res.status(404).json({error:'Khôi Lỗi hoặc linh thú không hợp lệ.'});}const inv=(await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[uid,itemId])).rows[0];if(!inv||Number(inv.quantity)<1){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ Khôi Lỗi.'});}await settleBeastCare(client,uid,beastId);const joy=Number(item.beast_joy_gain||10);await client.query('UPDATE inventory SET quantity=quantity-1,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[uid,itemId]);await client.query(`UPDATE spirit_beast_care SET happiness=LEAST(100,happiness+$3),joy=LEAST(100,joy+$4),anger=GREATEST(0,anger-$5),dislike=GREATEST(0,dislike-$5),pet_spirit=pet_spirit+$6,updated_at=NOW() WHERE user_id=$1 AND beast_id=$2`,[uid,beastId,Math.round(joy*.65),joy,Math.round(joy*.35),Math.round(joy*.5)]);await client.query('COMMIT');res.json({ok:true,message:`Khôi Lỗi ${item.name} khiến linh thú vui mừng.`});}
+  catch(e){try{await client.query('ROLLBACK')}catch{};console.error('beast puppet:',e);res.status(500).json({error:'Dùng Khôi Lỗi thất bại.'});}finally{client.release();}
+});
+
+app.post('/api/duong-thu/equip',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),itemId=Number(req.body?.itemId);const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND category='Dược Đường · Linh thú trang bị' FOR UPDATE`,[itemId])).rows[0],o=(await client.query('SELECT c.beast_realm_tier FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 AND o.quantity>0 FOR UPDATE',[uid,beastId])).rows[0],p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];if(!item||!o){await client.query('ROLLBACK');return res.status(404).json({error:'Linh thú hoặc trang bị không hợp lệ.'});}const ri=stageFor(Number(p.spirit_power)||0).realmIndex;if(Number(o.beast_realm_tier)<Number(item.beast_gear_min_realm)||ri<Number(item.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:'Cảnh giới linh thú hoặc môn nhân chưa đủ để dùng trang bị này.'});}const inv=(await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[uid,itemId])).rows[0];if(!inv||Number(inv.quantity)<1){await client.query('ROLLBACK');return res.status(400).json({error:'Trang bị chưa có trong Tu Di Giới.'});}await client.query(`INSERT INTO spirit_beast_equipment(user_id,beast_id,slot,item_id) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,beast_id,slot) DO UPDATE SET item_id=EXCLUDED.item_id,equipped_at=NOW()`,[uid,beastId,item.beast_gear_slot||'armor',itemId]);await client.query('COMMIT');res.json({ok:true,message:`Đã trang bị ${item.name} cho linh thú.`});}
+  catch(e){try{await client.query('ROLLBACK')}catch{};console.error('beast equip:',e);res.status(500).json({error:'Trang bị cho linh thú thất bại.'});}finally{client.release();}
+});
+
 app.get('/api/beast-house',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id;
@@ -2437,7 +2593,7 @@ app.post('/api/beast-house/buy',auth,async(req,res)=>{
     if(usedSlots>=Number(p.storage_capacity||30)){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${usedSlots}/${Number(p.storage_capacity||30)}). Hãy nâng dung lượng trước khi nhận Linh Thú.`});}
     const ns=Number(p.spirit_stones)-Number(item.price_stones);
     await client.query(`UPDATE profiles SET spirit_stones=$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,ns]);
-    await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity) VALUES($1,$2,1) ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1`,[req.session.user_id,item.id]);
+    await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity,unbound_quantity,acquisition_type) VALUES($1,$2,1,0,'shop') ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1`,[req.session.user_id,item.id]);
     await client.query('COMMIT');
     res.json({ok:true,item:item.name,rarity:item.rarity,realm:item.beast_realm,tier:item.beast_realm_tier,price:Number(item.price_stones),spiritStones:ns,message:'Linh thú đã chuyển vào Tu Di Giới. Vào Trang Bị để triệu hồi.'});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('beast house buy:',e);res.status(500).json({error:'Mua linh thú thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}
@@ -2716,7 +2872,7 @@ async function secretRealmLoot(client,userId,realm){
   if(roll<=66){
     const beast=(await client.query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,attack,defense,speed,spirit,skill,power_bonus,ability FROM spirit_beasts_catalog WHERE min_realm <= $1 ORDER BY (min_realm + beast_realm_tier) DESC, RANDOM() LIMIT 1`,[tier])).rows[0];
     if(beast){
-      await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity) VALUES($1,$2,1) ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1`,[userId,beast.id]);
+      await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity,unbound_quantity,acquisition_type) VALUES($1,$2,1,1,'drop') ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1,unbound_quantity=owned_spirit_beasts.unbound_quantity+1`,[userId,beast.id]);
       return {type:'beast',item:beast,quantity:1};
     }
   }
