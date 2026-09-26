@@ -54,6 +54,7 @@ async function ensureRuntimeSchema() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_percent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
@@ -114,6 +115,7 @@ async function ensureRuntimeSchema() {
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
     ALTER TABLE mansions ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Phàm';
     ALTER TABLE mansions ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE mansions ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
@@ -702,6 +704,23 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_challenge_opponent_status ON challenge_requests(opponent_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_challenger_status ON challenge_requests(challenger_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_history ON challenge_requests(created_at DESC);
+    CREATE TABLE IF NOT EXISTS challenge_bets (
+      id BIGSERIAL PRIMARY KEY,
+      challenge_id BIGINT NOT NULL REFERENCES challenge_requests(id) ON DELETE CASCADE,
+      bettor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bet_on_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount INTEGER NOT NULL CHECK(amount > 0),
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','won','lost','refunded')),
+      payout INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      settled_at TIMESTAMPTZ,
+      UNIQUE(challenge_id,bettor_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_challenge_bets_challenge ON challenge_bets(challenge_id,status);
+    ALTER TABLE challenge_bets ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'open';
+    ALTER TABLE challenge_bets ADD COLUMN IF NOT EXISTS payout INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE challenge_bets ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
+    ALTER TABLE challenge_bets ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_max_hp NUMERIC(14,2) NOT NULL DEFAULT 0;
@@ -1439,8 +1458,8 @@ app.get('/api/profile',auth,async(req,res)=>{
       LEFT JOIN spirit_roots_catalog r ON r.id=p.equipped_root_id
       LEFT JOIN treasure_items a ON a.id=p.equipped_artifact_id
       WHERE p.user_id=$1`,[p.id])).rows[0]||{};
-    const techniqueRows=(await query(`SELECT ct.power_bonus,ct.training_bonus_percent,ct.name,ct.grade,ct.ability
-      FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[p.id])).rows;
+    const techniqueRows=(await query(`SELECT ct.id,ct.power_bonus,ct.training_bonus_percent,ct.name,ct.grade,ct.ability, (p.equipped_technique_id=ct.id) AS equipped
+      FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[p.id])).rows;
     const mansion=(await query(`SELECT um.active,m.id,m.name,m.grade,m.spirit_per_hour,um.last_tick_at FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1`,[p.id])).rows[0]||null;
     const baseAttr=attributesFor(p.spirit_power);
     const equipmentPower=(Number(eq.beast_power)||0)+(Number(eq.root_power)||0)+(Number(eq.artifact_power)||0);
@@ -1460,7 +1479,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const healthCurrent=activeBattle ? (Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_hp):Number(activeBattle.opponent_hp)) : healthMax;
 
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:techniqueSlots(stage.realmIndex),mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
+    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,techniqueSlots:techniqueSlots(stage.realmIndex),mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -2145,6 +2164,25 @@ app.post('/api/linh-phap/buy',auth,async(req,res)=>{
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('linh phap buy:',e);res.status(500).json({error:'Mua linh căn thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}
 });
 
+// CÔNG PHÁP TRANG BỊ · đổi công pháp đang sử dụng
+app.post('/api/techniques/equip',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const techniqueId=Number(req.body?.techniqueId);
+    if(!Number.isInteger(techniqueId)||techniqueId<1)return res.status(400).json({error:'Công pháp không hợp lệ.'});
+    await client.query('BEGIN');
+    const row=(await client.query(`SELECT ct.id,ct.name,ct.grade,ct.ability FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1 AND ct.id=$2 FOR UPDATE`,[req.session.user_id,techniqueId])).rows[0];
+    if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn chưa học công pháp này.'});}
+    await client.query('UPDATE profiles SET equipped_technique_id=$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,techniqueId]);
+    await client.query('COMMIT');
+    res.json({ok:true,techniqueId,name:row.name,grade:row.grade,ability:row.ability,message:`Đã trang bị công pháp ${row.name}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('technique equip:',e);res.status(500).json({error:'Không thể thay đổi công pháp đang trang bị.'});}finally{client.release();}
+});
+app.post('/api/techniques/unequip',auth,async(req,res)=>{
+  try{await query('UPDATE profiles SET equipped_technique_id=NULL,updated_at=NOW() WHERE user_id=$1',[req.session.user_id]);res.json({ok:true,message:'Đã tháo công pháp đang trang bị.'});}
+  catch(e){res.status(500).json({error:'Không thể tháo công pháp.'});}
+});
+
 // TRANG BỊ · quản lý Linh Thú, Linh Căn và Pháp Khí sở hữu
 app.get('/api/equipment',auth,async(req,res)=>{
   try{
@@ -2162,7 +2200,7 @@ app.get('/api/equipment',auth,async(req,res)=>{
       AND NOT EXISTS (SELECT 1 FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
         WHERE i.user_id=p.user_id AND i.item_id=p.equipped_artifact_id AND i.quantity>0)`,[userId]);
 
-    const [p,b,r,a]=await Promise.all([
+    const [p,b,r,a,techniques]=await Promise.all([
       query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,
         COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0) +
         COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0) +
@@ -2178,9 +2216,12 @@ app.get('/api/equipment',auth,async(req,res)=>{
         FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
         WHERE i.user_id=$1 AND i.quantity>0
           AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
-        ORDER BY ti.power_bonus DESC,ti.id`,[userId])
+        ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
+      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,(p.equipped_technique_id=ct.id) AS equipped
+        FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id
+        WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[userId])
     ]);
-    res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipment_power:0},beasts:b.rows,roots:r.rows,artifacts:a.rows});
+    res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipped_technique_id:null,equipment_power:0},beasts:b.rows,roots:r.rows,artifacts:a.rows,techniques:techniques.rows});
   }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
 app.post('/api/equipment/equip',auth,async(req,res)=>{
@@ -2551,6 +2592,37 @@ function battleSnapshot(row,viewerId){
   };
 }
 
+function techniqueDamageMultiplier(technique){
+  if(!technique) return 1;
+  const grade=String(technique.grade||'');
+  const gradePct=grade.includes('Thượng')?0.28:grade.includes('Trung')?0.14:0.04;
+  const power=Math.max(0,Number(technique.power_bonus)||0);
+  return 1+gradePct+Math.min(0.45,power/5000);
+}
+
+async function settleChallengeBets(client,challengeId,winnerId){
+  const bets=(await client.query(`SELECT id,bettor_id,bet_on_user_id,amount FROM challenge_bets WHERE challenge_id=$1 AND status='open' ORDER BY id FOR UPDATE`,[challengeId])).rows;
+  if(!bets.length)return {pool:0,payout:0,winners:0};
+  const pool=bets.reduce((n,b)=>n+Number(b.amount||0),0);
+  const winning=bets.filter(b=>Number(b.bet_on_user_id)===Number(winnerId));
+  if(!winning.length){
+    for(const b of bets){await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,Number(b.amount)]);await client.query(`UPDATE challenge_bets SET status='refunded',payout=$2,settled_at=NOW() WHERE id=$1`,[b.id,Number(b.amount)]);}
+    return {pool,payout:pool,winners:0,refunded:true};
+  }
+  const winTotal=winning.reduce((n,b)=>n+Number(b.amount||0),0);
+  let distributed=0;
+  for(const b of bets){
+    if(Number(b.bet_on_user_id)!==Number(winnerId)){await client.query(`UPDATE challenge_bets SET status='lost',payout=0,settled_at=NOW() WHERE id=$1`,[b.id]);continue;}
+    const payout=Math.floor(pool*Number(b.amount)/winTotal);
+    distributed+=payout;
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,payout]);
+    await client.query(`UPDATE challenge_bets SET status='won',payout=$2,settled_at=NOW() WHERE id=$1`,[b.id,payout]);
+  }
+  const remainder=pool-distributed;
+  if(remainder>0){const first=winning[0];await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[first.bettor_id,remainder]);await client.query(`UPDATE challenge_bets SET payout=payout+$2 WHERE id=$1`,[first.id,remainder]);}
+  return {pool,payout:pool,winners:winning.length};
+}
+
 async function randomChallengeReward(client,userId,mode){
   const profile=(await client.query('SELECT storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0];
   const cap=Math.max(1,Number(profile?.storage_capacity)||30);
@@ -2862,8 +2934,22 @@ async function ensureChallengeSchema(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
   `);
   await query(`
+    CREATE TABLE IF NOT EXISTS challenge_bets (
+      id BIGSERIAL PRIMARY KEY,
+      challenge_id BIGINT NOT NULL REFERENCES challenge_requests(id) ON DELETE CASCADE,
+      bettor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bet_on_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount INTEGER NOT NULL CHECK(amount > 0),
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','won','lost','refunded')),
+      payout INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      settled_at TIMESTAMPTZ,
+      UNIQUE(challenge_id,bettor_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_challenge_bets_challenge ON challenge_bets(challenge_id,status);
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS winner_id INTEGER;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS loser_id INTEGER;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_damage NUMERIC(14,2) NOT NULL DEFAULT 0;
@@ -2892,7 +2978,7 @@ app.get('/api/challenges',auth,async(req,res)=>{
   try{
     await ensureChallengeSchema();
     const uid=req.session.user_id;
-    const [users,pending,history,activeRows]=await Promise.all([
+    const [users,pending,history,activeRows,publicBattles]=await Promise.all([
       query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier,p.challenge_debuff_until,p.challenge_debuff_percent,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
              FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name,u.id`,[uid]),
       query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.mode,cr.created_at,u.display_name AS challenger_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
@@ -2909,11 +2995,21 @@ app.get('/api/challenges',auth,async(req,res)=>{
              FROM challenge_requests cr
              JOIN users cu ON cu.id=cr.challenger_id JOIN profiles cp ON cp.user_id=cu.id
              JOIN users ou ON ou.id=cr.opponent_id JOIN profiles op ON op.user_id=ou.id
-             WHERE cr.status='accepted' AND (cr.challenger_id=$1 OR cr.opponent_id=$1) ORDER BY cr.id DESC LIMIT 1`,[uid])
+             WHERE cr.status='accepted' AND (cr.challenger_id=$1 OR cr.opponent_id=$1) ORDER BY cr.id DESC LIMIT 1`,[uid]),
+      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_action,cr.last_damage,cr.started_at,
+                    cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,
+                    ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,
+                    COALESCE((SELECT SUM(cb.amount) FROM challenge_bets cb WHERE cb.challenge_id=cr.id AND cb.status='open'),0)::int AS bet_pool,
+                    COALESCE((SELECT SUM(cb.amount) FROM challenge_bets cb WHERE cb.challenge_id=cr.id AND cb.status='open' AND cb.bet_on_user_id=cr.challenger_id),0)::int AS challenger_bet,
+                    COALESCE((SELECT SUM(cb.amount) FROM challenge_bets cb WHERE cb.challenge_id=cr.id AND cb.status='open' AND cb.bet_on_user_id=cr.opponent_id),0)::int AS opponent_bet
+             FROM challenge_requests cr
+             JOIN users cu ON cu.id=cr.challenger_id JOIN profiles cp ON cp.user_id=cu.id
+             JOIN users ou ON ou.id=cr.opponent_id JOIN profiles op ON op.user_id=ou.id
+             WHERE cr.status='accepted' ORDER BY cr.id DESC LIMIT 20`,[])
     ]);
     const me=(await query(`SELECT spirit_power,spirit_stones,challenge_debuff_until,challenge_debuff_percent,challenge_debuff_text FROM profiles WHERE user_id=$1`,[uid])).rows[0];
     const active=activeRows.rows[0]||null;
-    res.json({users:users.rows,pending:pending.rows,history:history.rows,me,activeBattle:active?{...battleSnapshot(active,uid),challengerName:active.challenger_name,challengerAvatar:active.challenger_avatar,challengerRank:active.challenger_rank,challengerSpirit:Number(active.challenger_spirit)||0,opponentName:active.opponent_name,opponentAvatar:active.opponent_avatar,opponentRank:active.opponent_rank,opponentSpirit:Number(active.opponent_spirit)||0}:null});
+    res.json({users:users.rows,pending:pending.rows,history:history.rows,me,activeBattles:publicBattles.rows,activeBattle:active?{...battleSnapshot(active,uid),challengerName:active.challenger_name,challengerAvatar:active.challenger_avatar,challengerRank:active.challenger_rank,challengerSpirit:Number(active.challenger_spirit)||0,opponentName:active.opponent_name,opponentAvatar:active.opponent_avatar,opponentRank:active.opponent_rank,opponentSpirit:Number(active.opponent_spirit)||0}:null});
   }catch(e){console.error('challenges load:',e);res.status(500).json({error:'Không thể mở Khiêu Chiến.'});}
 });
 
@@ -3001,7 +3097,7 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
   await ensureChallengeSchema();
   const client=await pool.connect();
   try{
-    const uid=req.session.user_id,requestId=Number(req.body?.requestId);
+    const uid=req.session.user_id,requestId=Number(req.body?.requestId),techniqueId=Number(req.body?.techniqueId||0);
     if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
     await client.query('BEGIN');
     const battle=(await client.query(`SELECT cr.*,cu.display_name AS challenger_name,ou.display_name AS opponent_name
@@ -3013,15 +3109,21 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[battle.challenger_id,battle.opponent_id])).rows;
     const attacker=rows.find(x=>Number(x.id)===uid), defender=rows.find(x=>Number(x.id)!==uid);
     if(!attacker||!defender){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hai hồ sơ chiến đấu.'});}
-    const attackerEq=(await client.query(`SELECT COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[uid])).rows[0];
+    const attackerEq=(await client.query(`SELECT p.equipped_technique_id,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[uid])).rows[0];
     const defenderEq=(await client.query(`SELECT COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[defender.id])).rows[0];
     attacker.equipment_power=Number(attackerEq?.equipment_power)||0; defender.equipment_power=Number(defenderEq?.equipment_power)||0;
-    const damage=ultimateDamage(attacker,defender);
+    const chosenTechniqueId=techniqueId>0?techniqueId:Number(attackerEq?.equipped_technique_id)||0;
+    let technique=null;
+    if(chosenTechniqueId>0){
+      technique=(await client.query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1 AND ct.id=$2`,[uid,chosenTechniqueId])).rows[0];
+      if(!technique){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa học công pháp được chọn.'});}
+    }
+    const damage=Math.max(1,Math.round(ultimateDamage(attacker,defender)*techniqueDamageMultiplier(technique)));
     const attackerIsChallenger=Number(attacker.id)===Number(battle.challenger_id);
     const oldDefHp=attackerIsChallenger?Number(battle.opponent_hp):Number(battle.challenger_hp);
     const newDefHp=Math.max(0,oldDefHp-damage);
     const newRound=Number(battle.round_number||0)+1;
-    const actionName='⚡ Tuyệt Chiêu · Hàn Thiên Phá';
+    const actionName=technique?`⚡ Tuyệt Chiêu · ${technique.name}`:'⚡ Tuyệt Chiêu · Hàn Thiên Phá';
     const realmGap=stageFor(Number(attacker.spirit_power)||0).realmIndex-stageFor(Number(defender.spirit_power)||0).realmIndex;
     if(newDefHp<=0){
       const winner=attacker, loser=defender;
@@ -3030,8 +3132,9 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       const challengerDamage=attackerIsChallenger?damage:Number(battle.challenger_damage||0);
       const opponentDamage=attackerIsChallenger?Number(battle.opponent_damage||0):damage;
       await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_hp=$4,opponent_hp=$5,turn_user_id=NULL,round_number=$6,last_actor_id=$7,last_damage=$8,last_action=$9,challenger_damage=$10,opponent_damage=$11,success_chance=1,reward_spirit=$12,reward_item_id=$13,reward_quantity=$14,penalty_text=$15,responded_at=NOW() WHERE id=$1`,[requestId,winner.id,loser.id,attackerIsChallenger?Number(battle.challenger_hp):newDefHp,attackerIsChallenger?newDefHp:Number(battle.opponent_hp),newRound,attacker.id,damage,actionName,challengerDamage,opponentDamage,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text]);
+      const betResult=await settleChallengeBets(client,requestId,winner.id);
       await client.query('COMMIT');
-      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,realmGap,round:newRound,reward,penalty:loss,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
+      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
     }
     const challengerHp=attackerIsChallenger?Number(battle.challenger_hp):newDefHp;
     const opponentHp=attackerIsChallenger?newDefHp:Number(battle.opponent_hp);
@@ -3040,6 +3143,53 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
     await client.query('COMMIT');
     res.json({ok:true,status:'accepted',damage,realmGap,round:newRound,turnUserId:nextTurn,yourTurn:false,challengerHp,opponentHp,challengerMaxHp:Number(battle.challenger_max_hp),opponentMaxHp:Number(battle.opponent_max_hp),lastActorId:uid,lastAction:actionName,message:`${attacker.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương. Đến lượt ${defender.display_name}.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge action:',e);res.status(500).json({error:'Không thể tung tuyệt chiêu. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
+});
+
+app.post('/api/challenges/online/leave',auth,async(req,res)=>{
+  await ensureChallengeSchema();
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,requestId=Number(req.body?.requestId);
+    if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
+    await client.query('BEGIN');
+    const battle=(await client.query(`SELECT * FROM challenge_requests WHERE id=$1 AND mode='online' AND status='accepted' AND (challenger_id=$2 OR opponent_id=$2) FOR UPDATE`,[requestId,uid])).rows[0];
+    if(!battle){await client.query('ROLLBACK');return res.status(404).json({error:'Lôi đài không còn hoạt động.'});}
+    const winnerId=Number(battle.challenger_id)===uid?Number(battle.opponent_id):Number(battle.challenger_id);
+    const loserId=uid;
+    const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[winnerId,loserId])).rows;
+    const winner=rows.find(x=>Number(x.id)===winnerId),loser=rows.find(x=>Number(x.id)===loserId);
+    if(!winner||!loser){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy người chơi.'});}
+    const reward=await applyChallengeWin(client,winnerId,'online',challengeOdds(winner,loser));
+    const loss=await applyChallengeLoss(client,loserId,'online',challengeOdds(loser,winner).aStage);
+    const attackerIsChallenger=Number(battle.challenger_id)===uid;
+    const betResult=await settleChallengeBets(client,requestId,winnerId);
+    await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,turn_user_id=NULL,last_actor_id=$3,last_damage=0,last_action=$4,penalty_text=$5,responded_at=NOW() WHERE id=$1`,[requestId,winnerId,loserId,`🏳️ ${loser.display_name} rời khỏi lôi đài`,loss.text]);
+    await client.query('COMMIT');
+    res.json({ok:true,status:'completed',winnerId,loserId,reward,penalty:loss,betSettlement:betResult,message:`${loser.display_name} đã rời khỏi lôi đài và bị tính thất bại. ${winner.display_name} chiến thắng.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge leave:',e);res.status(500).json({error:'Không thể rời khỏi lôi đài.'});}
+  finally{client.release();}
+});
+
+app.post('/api/challenges/bet',auth,async(req,res)=>{
+  await ensureChallengeSchema();
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,challengeId=Number(req.body?.challengeId),betOnUserId=Number(req.body?.betOnUserId),amount=Math.floor(Number(req.body?.amount)||0);
+    if(!Number.isInteger(challengeId)||challengeId<1||!Number.isInteger(betOnUserId)||betOnUserId<1||amount<1)return res.status(400).json({error:'Thông tin đặt cược không hợp lệ.'});
+    await client.query('BEGIN');
+    const battle=(await client.query(`SELECT * FROM challenge_requests WHERE id=$1 AND mode='online' AND status='accepted' FOR UPDATE`,[challengeId])).rows[0];
+    if(!battle){await client.query('ROLLBACK');return res.status(404).json({error:'Lôi đài không còn nhận cược.'});}
+    if(betOnUserId!==Number(battle.challenger_id)&&betOnUserId!==Number(battle.opponent_id)){await client.query('ROLLBACK');return res.status(400).json({error:'Chỉ được cược cho một trong hai người trên lôi đài.'});}
+    const already=(await client.query('SELECT id FROM challenge_bets WHERE challenge_id=$1 AND bettor_id=$2 FOR UPDATE',[challengeId,uid])).rows[0];
+    if(already){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã đặt cược cho trận này.'});}
+    const wallet=(await client.query('SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];
+    if(Number(wallet?.spirit_stones||0)<amount){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ linh thạch để đặt cược.'});}
+    await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[uid,amount]);
+    await client.query('INSERT INTO challenge_bets(challenge_id,bettor_id,bet_on_user_id,amount) VALUES($1,$2,$3,$4)',[challengeId,uid,betOnUserId,amount]);
+    await client.query('COMMIT');
+    res.json({ok:true,message:`Đã đặt ${amount.toLocaleString('vi-VN')} linh thạch.`,amount});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('challenge bet:',e);res.status(500).json({error:'Đặt cược thất bại. Linh thạch chưa bị mất.'});}
   finally{client.release();}
 });
 

@@ -1,0 +1,16 @@
+HÀN THIÊN MÔN v3.6.31
+
+- Thêm nút Rời khỏi Lôi Đài Online; rời trận được tính là thất bại, đối thủ thắng và nhận thưởng.
+- Thêm hệ thống đặt cược bằng linh thạch cho các Lôi Đài Online đang diễn ra.
+- Mọi môn nhân đăng nhập đều có thể đặt 1 cược/trận vào một trong hai đấu thủ.
+- Khi trận kết thúc, tổng pool được phân phối theo tỷ lệ cược cho phía thắng; nếu không có cược vào phía thắng thì hoàn lại toàn bộ cược.
+- Thêm nhiều lựa chọn Tuyệt Chiêu dựa trên các công pháp đã học.
+- Công pháp có phẩm cấp/chiến lực khác nhau và tạo hệ số sát thương riêng khi tung tuyệt chiêu.
+- Thêm công pháp đang trang bị: có thể đổi/tháo trong Trang Bị.
+- Công pháp đang trang bị được chọn mặc định khi tung tuyệt chiêu.
+- Bổ sung migration runtime cho equipped_technique_id và challenge_bets để tương thích PostgreSQL Render cũ.
+- Giữ nguyên Thanh Máu, đánh theo lượt và hệ số sát thương theo chênh lệch cảnh giới.
+
+Đã kiểm tra:
+- node --check server.js: OK
+- node --check script.js: OK

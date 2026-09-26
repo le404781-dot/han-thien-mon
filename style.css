@@ -224,3 +224,16 @@
 .profile-technique-list b{font-size:.85rem}.profile-technique-list span,.profile-technique-list small{font-size:.7rem;color:var(--muted)}
 @media(max-width:900px){.codex-grid,.mansion-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.codex-summary,.mansion-summary{grid-template-columns:1fr auto}}
 @media(max-width:650px){.codex-grid,.mansion-grid,.profile-technique-list{grid-template-columns:1fr}.codex-summary,.mansion-summary{grid-template-columns:1fr}.codex-summary>div:last-of-type,.mansion-summary>div:nth-child(2){width:100%}.mansion-summary .btn{width:100%}}
+
+/* v3.6.31 · Lôi đài: rời trận, tuyệt chiêu, đặt cược, công pháp trang bị */
+.battle-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.battle-actions .btn{flex:1;min-width:190px}
+.ultimate-choice,.equipment-technique-panel,.bet-card{border:1px solid rgba(42,77,68,.2);background:rgba(255,255,255,.42);padding:14px;border-radius:12px;margin-top:12px}
+.ultimate-choice label{display:block;font-weight:800;margin-bottom:6px}
+.ultimate-choice select,.technique-equip-row select,.bet-actions select,.bet-actions input{width:100%;padding:10px;border:1px solid rgba(42,77,68,.25);border-radius:8px;background:rgba(255,255,255,.8);font:inherit}
+.ultimate-choice small,.equipment-technique-panel small{display:block;margin-top:7px;opacity:.75}
+.bet-actions{display:grid;grid-template-columns:1fr 110px auto;gap:8px;align-items:center;margin-top:8px}
+.equipment-technique-panel{display:flex;justify-content:space-between;gap:14px;align-items:center;margin:14px 0}
+.technique-equip-row{display:flex;gap:8px;align-items:center;min-width:45%}
+.technique-equip-row select{min-width:180px}
+@media(max-width:700px){.bet-actions{grid-template-columns:1fr}.equipment-technique-panel{display:block}.technique-equip-row{display:grid;grid-template-columns:1fr;margin-top:10px}.battle-actions .btn{min-width:100%}}

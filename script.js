@@ -110,7 +110,7 @@ async function loadChallenges(){
  const area=$('#challengeArea'); if(!area||!getToken())return;
  try{
   const d=await api('/api/challenges',{headers:authHeaders()});
-  const users=d.users||[], pending=d.pending||[], history=d.history||[], me=d.me||{}, battle=d.activeBattle||null;
+  const users=d.users||[], pending=d.pending||[], history=d.history||[], me=d.me||{}, battle=d.activeBattle||null, publicBattles=d.activeBattles||[];
   const debuffActive=me.challenge_debuff_until&&new Date(me.challenge_debuff_until)>new Date();
   const pct=(hp,max)=>Math.min(100,Math.max(0,Math.round((Number(hp||0)/Math.max(1,Number(max||1)))*100)));
   const hpColor=(hp,max)=>pct(hp,max)<=25?'danger':pct(hp,max)<=55?'warn':'';
@@ -129,14 +129,16 @@ async function loadChallenges(){
        <div class="battle-hp"><i class="${hpColor(battle.opponentHp,battle.opponentMaxHp)}" style="width:${pct(battle.opponentHp,battle.opponentMaxHp)}%"></i></div>
       </article>
     </div>
-    <div class="battle-turn-note">${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Tung tuyệt chiêu để gây sát thương.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
+    <div class="battle-turn-note">${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
     ${battle.lastAction?`<div class="battle-last-action">${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b></div>`:''}
-    <button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ TUNG TUYỆT CHIÊU':'⏳ CHỜ ĐỐI THỦ'}</button>
-    <small class="battle-rule">Sát thương được tính theo Công lực + trang bị và điều chỉnh trực tiếp theo chênh lệch cảnh giới; cảnh giới cao hơn gây sát thương lớn hơn, cảnh giới thấp hơn gây sát thương giảm mạnh.</small>
+    ${battle.yourTurn?`<div class="ultimate-choice"><label>⚡ Tuyệt Chiêu</label><select id="battleTechniqueSelect">${(currentProfile?.techniques||[]).map(t=>`<option value="${t.id}" ${t.equipped?'selected':''}>${esc(t.name)} · ${esc(t.grade)} · ⚔+${Number(t.power_bonus||0).toLocaleString('vi-VN')}</option>`).join('') || '<option value="0">⚡ Hàn Thiên Phá</option>'}</select><small>Công pháp đang trang bị được chọn mặc định. Mỗi công pháp có hệ số sát thương riêng.</small></div>`:''}
+    <div class="battle-actions"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ TUNG TUYỆT CHIÊU':'⏳ CHỜ ĐỐI THỦ'}</button><button class="btn ghost battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
+    <small class="battle-rule">Sát thương phụ thuộc Công lực, trang bị, công pháp được chọn và chênh lệch cảnh giới; cảnh giới cao hơn gây sát thương lớn hơn, cảnh giới thấp hơn bị giảm mạnh.</small>
    </div>`:'';
   area.innerHTML=`
    ${debuffActive?`<div class="challenge-debuff"><b>☠ ${esc(me.challenge_debuff_text||'Khiêu chiến thất bại: đang chịu debuff.')}</b><small>Debuff còn hiệu lực đến ${new Date(me.challenge_debuff_until).toLocaleString('vi-VN')}</small></div>`:''}
    ${battleHtml}
+   ${publicBattles.length?`<div class="challenge-block betting-block"><div class="challenge-subhead"><span class="eyebrow">💎 SÀN ĐẶT CƯỢC LÔI ĐÀI</span><b>Mọi môn nhân đều có thể tham gia</b></div><div class="challenge-list">${publicBattles.map(x=>{const pool=Number(x.bet_pool||0),a=Number(x.challenger_bet||0),b=Number(x.opponent_bet||0);return `<article class="challenge-card bet-card"><span class="challenge-avatar">⚔</span><div><b>${esc(x.challenger_name)} VS ${esc(x.opponent_name)}</b><small>💎 Tổng cược: ${pool.toLocaleString('vi-VN')} · ${esc(x.challenger_name)}: ${a.toLocaleString('vi-VN')} · ${esc(x.opponent_name)}: ${b.toLocaleString('vi-VN')}</small></div><div class="bet-actions"><select class="bet-target" data-id="${x.id}"><option value="${x.challenger_id}">Cược ${esc(x.challenger_name)}</option><option value="${x.opponent_id}">Cược ${esc(x.opponent_name)}</option></select><input class="bet-amount" data-id="${x.id}" type="number" min="1" value="100" inputmode="numeric"><button class="btn small primary challenge-bet" data-id="${x.id}">💎 Đặt cược</button></div></article>`}).join('')}</div></div>`:''}
    <div class="challenge-rules"><div><span class="eyebrow">⚔ ONLINE · LÔI ĐÀI</span><h3>Đánh theo lượt</h3><p>Đối phương đồng thuận rồi hai bên lần lượt tung tuyệt chiêu. Ai hết thanh máu trước sẽ thất bại.</p></div><div><span class="eyebrow">🌓 OFFLINE · MÔ PHỎNG</span><h3>Đánh với bản mô phỏng</h3><p>Không cần đối phương online. Chế độ này vẫn dùng quy tắc chênh cảnh giới.</p></div><div><span class="eyebrow">☯ QUY LUẬT CẢNH GIỚI</span><h3>Sát thương theo cảnh giới</h3><p>Cùng cảnh giới sẽ cân bằng hơn; cảnh giới cao hơn có hệ số sát thương tăng, cảnh giới thấp hơn bị giảm sát thương.</p></div></div>
    ${pending.length?`<div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📨 LỜI MỜI LÔI ĐÀI</span><b>${pending.length} lời mời đang chờ</b></div><div class="challenge-list">${pending.map(x=>`<article class="challenge-card incoming"><span class="challenge-avatar">${esc(x.avatar||'⚔')}</span><div><b>${esc(x.challenger_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary challenge-accept" data-id="${x.id}">Đồng thuận</button><button class="btn small ghost challenge-reject" data-id="${x.id}">Từ chối</button></article>`).join('')}</div></div>`:''}
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">🎯 CHỌN ĐỐI THỦ</span><b>${users.length} môn nhân</b></div><div class="challenge-list">${users.length?users.map(x=>`<article class="challenge-card"><span class="challenge-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${Number(x.challenge_debuff_percent||0)>0?`<small class="debuff-mini">☠ Đang chịu debuff ${x.challenge_debuff_percent}%</small>`:''}</div><div class="challenge-card-actions"><button class="btn small primary challenge-online" data-id="${x.id}" ${battle?'disabled':''}>⚔ Online</button><button class="btn small ghost challenge-offline" data-id="${x.id}" ${battle?'disabled':''}>🌓 Offline</button></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có môn nhân khác để khiêu chiến.</p></div>`}</div></div>
@@ -147,16 +149,31 @@ async function loadChallenges(){
   document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept'));
   document.querySelectorAll('.challenge-reject').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'reject'));
   document.querySelectorAll('.battle-ultimate').forEach(b=>b.onclick=()=>useUltimate(Number(b.dataset.id)));
+  document.querySelectorAll('.battle-leave').forEach(b=>b.onclick=()=>leaveBattle(Number(b.dataset.id)));
+  document.querySelectorAll('.challenge-bet').forEach(b=>b.onclick=()=>placeChallengeBet(Number(b.dataset.id)));
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
 async function useUltimate(requestId){
  const b=document.querySelector(`.battle-ultimate[data-id="${requestId}"]`),msg=$('#challengeMsg'); if(b)b.disabled=true;
  try{
-  const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId})});
+  const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,techniqueId:Number($('#battleTechniqueSelect')?.value||0)})});
   msg.textContent=x.status==='completed'?`🏆 ${x.message}`:`⚡ ${x.message}`;
   await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
  }catch(e){msg.textContent='❌ '+e.message;await loadChallenges();}
+}
+
+async function leaveBattle(requestId){
+ const msg=$('#challengeMsg');
+ if(!confirm('Rời khỏi lôi đài sẽ được tính là THẤT BẠI và chịu toàn bộ hình phạt. Tiếp tục?'))return;
+ try{const x=await api('/api/challenges/online/leave',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId})});msg.textContent='🏳️ '+x.message;await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);}catch(e){msg.textContent='❌ '+e.message;await loadChallenges();}
+}
+
+async function placeChallengeBet(challengeId){
+ const target=Number(document.querySelector(`.bet-target[data-id="${challengeId}"]`)?.value||0);
+ const amount=Math.floor(Number(document.querySelector(`.bet-amount[data-id="${challengeId}"]`)?.value)||0);
+ const msg=$('#challengeMsg');
+ try{const x=await api('/api/challenges/bet',{method:'POST',headers:authHeaders(),body:JSON.stringify({challengeId,betOnUserId:target,amount})});msg.textContent='💎 '+x.message;await Promise.all([loadProfile(),loadChallenges()]);}catch(e){msg.textContent='❌ '+e.message;}
 }
 
 async function runChallenge(userId,mode){
@@ -385,16 +402,20 @@ async function loadTreasure(){
 async function loadEquipment(){
  const area=$('#equipmentArea'); if(!area||!getToken())return;
  try{
-  const d=await api('/api/equipment',{headers:authHeaders()}); const e=d.equipped||{};
+  const d=await api('/api/equipment',{headers:authHeaders()}); const e=d.equipped||{}, techniques=d.techniques||[];
   const slot=(type,title,icon,obj)=>`<article class="equipment-slot ${obj?'equipped':''}"><span class="eyebrow">${icon} ${title}</span>${obj?`<h3>${esc(obj.name)}</h3><p>Chiến lực +${Number(obj.power||0).toLocaleString('vi-VN')}</p><small>${esc(obj.ability||'Không có công năng riêng.')}</small><div class="equipment-actions"><button class="btn small" data-unequip="${type}">Tháo</button></div>`:`<h3>Chưa trang bị</h3><p>Chọn vật phẩm trong Tu Di Giới để trang bị.</p>`}</article>`;
   const beastCards=(d.beasts||[]).map(x=>`<article class="equipment-item"><span class="eyebrow">🐉 ${esc(x.rarity)} · ${esc(x.beast_realm)} ${x.beast_realm_tier}</span><h3>${esc(x.name)} ×${x.quantity}</h3><p>⚔ ${x.attack} · 🛡 ${x.defense} · 💨 ${x.speed} · ☯ ${x.spirit}</p><span class="equip-meta">Chiến lực +${Number(x.power_bonus||0).toLocaleString('vi-VN')}</span><p>${esc(x.ability||x.skill||'—')}</p><div class="equipment-actions"><button class="btn small primary" data-equip-type="beast" data-equip-id="${x.beast_id}">Trang bị</button></div></article>`).join('');
   const rootCards=(d.roots||[]).map(x=>`<article class="equipment-item"><span class="eyebrow">🌿 ${esc(x.rarity)}</span><h3>${esc(x.name)} ×${x.quantity}</h3><p>${esc(x.support)}</p><span class="equip-meta">Chiến lực +${Number(x.power_bonus||0).toLocaleString('vi-VN')}</span><p>${esc(x.ability||'—')}</p><div class="equipment-actions"><button class="btn small primary" data-equip-type="root" data-equip-id="${x.root_id}">Trang bị</button></div></article>`).join('');
   const artifactCards=(d.artifacts||[]).map(x=>`<article class="equipment-item"><span class="eyebrow">⚔ ${esc(x.category)} · ×${x.quantity}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><span class="equip-meta">Chiến lực +${Number(x.power_bonus||0).toLocaleString('vi-VN')}</span><p>${esc(x.ability||'Không có công năng riêng.')}</p><div class="equipment-actions"><button class="btn small primary" data-equip-type="artifact" data-equip-id="${x.id}">Trang bị</button></div></article>`).join('');
   const power=Number(e.equipment_power||0);
   const combat=Number(currentProfile?.attributes?.combatPower||0);
-  area.innerHTML=`<div class="equipment-power"><div><span class="eyebrow">⚔ CHIẾN LỰC HIỆN TẠI</span><p>Chiến lực đã bao gồm Linh Thú + Linh Căn + Pháp Khí đang trang bị.</p><small>Trang bị cộng thêm: +${power.toLocaleString('vi-VN')}</small></div><strong>${combat.toLocaleString('vi-VN')}</strong></div><div class="equipment-slots">${slot('beast','Linh Thú','🐉',e.beast)}${slot('root','Linh Căn','🌿',e.root)}${slot('artifact','Pháp Khí','⚔',e.artifact)}</div><div><div class="friend-subtitle">📦 Linh Thú trong Tu Di Giới</div><div class="equipment-list">${beastCards||'<div class="equipment-empty">Chưa có Linh Thú.</div>'}</div></div><div><div class="friend-subtitle">📦 Linh Căn trong Tu Di Giới</div><div class="equipment-list">${rootCards||'<div class="equipment-empty">Chưa có Linh Căn.</div>'}</div></div><div><div class="friend-subtitle">📦 Pháp Khí trong Tu Di Giới</div><div class="equipment-list">${artifactCards||'<div class="equipment-empty">Chưa có Pháp Khí/Pháp Bảo.</div>'}</div></div><p id="equipmentMsg" class="train-msg"></p>`;
+  const equippedTechnique=techniques.find(x=>x.equipped);
+  const techniquePanel=`<div class="equipment-technique-panel"><div><span class="eyebrow">📚 CÔNG PHÁP TRANG BỊ</span><h3>${equippedTechnique?esc(equippedTechnique.name):'Chưa trang bị công pháp'}</h3><small>${equippedTechnique?`${esc(equippedTechnique.grade)} · ⚔ +${Number(equippedTechnique.power_bonus||0).toLocaleString('vi-VN')} · ${esc(equippedTechnique.ability||'')}`:'Chọn một công pháp đã học để làm công pháp đang sử dụng.'}</small></div><div class="technique-equip-row"><select id="equippedTechniqueSelect"><option value="0">— Chọn công pháp —</option>${techniques.map(x=>`<option value="${x.id}" ${x.equipped?'selected':''}>${esc(x.name)} · ${esc(x.grade)}</option>`).join('')}</select><button class="btn small primary" id="equipTechniqueBtn">📚 Đổi công pháp</button>${equippedTechnique?'<button class="btn small ghost" id="unequipTechniqueBtn">Tháo</button>':''}</div></div>`;
+  area.innerHTML=`<div class="equipment-power"><div><span class="eyebrow">⚔ CHIẾN LỰC HIỆN TẠI</span><p>Chiến lực đã bao gồm Linh Thú + Linh Căn + Pháp Khí đang trang bị.</p><small>Trang bị cộng thêm: +${power.toLocaleString('vi-VN')}</small></div><strong>${combat.toLocaleString('vi-VN')}</strong></div><div class="equipment-slots">${slot('beast','Linh Thú','🐉',e.beast)}${slot('root','Linh Căn','🌿',e.root)}${slot('artifact','Pháp Khí','⚔',e.artifact)}</div>${techniquePanel}<div><div class="friend-subtitle">📦 Linh Thú trong Tu Di Giới</div><div class="equipment-list">${beastCards||'<div class="equipment-empty">Chưa có Linh Thú.</div>'}</div></div><div><div class="friend-subtitle">📦 Linh Căn trong Tu Di Giới</div><div class="equipment-list">${rootCards||'<div class="equipment-empty">Chưa có Linh Căn.</div>'}</div></div><div><div class="friend-subtitle">📦 Pháp Khí trong Tu Di Giới</div><div class="equipment-list">${artifactCards||'<div class="equipment-empty">Chưa có Pháp Khí/Pháp Bảo.</div>'}</div></div><p id="equipmentMsg" class="train-msg"></p>`;
   document.querySelectorAll('[data-equip-type]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/equipment/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:b.dataset.equipType,id:Number(b.dataset.equipId)})});$('#equipmentMsg').textContent=`✅ ${x.message}`;await loadProfile();}catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;b.disabled=false;}});
-  document.querySelectorAll('[data-unequip]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/api/equipment/unequip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:b.dataset.unequip})});$('#equipmentMsg').textContent='✅ Đã tháo trang bị.';await loadProfile();}catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;b.disabled=false;}});
+  document.querySelectorAll('[data-unequip]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/api/equipment/unequip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:b.dataset.unequip})});$('#equipmentMsg').textContent='✅ Đã tháo trang bị.';await loadProfile();await loadEquipment();}catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;b.disabled=false;}});
+  const et=$('#equipTechniqueBtn'); if(et)et.onclick=async()=>{const id=Number($('#equippedTechniqueSelect')?.value||0);if(!id){$('#equipmentMsg').textContent='❌ Hãy chọn công pháp.';return;}et.disabled=true;try{const x=await api('/api/techniques/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({techniqueId:id})});$('#equipmentMsg').textContent='✅ '+x.message;await loadProfile();await loadEquipment();}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;et.disabled=false;}};
+  const ut=$('#unequipTechniqueBtn'); if(ut)ut.onclick=async()=>{ut.disabled=true;try{const x=await api('/api/techniques/unequip',{method:'POST',headers:authHeaders(),body:'{}'});$('#equipmentMsg').textContent='✅ '+x.message;await loadProfile();await loadEquipment();}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;ut.disabled=false;}};
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>Không thể mở Trang Bị</h3><p>${esc(e.message)}</p><button class="btn small primary" id="retryEquipmentBtn">↻ Thử lại</button></div>`;$('#retryEquipmentBtn').onclick=loadEquipment;}
 }
 
