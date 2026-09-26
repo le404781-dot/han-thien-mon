@@ -1,0 +1,16 @@
+HÀN THIÊN MÔN v3.6.62 · THÚ TRƯỜNG 🪶
+
+1. Thêm mục Thú Trường 🪶 vào menu và giao diện mobile.
+2. Thêm 3 chế độ:
+   - Thách Chiến Online: môn nhân gửi lời mời so tài linh thú; lời mời vào Hòm Thư.
+   - Thách Chiến Offline: đấu NPC, mô phỏng nhiều hiệp kiểu game bắt linh thú tiên hiệp.
+   - Thách Chiến Thần Thú: độ khó cao nhất, ưu tiên phần thưởng Dược Đường phẩm cấp cao.
+3. Linh thú xuất chiến lấy trực tiếp từ Tu Di Giới/owned_spirit_beasts hiện có.
+4. Chỉ số chiến đấu dùng Công, Thủ, Tốc, Thần; có ảnh hưởng chăm sóc linh thú, trang bị và debuff.
+5. Thắng trận có cơ hội nhận ngẫu nhiên vật phẩm từ Dược Đường.
+6. Thất bại Thách Chiến Thần Thú: linh thú bị một debuff ngẫu nhiên -35% (Công/Thủ/Tốc/Thần), hiệu lực 24 giờ.
+7. Ghi lịch sử Thú Trường và phần thưởng.
+8. Giữ nguyên các hệ thống cũ, không thay đổi dữ liệu linh thú hiện có ngoài việc bổ sung các cột debuff an toàn.
+9. Đã kiểm tra cú pháp server.js và script.js bằng Node.js.
+
+Lưu ý chạy production: npm install rồi npm start; database PostgreSQL sẽ tự tạo bảng/cột mới khi khởi động.
