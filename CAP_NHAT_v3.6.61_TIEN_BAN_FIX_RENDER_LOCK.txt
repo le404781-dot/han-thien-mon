@@ -1,0 +1,23 @@
+HÀN THIÊN MÔN v3.6.61
+
+1. FIX DƯỢC ĐƯỜNG / RENDER
+- Không chạy DDL/ALTER TABLE khi người dùng mở trang.
+- Các schema guard được chạy một lần khi khởi động.
+- Dùng pg_advisory_lock để tránh hai tiến trình Render đồng thời ALTER TABLE gây AccessExclusiveLock/40P01.
+- Giảm request trùng khi đăng nhập: loadProfile là nguồn dữ liệu chính, các phần còn thiếu được tải song song.
+
+2. TIÊN BÀN VÒNG QUAY
+- Mở từ cảnh giới Nhân Tiên (realm index 9).
+- Đại Thừa trở xuống: mỗi vòng tiêu hao 10% linh lực.
+- Đại Thừa trở lên: mỗi vòng tiêu hao 1% linh lực.
+- 94%: vật phẩm ngẫu nhiên.
+- 5%: kho Tiên Phẩm / Tiên Thú / Tiên Khí.
+- 1%: Cực Phẩm Tiên Thú Cửu Vĩ Thiên Hồ.
+- Cửu Vĩ có thiên phú “Vô Thượng Huyễn Thuật Thiên Phú”.
+- Khi nhận Cửu Vĩ: lưu quyền sở hữu, đánh dấu hồ sơ, thêm hào quang tím và phát thông cáo toàn tông môn trong 15 giây.
+
+3. GIAO DIỆN
+- Thêm mục 🎡 Tiên Bàn.
+- Có vòng tiên bàn, tỷ lệ, chi phí và kho phần thưởng.
+- Thông cáo Cửu Vĩ hiển thị dạng banner toàn trang trong thời gian hiệu lực.
+- Không thay thế hay xóa các giao diện/chức năng cũ.
