@@ -2502,9 +2502,96 @@ function bondChanceFor(userSpirit){
   return Math.min(95,Math.max(25,35+st.realmIndex*4+(st.tier-1)*2));
 }
 
+async function ensureDuocDuongSchema(){
+  // Guard riêng cho Dược Đường/Dưỡng Thú: không phụ thuộc vào toàn bộ migration lớn.
+  // Quan trọng với DB Render đã tồn tại từ phiên bản cũ.
+  await query(`
+    CREATE TABLE IF NOT EXISTS treasure_items (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      price INTEGER NOT NULL DEFAULT 0 CHECK(price >= 0),
+      spirit_gain INTEGER NOT NULL DEFAULT 0,
+      min_realm INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_food_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_joy_gain INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_slot TEXT;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_power INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS is_khoi_loi BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS spirit_beasts_catalog (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      rarity TEXT NOT NULL DEFAULT 'Phàm',
+      description TEXT NOT NULL DEFAULT '',
+      beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai',
+      beast_realm_tier INTEGER NOT NULL DEFAULT 1,
+      price_stones INTEGER NOT NULL DEFAULT 0,
+      min_realm INTEGER NOT NULL DEFAULT 0,
+      attack INTEGER NOT NULL DEFAULT 0,
+      defense INTEGER NOT NULL DEFAULT 0,
+      speed INTEGER NOT NULL DEFAULT 0,
+      spirit INTEGER NOT NULL DEFAULT 0,
+      skill TEXT NOT NULL DEFAULT '',
+      power_bonus INTEGER NOT NULL DEFAULT 0,
+      ability TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS inventory (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,item_id)
+    );
+    ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    CREATE TABLE IF NOT EXISTS owned_spirit_beasts (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
+      acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,beast_id)
+    );
+    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS avatar TEXT;
+    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS unbound_quantity INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS acquisition_type TEXT NOT NULL DEFAULT 'bound';
+    CREATE TABLE IF NOT EXISTS spirit_beast_care (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,
+      happiness INTEGER NOT NULL DEFAULT 50,
+      anger INTEGER NOT NULL DEFAULT 20,
+      love INTEGER NOT NULL DEFAULT 50,
+      dislike INTEGER NOT NULL DEFAULT 20,
+      joy INTEGER NOT NULL DEFAULT 50,
+      pet_spirit INTEGER NOT NULL DEFAULT 0,
+      last_tick_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,beast_id)
+    );
+    CREATE TABLE IF NOT EXISTS spirit_beast_equipment (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,
+      slot TEXT NOT NULL,
+      item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
+      equipped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,beast_id,slot)
+    );
+  `);
+}
+
 app.get('/api/duoc-duong',auth,async(req,res)=>{
   try{
-    await ensureRuntimeSchema();
+    await ensureDuocDuongSchema();
     const p=(await query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
     const items=(await query(`SELECT id,name,category,description,price,spirit_gain,min_realm,beast_food_gain,beast_joy_gain,beast_gear_slot,beast_gear_power,beast_gear_min_realm,is_khoi_loi FROM treasure_items WHERE category LIKE 'Dược Đường%' ORDER BY min_realm,price,id`)).rows;
     const stage=stageFor(Number(p?.spirit_power)||0);
@@ -2529,7 +2616,7 @@ app.post('/api/duoc-duong/buy',auth,async(req,res)=>{
 
 app.get('/api/duong-thu',auth,async(req,res)=>{
   const client=await pool.connect();
-  try{await client.query('BEGIN');const uid=req.session.user_id;
+  try{await ensureDuocDuongSchema(); await client.query('BEGIN');const uid=req.session.user_id;
     const owned=(await client.query(`SELECT o.beast_id FROM owned_spirit_beasts o WHERE o.user_id=$1 AND o.quantity>0`,[uid])).rows;for(const b of owned)await settleBeastCare(client,uid,Number(b.beast_id));
     const rows=(await client.query(`SELECT o.beast_id,o.quantity,o.unbound_quantity,o.acquisition_type,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.min_realm,bc.happiness,bc.anger,bc.love,bc.dislike,bc.joy,bc.pet_spirit,COALESCE((SELECT json_agg(json_build_object('slot',sbe.slot,'itemId',sbe.item_id,'name',ti.name,'power',ti.beast_gear_power)) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=o.user_id AND sbe.beast_id=o.beast_id),'[]'::json) AS gear FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id JOIN spirit_beast_care bc ON bc.user_id=o.user_id AND bc.beast_id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.id`,[uid])).rows;
     const p=(await client.query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[uid])).rows[0];const stage=stageFor(Number(p?.spirit_power)||0);await client.query('COMMIT');res.json({profile:p||{},stage,bondChance:bondChanceFor(Number(p?.spirit_power)||0),beasts:rows.map(x=>({...x,gear:Array.isArray(x.gear)?x.gear:[]}))});

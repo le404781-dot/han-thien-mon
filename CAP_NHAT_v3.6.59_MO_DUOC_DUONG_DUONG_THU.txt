@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.59
+
+- Sửa lỗi Dược Đường/Dưỡng Thú bị treo ở trạng thái “Đang mở...”.
+- Thêm runtime schema guard riêng cho 2 module, tạo bảng theo đúng thứ tự khóa ngoại và bổ sung các cột linh thú cần thiết.
+- Không còn phụ thuộc việc chạy toàn bộ migration lớn mỗi lần mở 2 module.
+- Dược Đường có nút thử mở lại khi kết nối/API lỗi.
+- Dưỡng Thú có nút thử mở lại khi kết nối/API lỗi.
+- Giữ nguyên toàn bộ hệ thống mua dược, nhận chủ, cảm xúc, cho ăn, Khôi Lỗi và trang bị linh thú.

@@ -1,0 +1,21 @@
+HÀN THIÊN MÔN · v3.6.58
+
+1. DƯỢC ĐƯỜNG
+- NPC Dược Đồng · Mặc Ly, có lời thoại phong cách tiên hiệp.
+- Bán đan dược tăng trực tiếp linh lực; vật phẩm được đưa vào Tu Di Giới và dùng qua chức năng sử dụng vật phẩm hiện có.
+- Bán thức ăn linh thú, Khôi Lỗi tăng niềm vui và trang bị linh thú theo cảnh giới.
+
+2. DƯỠNG THÚ
+- Linh thú rơi từ Bí Cảnh được đánh dấu vô chủ; có thể dùng Nhận Chủ.
+- Tỷ lệ Nhận Chủ tăng theo cảnh giới môn nhân.
+- Hiển thị 4 cảm xúc Hỉ · Nộ · Ái · Ố và thanh Niềm Vui.
+- Hỉ/Ái giúp linh thú sinh linh lực theo thời gian; Nộ/Ố làm giảm hiệu quả.
+- Cho ăn linh thú bằng thức ăn mua tại Dược Đường.
+- Dùng Khôi Lỗi để tăng Hỉ/Niềm Vui và linh lực thú.
+- Có thể trang bị trang bị riêng cho từng linh thú.
+
+3. ĐỆ TỬ BẢNG
+- Nếu môn nhân đang trang bị một linh thú, thông tin linh thú và tổng sức mạnh trang bị linh thú được hiển thị trong thẻ môn nhân và cửa sổ chi tiết.
+
+4. TƯƠNG THÍCH
+- Có migration tự động cho PostgreSQL cũ qua ensureRuntimeSchema.
