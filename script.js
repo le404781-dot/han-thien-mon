@@ -25,12 +25,17 @@ async function loadData(){
  try{
   const data=await api('/api/data'); members=data.members; memories=data.memories; timeline=data.timeline;
   $('#memberCount').textContent=members.length; $('#memoryCount').textContent=memories.length; $('#userCount').textContent=data.userCount||0;
-  renderMembers(); renderGallery(); renderTimeline(); renderLegendEditor();
+  renderMembers(); renderXuatQuan(); renderGallery(); renderTimeline(); renderLegendEditor();
  }catch(e){console.error(e);}
 }
 function renderMembers(list=members){
  $('#membersGrid').innerHTML=list.length?list.map((m)=>`<article class="member-card" data-index="${members.indexOf(m)}"><div class="avatar">${avatarHtml(m.emoji)}</div><div class="member-info"><span class="nickname">${esc(m.nick||'')}</span><h3>${esc(m.name)}</h3><p>${esc(m.role||'Đệ tử')}</p><div class="presence-status ${m.online?'online':'offline'}"><span class="presence-dot"></span>${esc(m.presenceLabel||'Đã bế quan')}</div><div class="tags">${(Array.isArray(m.tags)?m.tags:[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div></article>`).join(''):`<p>Không tìm thấy môn nhân phù hợp.</p>`;
  document.querySelectorAll('.member-card').forEach(c=>c.onclick=()=>openMember(+c.dataset.index));
+}
+function renderXuatQuan(){
+ const grid=$('#xuatQuanGrid'),count=$('#xuatQuanCount'); if(!grid)return;
+ const online=members.filter(m=>m.online); if(count)count.textContent=`${online.length} ĐANG XUẤT QUAN`;
+ grid.innerHTML=online.length?online.map(m=>`<article class="member-card"><div class="avatar">${avatarHtml(m.emoji)}</div><div class="member-info"><span class="nickname">${esc(m.nick||'')}</span><h3>${esc(m.name)}</h3><p>${esc(m.role||'Đệ tử')}</p><div class="presence-status online"><span class="presence-dot"></span>Đang xuất quan</div><div class="tags">${(Array.isArray(m.tags)?m.tags:[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div></article>`).join(''):`<div class="empty-state compact"><h3>Không có môn nhân đang xuất quan</h3><p>Hiện tại chưa có môn nhân nào đang hoạt động trên sơn môn.</p></div>`;
 }
 function renderGallery(){
  const grid=$('#galleryGrid'); if(!grid)return;
@@ -275,7 +280,7 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadBeastHouse();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadBeastHouse();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();}
  catch{localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}
 }
 function renderGuestAreas(){
@@ -654,6 +659,17 @@ async function loadSectPosts(){
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
+async function loadMailbox(){
+ const area=$('#mailboxArea'),badge=$('#mailboxBadge'); if(!area||!getToken())return;
+ try{const d=await api('/api/mailbox',{headers:authHeaders()});
+  if(badge)badge.style.display=Number(d.unread||0)>0?'inline-flex':'none';
+  area.innerHTML=`<div class="mailbox-toolbar"><label><input id="mailboxToggle" type="checkbox" ${d.enabled?'checked':''}> 🔔 Nhận thông báo Hòm Thư</label><button id="mailboxReadAll" class="btn small ghost">Đánh dấu tất cả đã đọc</button><span>Chưa đọc: <b>${Number(d.unread||0)}</b></span></div><div class="mailbox-list">${(d.rows||[]).map(x=>`<article class="mail-item ${x.read_at?'':'unread'}" data-id="${x.id}"><div class="mail-icon">${x.type==='challenge'?'⚔️':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='chat_total'?'☯':'📬'}</div><div><b>${esc(x.title)}</b><p>${esc(x.message)}</p><small>${new Date(x.created_at).toLocaleString('vi-VN')}</small></div>${x.read_at?'':'<span class="mail-new">MỚI</span>'}</article>`).join('')||'<div class="empty-state compact"><p>Hòm thư đang tĩnh lặng.</p></div>'}</div>`;
+  $('#mailboxToggle').onchange=async e=>{try{await api('/api/mailbox/toggle',{method:'POST',headers:authHeaders(),body:JSON.stringify({enabled:e.target.checked})});}catch(err){e.target.checked=!e.target.checked;}};
+  $('#mailboxReadAll').onclick=async()=>{await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({})});await loadMailbox();};
+  document.querySelectorAll('.mail-item.unread').forEach(el=>el.onclick=async()=>{await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(el.dataset.id)})});await loadMailbox();});
+ }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
+}
+
 async function loadChat(){
  if(!getToken())return;
  try{const d=await api('/api/chat',{headers:authHeaders()});renderChat(d.rows,d.elderSettings);}catch(e){if(getToken())$('#chatArea').innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
@@ -676,7 +692,7 @@ function renderAuth(mode){
  const register=mode==='register';
  $('#accountContent').innerHTML=`<div class="auth-title">寒天門</div><div class="auth-sub">Ghi danh môn nhân · Dữ liệu được lưu trong PostgreSQL</div><div class="tabs"><button class="tab ${!register?'active':''}" data-mode="login">Đăng nhập</button><button class="tab ${register?'active':''}" data-mode="register">Đăng ký</button></div><form id="authForm" class="auth-form"><div class="field ${register?'':'hidden'}"><label>Danh xưng</label><input id="displayName" maxlength="40" ${register?'required':''} placeholder="Tên hiển thị"></div><div class="field"><label>Tên tài khoản</label><input id="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="tu_tien_01"></div><div class="field"><label>Mật khẩu</label><input id="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Ít nhất 6 ký tự"></div><button class="btn primary" type="submit">${register?'Ghi danh vào sơn môn':'Nhập môn'}</button><div id="authMsg" class="auth-msg"></div></form>`;
  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>renderAuth(b.dataset.mode));
- $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadDisciples();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadBeastHouse();await loadLinhPhap();await loadEquipment();await loadTuDi();await loadMarket();await loadProfessions();await loadData();await loadSectPosts();await loadChallenges();}}catch(err){msg.textContent=err.message;}};
+ $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadDisciples();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadBeastHouse();await loadLinhPhap();await loadEquipment();await loadTuDi();await loadMarket();await loadProfessions();await loadData();await loadSectPosts();await loadChallenges();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }
 async function logout(){try{await api('/api/logout',{method:'POST',headers:authHeaders()});}catch{}finally{localStorage.removeItem(tokenKey);currentProfile=null;accountUI(null);$('#accountModal').close();renderGuestAreas();}}
@@ -690,6 +706,6 @@ $('#menuBtn').onclick=()=>$('#nav').classList.toggle('open');document.querySelec
 if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$('#themeBtn').textContent='☀';}
 
 loadData();loadSect();checkSession();
-setInterval(()=>{if(getToken()){sendPresenceHeartbeat();loadChat();if(currentProfile?.activeBattle)loadChallenges();}},5000);
+setInterval(()=>{if(getToken()){sendPresenceHeartbeat();loadChat();loadData();if(currentProfile?.activeBattle)loadChallenges();}},5000);
 setInterval(()=>{if(getToken())sendPresenceHeartbeat();},30000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});

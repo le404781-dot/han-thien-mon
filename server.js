@@ -807,6 +807,19 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_private_messages_conversation ON private_messages(sender_id,recipient_id,id DESC);
     CREATE INDEX IF NOT EXISTS idx_private_messages_recipient ON private_messages(recipient_id,id DESC);
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS mailbox_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+    CREATE TABLE IF NOT EXISTS mailbox_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      link_hash TEXT NOT NULL DEFAULT '',
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_mailbox_user_unread ON mailbox_notifications(user_id,read_at,id DESC);
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS reward_grade TEXT NOT NULL DEFAULT 'Hạ Đẳng';
 
     CREATE TABLE IF NOT EXISTS challenge_requests (
       id BIGSERIAL PRIMARY KEY,
@@ -2688,6 +2701,7 @@ app.post('/api/bicanh/invite',auth,async(req,res)=>{
     if(stageFor(Number(me.spirit_power)||0).realmIndex<Number(realm.required_realm_index))return res.status(403).json({error:`Bạn phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể mời vào Bí Cảnh này.`});
     if(stageFor(Number(friend.spirit_power)||0).realmIndex<Number(realm.required_realm_index))return res.status(400).json({error:`Bằng Hữu phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể tham gia Bí Cảnh này.`});
     const r=await query(`INSERT INTO secret_realm_invitations(realm_id,inviter_id,invitee_id,status) VALUES($1,$2,$3,'pending') ON CONFLICT(realm_id,inviter_id,invitee_id) DO UPDATE SET status='pending',created_at=NOW(),responded_at=NULL RETURNING id`,[realmId,uid,friendId]);
+    await createMailboxNotification(friendId,'bicanh_invite','🌌 Mời vào Bí Cảnh',`Bạn được mời tham gia ${realm.name}.`,'#bicanh');
     res.json({ok:true,id:r.rows[0].id,message:'Đã gửi lời mời tham gia Bí Cảnh cho Bằng Hữu.'});
   }catch(e){console.error('bicanh invite:',e);res.status(500).json({error:`Không thể gửi lời mời Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}
 });
@@ -2942,6 +2956,8 @@ app.post('/api/chat',auth,async(req,res)=>{
         await client.query('INSERT INTO chat_messages(user_id,message,kind) VALUES($1,$2,\'arrival\')',[req.session.user_id,notice]);
       }
       const r=await client.query('INSERT INTO chat_messages(user_id,message,kind) VALUES($1,$2,\'chat\') RETURNING id,created_at',[req.session.user_id,message]);
+      const recipients=(await client.query('SELECT user_id FROM profiles WHERE user_id<>$1 AND mailbox_enabled=TRUE',[req.session.user_id])).rows.map(x=>x.user_id);
+      await notifyMany(recipients,'chat_total','☯ Truyền Âm Chat Tổng',message.slice(0,160),'#chat');
       await client.query('COMMIT');
       res.status(201).json({ok:true,...r.rows[0],isElder:Boolean(myRank),elderRank:myRank});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
@@ -2959,6 +2975,15 @@ app.patch('/api/elder-notification',auth,async(req,res)=>{
   }catch(e){console.error('elder notification update:',e);res.status(500).json({error:'Không thể đổi thông báo.'});}
 });
 
+
+async function createMailboxNotification(userId,type,title,message,linkHash=''){
+  try{const on=(await query('SELECT mailbox_enabled FROM profiles WHERE user_id=$1',[userId])).rows[0]?.mailbox_enabled; if(on===false)return; await query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash) VALUES($1,$2,$3,$4,$5)`,[userId,type,title,message,linkHash||'']);}catch(e){console.error('mailbox notify:',e.message);}
+}
+async function notifyMany(userIds,type,title,message,linkHash=''){
+  const ids=[...new Set(userIds.map(Number).filter(Boolean))];
+  if(!ids.length)return;
+  await Promise.all(ids.map(id=>createMailboxNotification(id,type,title,message,linkHash)));
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // KHIÊU CHIẾN · Lôi đài online / mô phỏng offline
@@ -3076,19 +3101,26 @@ async function settleChallengeBets(client,challengeId,winnerId){
   return {pool,payout:pool,winners:winning.length};
 }
 
-async function randomChallengeReward(client,userId,mode){
+async function randomChallengeReward(client,userId,mode,qualityMode='normal'){
   const profile=(await client.query('SELECT storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0];
   const cap=Math.max(1,Number(profile?.storage_capacity)||30);
   const used=Number((await client.query('SELECT COUNT(*)::int AS c FROM inventory WHERE user_id=$1 AND quantity>0',[userId])).rows[0].c)||0;
+  let grade='Hạ Đẳng';
+  const roll=Math.random()*100;
+  if(qualityMode==='underdog'){ grade=roll<90?'Thượng Đẳng':roll<98?'Trung Đẳng':'Hạ Đẳng'; }
+  else if(qualityMode==='favored'){ grade=roll<89?'Hạ Đẳng':roll<98?'Trung Đẳng':'Thượng Đẳng'; }
+  else { grade=roll<60?'Hạ Đẳng':roll<90?'Trung Đẳng':'Thượng Đẳng'; }
   let item;
-  if(used>=cap){
-    item=(await client.query(`SELECT ti.id,ti.name,ti.category,ti.description FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY RANDOM() LIMIT 1`,[userId])).rows[0];
-  } else {
-    item=(await client.query(`SELECT id,name,category,description FROM treasure_items ORDER BY RANDOM() LIMIT 1`)).rows[0];
-  }
+  const gradeRows=await client.query(`SELECT id,name,category,description,reward_grade FROM treasure_items WHERE reward_grade=$1 ORDER BY RANDOM() LIMIT 1`,[grade]);
+  item=gradeRows.rows[0];
+  if(!item)item=(await client.query(`SELECT id,name,category,description,reward_grade FROM treasure_items ORDER BY RANDOM() LIMIT 1`)).rows[0];
   if(!item)return null;
-  await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[userId,item.id]);
-  return {...item,quantity:1,mode};
+  if(used>=cap){
+    item=(await client.query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.reward_grade FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY RANDOM() LIMIT 1`,[userId])).rows[0]||item;
+  }else{
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[userId,item.id]);
+  }
+  return {...item,quantity:1,mode,grade:item.reward_grade||grade};
 }
 
 async function applyChallengeLoss(client,userId,mode,stage){
@@ -3111,16 +3143,29 @@ async function applyChallengeLoss(client,userId,mode,stage){
   return {newSpirit,debuffPercent:pct,text};
 }
 
-async function applyChallengeWin(client,userId,mode,odds){
+async function applyChallengeWin(client,userId,mode,odds,loserSpirit=0,winnerSpirit=0){
   const p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0];
   const spirit=Math.max(0,Number(p?.spirit_power)||0);
-  const gain=Math.max(mode==='online'?180:80,Math.floor(spirit*(mode==='online'?0.30:0.12))+ (odds.gap>0?odds.gap*50:0));
-  const item=await randomChallengeReward(client,userId,mode);
+  const target=Math.max(0,Number(loserSpirit)||0);
+  const higher=Math.max(0,Number(winnerSpirit)||spirit);
+  let gain; let qualityMode='normal';
+  const winnerStage=stageFor(higher), loserStage=stageFor(target);
+  if(winnerStage.realmIndex>loserStage.realmIndex){
+    const pct=0.01+Math.random()*0.09;
+    gain=Math.max(1,Math.floor(target*pct)); qualityMode='favored';
+  }else if(winnerStage.realmIndex<loserStage.realmIndex){
+    const pct=0.05+Math.random()*0.10;
+    gain=Math.max(1,Math.floor(target*pct)); qualityMode='underdog';
+  }else{
+    gain=Math.max(mode==='online'?180:80,Math.floor(spirit*(mode==='online'?0.30:0.12)));
+  }
+  const item=await randomChallengeReward(client,userId,mode,qualityMode);
   const ns=spirit+gain;
   const st=stageFor(ns);
   await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,challenge_debuff_until=NULL,challenge_debuff_percent=0,challenge_debuff_text='',updated_at=NOW() WHERE user_id=$1`,[userId,ns,gain,st.realm,st.tier]);
-  return {gain,spiritPower:ns,stage:st,item};
+  return {gain,spiritPower:ns,stage:st,item,qualityMode};
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SƯ ĐỒ · Bảo hộ + nhận đệ tử
@@ -3368,6 +3413,10 @@ app.post('/api/disciples/gift',auth,async(req,res)=>{
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/mailbox',auth,async(req,res)=>{try{const uid=req.session.user_id;const [rows,meta]=await Promise.all([query(`SELECT id,type,title,message,link_hash,read_at,created_at FROM mailbox_notifications WHERE user_id=$1 ORDER BY id DESC LIMIT 100`,[uid]),query(`SELECT mailbox_enabled,COUNT(*) FILTER (WHERE read_at IS NULL)::int AS unread FROM profiles p WHERE p.user_id=$1 GROUP BY mailbox_enabled`,[uid])]);res.json({rows:rows.rows,enabled:meta.rows[0]?.mailbox_enabled!==false,unread:Number(meta.rows[0]?.unread||0)});}catch(e){res.status(500).json({error:'Không thể mở Hòm Thư.'});}});
+app.post('/api/mailbox/toggle',auth,async(req,res)=>{try{const enabled=Boolean(req.body?.enabled);await query('UPDATE profiles SET mailbox_enabled=$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,enabled]);res.json({ok:true,enabled});}catch(e){res.status(500).json({error:'Không thể đổi trạng thái Hòm Thư.'});}});
+app.post('/api/mailbox/read',auth,async(req,res)=>{try{const id=Number(req.body?.id);if(id){await query('UPDATE mailbox_notifications SET read_at=NOW() WHERE id=$1 AND user_id=$2',[id,req.session.user_id]);}else await query('UPDATE mailbox_notifications SET read_at=NOW() WHERE user_id=$1 AND read_at IS NULL',[req.session.user_id]);res.json({ok:true});}catch(e){res.status(500).json({error:'Không thể đánh dấu đã đọc.'});}});
+
 // BẰNG HỮU · Kết giao + chat riêng
 // ─────────────────────────────────────────────────────────────────────────────
 // Khiêu chiến cần schema đầy đủ ngay cả khi Render đang dùng DB cũ.
@@ -3482,7 +3531,7 @@ app.post('/api/challenges/offline',auth,async(req,res)=>{
     const roll=Math.random();
     const win=roll<odds.chance;
     let winnerId=win?uid:target, loserId=win?target:uid, reward=null, loss=null;
-    if(win) reward=await applyChallengeWin(client,uid,'offline',odds); else loss=await applyChallengeLoss(client,uid,'offline',odds.aStage);
+    if(win) reward=await applyChallengeWin(client,uid,'offline',odds,Number(opp.spirit_power)||0,Number(me.spirit_power)||0); else loss=await applyChallengeLoss(client,uid,'offline',odds.aStage);
     const row=await client.query(`INSERT INTO challenge_requests(challenger_id,opponent_id,mode,status,winner_id,loser_id,challenger_damage,opponent_damage,success_chance,reward_spirit,reward_item_id,reward_quantity,penalty_text,responded_at)
       VALUES($1,$2,'offline','completed',$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW()) RETURNING id`,[uid,target,winnerId,loserId,win?odds.damageMultiplier:odds.damageMultiplier*0.55,win?1:Math.max(0.1,odds.damageMultiplier*0.35),odds.chance,reward?.gain||0,reward?.item?.id||null,reward?.item?.quantity||0,loss?.text||'']);
     await client.query('COMMIT');
@@ -3509,6 +3558,7 @@ app.post('/api/challenges/online/request',auth,async(req,res)=>{
     const incoming=(await client.query(`SELECT id FROM challenge_requests WHERE challenger_id=$2 AND opponent_id=$1 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
     if(incoming){await client.query('ROLLBACK');return res.status(409).json({error:'Đối phương đã mở lôi đài với bạn. Hãy vào Khiêu Chiến để đồng thuận.'});}
     const r=await client.query(`INSERT INTO challenge_requests(challenger_id,opponent_id,mode,status) VALUES($1,$2,'online','pending') RETURNING id,created_at`,[uid,target]);
+    await createMailboxNotification(target,'challenge','⚔️ Lời mời Khiêu Chiến','Bạn nhận được lời mời bước vào Lôi Đài.','#challenge');
     await client.query('COMMIT');
     res.status(201).json({ok:true,...r.rows[0],message:'Đã mở lôi đài. Chờ đối phương đồng thuận.'});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge request:',e);res.status(500).json({error:'Không thể mở lôi đài.'});}
@@ -3580,7 +3630,7 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
     const realmGap=stageFor(Number(attacker.spirit_power)||0).realmIndex-stageFor(Number(defender.spirit_power)||0).realmIndex;
     if(newDefHp<=0){
       const winner=attacker, loser=defender;
-      const reward=await applyChallengeWin(client,Number(winner.id),'online',challengeOdds(winner,loser));
+      const reward=await applyChallengeWin(client,Number(winner.id),'online',challengeOdds(winner,loser),Number(loser.spirit_power)||0,Number(winner.spirit_power)||0);
       const loss=await applyChallengeLoss(client,Number(loser.id),'online',challengeOdds(loser,winner).dStage);
       const challengerDamage=attackerIsChallenger?damage:Number(battle.challenger_damage||0);
       const opponentDamage=attackerIsChallenger?Number(battle.opponent_damage||0):damage;
@@ -3613,7 +3663,7 @@ app.post('/api/challenges/online/leave',auth,async(req,res)=>{
     const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[winnerId,loserId])).rows;
     const winner=rows.find(x=>Number(x.id)===winnerId),loser=rows.find(x=>Number(x.id)===loserId);
     if(!winner||!loser){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy người chơi.'});}
-    const reward=await applyChallengeWin(client,winnerId,'online',challengeOdds(winner,loser));
+    const reward=await applyChallengeWin(client,winnerId,'online',challengeOdds(winner,loser),Number(loser.spirit_power)||0,Number(winner.spirit_power)||0);
     const loss=await applyChallengeLoss(client,loserId,'online',challengeOdds(loser,winner).aStage);
     const attackerIsChallenger=Number(battle.challenger_id)===uid;
     const betResult=await settleChallengeBets(client,requestId,winnerId);
@@ -3683,6 +3733,7 @@ app.post('/api/friends/request',auth,async(req,res)=>{
     }
     if(old?.status==='rejected') await query('DELETE FROM friend_requests WHERE id=$1',[old.id]);
     const r=await query(`INSERT INTO friend_requests(requester_id,addressee_id,status) VALUES($1,$2,'pending') RETURNING id,created_at`,[uid,target]);
+    await createMailboxNotification(target,'friend','🤝 Lời mời kết giao',`Môn nhân #${uid} gửi lời mời kết giao bằng hữu.`, '#profile');
     res.status(201).json({ok:true,...r.rows[0],message:'Đã gửi lời mời kết bằng hữu.'});
   }catch(e){console.error('friend request:',e);res.status(500).json({error:'Không thể gửi lời mời bằng hữu.'});}
 });
@@ -3738,6 +3789,7 @@ app.post('/api/friends/:userId/messages',auth,async(req,res)=>{
     if(!message)return res.status(400).json({error:'Tin nhắn không được để trống.'});
     if(!(await areFriends(uid,target)))return res.status(403).json({error:'Chỉ có thể chat riêng với bằng hữu đã kết giao.'});
     const r=await query(`INSERT INTO private_messages(sender_id,recipient_id,message) VALUES($1,$2,$3) RETURNING id,created_at`,[uid,target,message]);
+    await createMailboxNotification(target,'private_chat','💬 Tin nhắn riêng',message.slice(0,160),'#profile');
     res.status(201).json({ok:true,...r.rows[0]});
   }catch(e){console.error('private chat send:',e);res.status(500).json({error:'Không thể gửi tin nhắn riêng.'});}
 });
