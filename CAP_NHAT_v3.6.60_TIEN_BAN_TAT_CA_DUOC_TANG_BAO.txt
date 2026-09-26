@@ -1,0 +1,11 @@
+HÀN THIÊN MÔN v3.6.60
+
+- Tiên Bàn Vòng Quay mở cho toàn bộ môn nhân đã đăng nhập.
+- Đại Thừa trở xuống: mỗi vòng tốn 10% linh lực.
+- Đại Thừa trở lên: mỗi vòng tốn 4.000 linh thạch.
+- Tỷ lệ: 94% vật phẩm thường; 5% nhóm Tiên Phẩm/Tiên Khí/Tiên Thú; 1% Cửu Vĩ Thiên Hồ khi đạt Nhân Tiên.
+- Tiên Thú và Cửu Vĩ Thiên Hồ chỉ có thể xuất hiện từ Nhân Tiên trở lên.
+- Cửu Vĩ: Vô Thượng Huyễn Thuật Thiên Phú, cập nhật hồ sơ + hào quang tím và thông báo toàn tông 15 giây.
+- Toàn bộ vật phẩm Dược Đường tiếp tục dùng chung catalog Tàng Bảo Các, có thể mua bằng linh thạch và lưu vào Tu Di Giới.
+- Đan dược có spirit_gain có thể dùng trực tiếp trong Tu Di Giới; vật phẩm linh thú/khôi lỗi/trang bị dùng tại các khu chức năng tương ứng.
+- Thông báo Cửu Vĩ được client kiểm tra định kỳ để môn nhân đang online thấy trong cửa sổ 15 giây.

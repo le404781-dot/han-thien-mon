@@ -2503,22 +2503,27 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
 
     const roll=Math.random()*100;
     let resultType='ordinary', resultName='', message='Vật phẩm ngẫu nhiên';
-    if(roll<1){
+    // Tất cả môn nhân đều được quay. Tiên Thú (bao gồm Cửu Vĩ) chỉ hợp lệ từ Nhân Tiên.
+    if(roll<1 && stage.realmIndex>=IMMORTAL_REALM_START){
       resultType='cuu_vi';
       resultName='Cửu Vĩ Thiên Hồ';
-      const beast=(await client.query(`SELECT * FROM spirit_beasts_catalog WHERE name='Cửu Vĩ Thiên Hồ' LIMIT 1`)).rows[0];
-      await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity) VALUES($1,$2,1)
-        ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1`,[uid,beast.id]);
-      await client.query(`UPDATE profiles SET cqq_tail_hu=TRUE,cqq_tail_hu_talent='Vô Thượng Huyễn Thuật Thiên Phú',
-        spirit_beast='Cửu Vĩ Thiên Hồ',spirit_beast_rarity='Cực Phẩm Tiên Thú',beast_realm='Tiên Thú',
-        beast_realm_tier=1,beast_attack=$2,beast_defense=$3,beast_speed=$4,beast_spirit=$5,beast_skill=$6,
-        equipped_beast_id=$7,updated_at=NOW() WHERE user_id=$1`,
-        [uid,beast.attack,beast.defense,beast.speed,beast.spirit,beast.skill,beast.id]);
-      message='Đại hỷ! Môn nhân đã quay ra Cực Phẩm Tiên Thú Cửu Vĩ Thiên Hồ!';
+      const beast=(await client.query(`SELECT * FROM spirit_beasts_catalog WHERE name='Cửu Vĩ Thiên Hồ' AND min_realm<= $1 LIMIT 1`,[stage.realmIndex])).rows[0];
+      if(beast){
+        await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity) VALUES($1,$2,1)
+          ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1`,[uid,beast.id]);
+        await client.query(`UPDATE profiles SET cqq_tail_hu=TRUE,cqq_tail_hu_talent='Vô Thượng Huyễn Thuật Thiên Phú',
+          spirit_beast='Cửu Vĩ Thiên Hồ',spirit_beast_rarity='Cực Phẩm Tiên Thú',beast_realm='Tiên Thú',
+          beast_realm_tier=1,beast_attack=$2,beast_defense=$3,beast_speed=$4,beast_spirit=$5,beast_skill=$6,
+          equipped_beast_id=$7,updated_at=NOW() WHERE user_id=$1`,
+          [uid,beast.attack,beast.defense,beast.speed,beast.spirit,beast.skill,beast.id]);
+        message='Đại hỷ! Môn nhân đã quay ra Cực Phẩm Tiên Thú Cửu Vĩ Thiên Hồ!';
+      } else {
+        resultType='ordinary'; resultName='Linh vật ngẫu nhiên';
+      }
     }else if(roll<6){
       const poolRows=[];
       poolRows.push(...(await client.query(`SELECT id,name FROM treasure_items WHERE category IN ('Tiên Phẩm','Tiên Khí') ORDER BY RANDOM()`)).rows);
-      if(stage.realmIndex>=9) poolRows.push(...(await client.query(`SELECT id,name FROM spirit_beasts_catalog WHERE min_realm<=9 ORDER BY RANDOM()`)).rows.map(x=>({...x,beast:true})));
+      if(stage.realmIndex>=IMMORTAL_REALM_START) poolRows.push(...(await client.query(`SELECT id,name FROM spirit_beasts_catalog WHERE min_realm<= $1 ORDER BY RANDOM()`,[stage.realmIndex])).rows.map(x=>({...x,beast:true})));
       const pick=poolRows[Math.floor(Math.random()*poolRows.length)];
       if(pick?.beast){
         resultType='tien_thu'; resultName=pick.name;

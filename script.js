@@ -32,6 +32,9 @@ function startPresenceHeartbeat(){
 }
 startPresenceHeartbeat();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')sendPresenceHeartbeat();});
+let tienBanAnnouncementPoll=null;
+function startTienBanAnnouncementPoll(){if(tienBanAnnouncementPoll)clearInterval(tienBanAnnouncementPoll);if(!getToken())return;tienBanAnnouncementPoll=setInterval(()=>{if(getToken())showTienBanAnnouncement();},3000);}
+startTienBanAnnouncementPoll();
 let tienBanAnnouncementTimer=null;
 async function showTienBanAnnouncement(){
   const el=$('#tienBanAnnouncement'); if(!el)return;
@@ -519,7 +522,7 @@ async function loadTreasure(){
     const locked=currentRealmIndex<requiredRealmIndex;
     const can=!locked&&stones>=price;
     const text=locked?'🔒 Cần '+esc(realmNames[requiredRealmIndex]||'cảnh giới cao hơn'):can?'💎 Mua vật phẩm':'Thiếu '+Number(Math.max(0,price-stones)).toLocaleString('vi-VN')+' linh thạch';
-    return `<article class="treasure-card ${locked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':i.category==='Linh thú'?'🐉':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đang có: ${Number(i.quantity||0)} · Giá: 💎 ${price.toLocaleString('vi-VN')} linh thạch</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${locked||!can?'disabled':''}>${text}</button></article>`;
+    return `<article class="treasure-card ${locked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':i.category==='Linh thú'?'🐉':'⚔'}</span><div><span class="eyebrow">${i.category.startsWith('Dược Đường')?'💊 DƯỢC ĐƯỜNG · ':''}${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đang có: ${Number(i.quantity||0)} · Giá: 💎 ${price.toLocaleString('vi-VN')} linh thạch</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${locked||!can?'disabled':''}>${text}</button></article>`;
   }).join('')}</div><p id="treasureMsg" class="train-msg"></p>`;
   $('#exchangeStonesBtn').onclick=async()=>{const b=$('#exchangeStonesBtn');const qty=Number($('#exchangeStonesQty').value||0);b.disabled=true;try{const x=await api('/api/currency/exchange',{method:'POST',headers:authHeaders(),body:JSON.stringify({stones:qty})});$('#treasureMsg').textContent=`🔄 Đã đổi ${Number(x.spentSpirit).toLocaleString('vi-VN')} linh lực → ${Number(x.receivedStones).toLocaleString('vi-VN')} linh thạch.`;await Promise.all([loadProfile(),loadTreasure()]);}catch(e){$('#treasureMsg').textContent='❌ '+e.message;}finally{b.disabled=false;}};
   document.querySelectorAll('.buy-item').forEach(b=>b.onclick=async()=>{
@@ -560,7 +563,7 @@ async function loadTienBan(){
  try{
   const d=await api('/api/tien-ban',{headers:authHeaders()});
   const cost=d.cost||{};
-  area.innerHTML=`<div class="tien-ban-hero"><div><span class="eyebrow">☯ TIÊN BÀN VÒNG QUAY</span><h3>Tiên Phẩm · Tiên Thú · Tiên Khí</h3><p>94% vật phẩm ngẫu nhiên · 5% Tiên phẩm/Tiên khí/Tiên thú · <b>1% Cửu Vĩ Thiên Hồ</b>.</p><small>${esc(d.stage?.realm||'')} · Mỗi vòng quay: <b>${esc(cost.label||'')}</b></small></div><div class="tien-ban-wheel">☯</div><button id="tienBanSpinBtn" class="btn primary">🎡 Quay · ${esc(cost.label||'')}</button></div><div id="tienBanResult" class="tien-ban-result">${d.hasCuuVi?'🦊 Hồ sơ đã có Cửu Vĩ Thiên Hồ · Vô Thượng Huyễn Thuật Thiên Phú.':'Chưa sở hữu Cửu Vĩ Thiên Hồ.'}</div><div class="tien-ban-history">${(d.recent||[]).map(x=>`<div><b>${esc(x.result_name)}</b><small>${esc(x.result_type)} · ${new Date(x.created_at).toLocaleString('vi-VN')}</small></div>`).join('')}</div>`;
+  area.innerHTML=`<div class="tien-ban-hero"><div><span class="eyebrow">☯ TIÊN BÀN VÒNG QUAY</span><h3>Tiên Phẩm · Tiên Thú · Tiên Khí</h3><p><b>Tất cả môn nhân đều có thể quay.</b> 94% vật phẩm ngẫu nhiên · 5% Tiên phẩm/Tiên khí/Tiên thú · <b>1% Cửu Vĩ Thiên Hồ</b> (Tiên Thú từ Nhân Tiên).</p><small>${esc(d.stage?.realm||'')} · Mỗi vòng quay: <b>${esc(cost.label||'')}</b></small></div><div class="tien-ban-wheel">☯</div><button id="tienBanSpinBtn" class="btn primary">🎡 Quay · ${esc(cost.label||'')}</button></div><div id="tienBanResult" class="tien-ban-result">${d.hasCuuVi?'🦊 Hồ sơ đã có Cửu Vĩ Thiên Hồ · Vô Thượng Huyễn Thuật Thiên Phú.':'Chưa sở hữu Cửu Vĩ Thiên Hồ.'}</div><div class="tien-ban-history">${(d.recent||[]).map(x=>`<div><b>${esc(x.result_name)}</b><small>${esc(x.result_type)} · ${new Date(x.created_at).toLocaleString('vi-VN')}</small></div>`).join('')}</div>`;
   $('#tienBanSpinBtn').onclick=async()=>{
     const b=$('#tienBanSpinBtn');b.disabled=true;$('#tienBanResult').textContent='☯ Tiên Bàn đang xoay...';
     try{const x=await api('/api/tien-ban/spin',{method:'POST',headers:authHeaders(),body:'{}'});$('#tienBanResult').innerHTML=x.cuuVi?'🦊 <b>CỰC PHẨM! CỬU VĨ THIÊN HỒ</b> · Vô Thượng Huyễn Thuật Thiên Phú':'✨ '+esc(x.message);await Promise.all([loadProfile(),loadTuDi(),loadTienBan(),loadMailbox(),loadChat()]);}
@@ -579,7 +582,7 @@ async function loadTuDi(){
   <div class="equipment-list"><div class="equipment-item"><span class="eyebrow">🐉 LINH THÚ · ĐÃ NHẬN</span><h3>${beasts.length?beasts.map(x=>`${esc(x.name)} ×${x.quantity}`).join(' · '):'Chưa có'}</h3><p>Linh Thú được lưu trong Tu Di Giới và chỉ cộng chiến lực khi trang bị.</p></div><div class="equipment-item"><span class="eyebrow">🌿 LINH CĂN · ĐÃ NHẬN</span><h3>${roots.length?roots.map(x=>`${esc(x.name)} ×${x.quantity}`).join(' · '):'Chưa có'}</h3><p>Linh Căn được lưu trong Tu Di Giới và chỉ phát huy công năng khi trang bị.</p></div></div>
   <div class="inventory-grid">${rows.length?rows.map(i=>{
     const usable=Number(i.spirit_gain||0)>0;
-    return `<article class="inventory-card"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><b>Số lượng: ${Number(i.quantity||0)}</b>${usable?`<div class="use-item-row"><input class="use-item-qty" data-id="${i.id}" type="number" min="1" max="${Number(i.quantity||1)}" value="1"><button class="btn small primary use-item" data-id="${i.id}">Dùng · +${Number(i.spirit_gain).toLocaleString('vi-VN')} / viên</button></div>`:''}</div></article>`;
+    return `<article class="inventory-card"><span class="item-seal">${i.category==='Đan dược'?'◈':'⚔'}</span><div><span class="eyebrow">${i.category.startsWith('Dược Đường')?'💊 DƯỢC ĐƯỜNG · ':''}${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><b>Số lượng: ${Number(i.quantity||0)}</b>${usable?`<div class="use-item-row"><input class="use-item-qty" data-id="${i.id}" type="number" min="1" max="${Number(i.quantity||1)}" value="1"><button class="btn small primary use-item" data-id="${i.id}">Dùng · +${Number(i.spirit_gain).toLocaleString('vi-VN')} / viên</button></div>`:''}</div></article>`;
   }).join(''):`<div class="empty-state compact"><h3>Tu Di Giới đang trống</h3><p>Vật phẩm mua tại Tàng Bảo Các, nhận từ Nhiệm Vụ Đường hoặc giao dịch ở Phường Thị sẽ được lưu tại đây.</p></div>`}</div>`;
   $('#storageUpgradeBtn').onclick=async()=>{
     const b=$('#storageUpgradeBtn');b.disabled=true;
