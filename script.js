@@ -917,7 +917,7 @@ if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$
 setupTutorial();
 
 loadData();loadSect();checkSession();
-setInterval(()=>{if(getToken()){sendPresenceHeartbeat();loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},5000);
+setInterval(()=>{if(getToken()){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},15000);
 setInterval(()=>{if(getToken())sendPresenceHeartbeat();},30000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
 

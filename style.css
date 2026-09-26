@@ -740,3 +740,54 @@ body.dark .online-numbers b{color:var(--gold)}
 .audio-art span{font:900 4.6rem/1 'Noto Serif SC';color:var(--red);z-index:1}.audio-art small{font-size:.52rem;letter-spacing:.2em;font-weight:900;color:var(--jade);z-index:1}
 .audio-copy h3{font:700 1.35rem 'Noto Serif SC';color:var(--jade);margin-bottom:5px}.audio-copy>p{color:var(--muted);font-size:.8rem;line-height:1.55}.audio-controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.audio-controls .btn{min-width:135px}.audio-volume{display:flex;align-items:center;gap:12px;margin-top:16px;max-width:480px}.audio-volume label,.audio-volume span{font-size:.72rem;font-weight:800;color:var(--muted);white-space:nowrap}.audio-volume input{flex:1;accent-color:var(--jade)}.audio-note{margin-top:10px!important;min-height:22px;color:var(--red)!important;font-size:.72rem!important}.audio-section audio{display:none}
 @media(max-width:650px){.audio-panel{grid-template-columns:1fr}.audio-art{margin:auto}.audio-controls{display:grid;grid-template-columns:1fr 1fr}.audio-controls .btn{width:100%;min-width:0}.audio-volume{max-width:none}}
+
+
+/* v3.6.54 · TỐI ƯU HIỆU NĂNG + MENU ĐỐI LẬP + ÂM THANH RIÊNG */
+:root{
+  --menu-bg:#183c36;
+  --menu-text:#f7f0dc;
+  --menu-accent:#e0bd70;
+  --menu-hover:#cfe6dc;
+  --menu-active:#8fd0b5;
+}
+body.dark{
+  --menu-bg:#e7d7b2;
+  --menu-text:#102522;
+  --menu-accent:#6b4422;
+  --menu-hover:#183c36;
+  --menu-active:#24584c;
+}
+/* Menu luôn tương phản với nền ở cả hai chế độ */
+.topbar{background:var(--menu-bg);border-bottom-color:color-mix(in srgb,var(--menu-accent) 55%,transparent);box-shadow:0 4px 16px rgba(15,35,30,.16)}
+.topbar nav a{color:var(--menu-text);font-weight:800;opacity:.94;transition:color .16s ease,background-color .16s ease,transform .16s ease;padding:7px 9px;border-radius:7px}
+.topbar nav a:hover,.topbar nav a:focus-visible{color:var(--menu-hover);background:color-mix(in srgb,var(--menu-text) 10%,transparent);transform:translateY(-1px)}
+.brand{color:var(--menu-text)}
+.brand small{color:color-mix(in srgb,var(--menu-text) 68%,transparent)}
+.brand-seal{background:var(--menu-text);color:var(--menu-bg);border-color:var(--menu-accent);box-shadow:inset 0 0 0 3px var(--menu-text),inset 0 0 0 4px var(--menu-accent)}
+.icon-btn,.seal-btn{background:var(--menu-text);color:var(--menu-bg);border-color:var(--menu-accent)}
+.user-badge{background:var(--menu-text);color:var(--menu-bg);border-color:var(--menu-accent)}
+/* Giảm hiệu ứng nặng trên iPhone */
+.mist{filter:blur(22px);opacity:.08}
+.topbar{backdrop-filter:none;-webkit-backdrop-filter:none}
+body{background-attachment:scroll}
+body,.section,.topbar,.member-card,.profile-card,.power-card,.online-cultivation-card,.daily-stone-card,.challenge-block,.challenge-rules>div,.mailbox-area,.codex-card,.mansion-card,.friend-card,.market-card,.quest-card,.attribute-panel,.hero-card{transition:background-color .22s ease,border-color .22s ease,color .22s ease}
+.member-card:hover{transform:translateY(-3px)}
+.btn:hover{transform:translateY(-1px)}
+.hero-card,.member-card,.profile-card,.power-card,.online-cultivation-card,.daily-stone-card,.challenge-block,.mailbox-area,.codex-card,.mansion-card{box-shadow:0 10px 28px rgba(35,55,48,.09)}
+/* Âm thanh là một chức năng độc lập, có mục riêng trên thanh menu */
+#audio{scroll-margin-top:90px}
+.audio-section{min-height:420px}
+.audio-section .section-head{align-items:center}
+.audio-section .live-pill.audio-playing{background:var(--menu-bg);color:var(--menu-text);border-color:var(--menu-accent)}
+.audio-panel{border-radius:12px;box-shadow:0 10px 28px rgba(35,55,48,.09)}
+.audio-controls .btn{transition:background-color .18s ease,color .18s ease,border-color .18s ease,transform .18s ease}
+@media(max-width:900px){
+  .topbar{height:70px;padding:0 4%;gap:10px}
+  .topbar nav{gap:4px}
+  .topbar nav a{font-size:.78rem;padding:6px 7px}
+}
+@media(max-width:700px){
+  .topbar{padding:0 4%;}
+  .brand small{display:none}
+  .audio-section{min-height:0}
+}
