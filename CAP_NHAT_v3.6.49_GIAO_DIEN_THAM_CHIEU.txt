@@ -1,0 +1,4 @@
+HÀN THIÊN MÔN v3.6.49
+- Tái thiết kế khu vực Sơn Môn theo bố cục giao diện tham chiếu: nền tiên cảnh, khung trung tâm tối, viền vàng, tiêu đề lớn, nút thao tác gọn và thống kê 3 cột.
+- Giữ nguyên các chức năng hiện có và cơ chế focus-mode.
+- Tối ưu responsive cho iPhone; trên mobile các nút hero xếp dọc, tiêu đề thu gọn và nền không fixed để cuộn mượt.

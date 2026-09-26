@@ -88,6 +88,7 @@ async function ensureRuntimeSchema() {
       acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(user_id,beast_id)
     );
+    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS avatar TEXT;
     CREATE TABLE IF NOT EXISTS owned_spirit_roots (
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -128,6 +129,7 @@ async function ensureRuntimeSchema() {
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS comprehension INTEGER NOT NULL DEFAULT 8;
     ALTER TABLE mansions ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Phàm';
@@ -341,6 +343,7 @@ async function ensureBicanhSchema() {
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
 
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE inventory ADD COLUMN IF NOT EXISTS avatar TEXT;
   `);
 }
 
@@ -690,6 +693,7 @@ async function initDb() {
     -- Migration for databases created by older Hàn Thiên Môn versions.
     -- CREATE TABLE IF NOT EXISTS does not modify an existing inventory table.
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE inventory ADD COLUMN IF NOT EXISTS avatar TEXT;
     CREATE TABLE IF NOT EXISTS owned_spirit_beasts (
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -698,6 +702,7 @@ async function initDb() {
       acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(user_id,beast_id)
     );
+    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS avatar TEXT;
     CREATE TABLE IF NOT EXISTS owned_spirit_roots (
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1544,7 +1549,7 @@ app.get('/api/data',async(req,res)=>{
     ]);
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
-    const accountMembers=accounts.rows.map(x=>{const online=!!x.last_seen_at && (Date.now()-new Date(x.last_seen_at).getTime())<90000 && x.presence_status==='online'; return {...x,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true,online,presenceLabel:online?'Đang xuất quan':'Đã bế quan'};});
+    const accountMembers=accounts.rows.map(x=>{const realmIndex=realmIndexFor(Number(x.spirit_power)||0); const online=!!x.last_seen_at && (Date.now()-new Date(x.last_seen_at).getTime())<90000 && x.presence_status==='online'; return {...x,realmIndex,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true,online,presenceLabel:online?'Đang xuất quan':'Đã bế quan'};});
     res.json({members:accountMembers,memories:legends,timeline:t.rows,userCount:u.rows[0].c,memberCount:accountMembers.length});
   } catch(e) { res.status(500).json({error:'Không thể tải dữ liệu.'}); }
 });
@@ -1649,15 +1654,17 @@ app.get('/api/profile',auth,async(req,res)=>{
     await ensureAchievements(p.id,p.spirit_power);
     const stage=stageFor(p.spirit_power);
     const eq=(await query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,
-      b.name AS beast_name,b.power_bonus AS beast_power,b.ability AS beast_ability,
+      b.name AS beast_name,b.power_bonus AS beast_power,b.ability AS beast_ability,ob.avatar AS beast_avatar,
       r.name AS root_name,r.power_bonus AS root_power,r.ability AS root_ability,
-      a.name AS artifact_name,a.power_bonus AS artifact_power,a.ability AS artifact_ability
+      a.name AS artifact_name,a.power_bonus AS artifact_power,a.ability AS artifact_ability,ia.avatar AS artifact_avatar
       FROM profiles p
       LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id
+      LEFT JOIN owned_spirit_beasts ob ON ob.user_id=p.user_id AND ob.beast_id=p.equipped_beast_id
       LEFT JOIN spirit_roots_catalog r ON r.id=p.equipped_root_id
       LEFT JOIN treasure_items a ON a.id=p.equipped_artifact_id
+      LEFT JOIN inventory ia ON ia.user_id=p.user_id AND ia.item_id=p.equipped_artifact_id
       WHERE p.user_id=$1`,[p.id])).rows[0]||{};
-    const techniqueRows=(await query(`SELECT ct.id,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.name,ct.grade,ct.ability, (p.equipped_technique_id=ct.id) AS equipped
+    const techniqueRows=(await query(`SELECT ct.id,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.name,ct.grade,ct.ability,ut.avatar, (p.equipped_technique_id=ct.id) AS equipped
       FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[p.id])).rows;
     const mansion=(await query(`SELECT um.active,m.id,m.name,m.grade,m.spirit_per_hour,um.last_tick_at FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1`,[p.id])).rows[0]||null;
     const baseAttr=attributesFor(p.spirit_power,p.comprehension);
@@ -1680,7 +1687,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const healthCurrent=activeBattle ? (Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_hp):Number(activeBattle.opponent_hp)) : healthMax;
 
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:600}});
+    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:600}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -1752,6 +1759,7 @@ app.get('/api/codex',auth,async(req,res)=>{
     if(!p)return res.status(404).json({error:'Không tìm thấy hồ sơ.'});
     const st=stageFor(Number(p.spirit_power)||0);
     const rows=(await query(`SELECT ct.id,ct.name,ct.realm_index,ct.realm_name,ct.grade,ct.description,ct.price_stones,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.ability,
+      (SELECT ut.avatar FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id LIMIT 1) AS avatar,
       EXISTS(SELECT 1 FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id) AS learned
       FROM cultivation_techniques ct
       WHERE ct.realm_index <= $2
@@ -2490,7 +2498,9 @@ async function ensureEquipmentSchema(){
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE inventory ADD COLUMN IF NOT EXISTS avatar TEXT;
     CREATE TABLE IF NOT EXISTS owned_spirit_beasts (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,beast_id));
+    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS avatar TEXT;
     CREATE TABLE IF NOT EXISTS owned_spirit_roots (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,root_id INTEGER NOT NULL REFERENCES spirit_roots_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,root_id));
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Hạ Phẩm';
@@ -2499,6 +2509,7 @@ async function ensureEquipmentSchema(){
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS avatar TEXT;
   `);
 }
 
@@ -2545,24 +2556,46 @@ app.get('/api/equipment',auth,async(req,res)=>{
         COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0) +
         COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
         FROM profiles p WHERE p.user_id=$1`,[userId]),
-      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm
+      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,o.avatar
         FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.power_bonus DESC,c.id`,[userId]),
       query(`SELECT o.id,o.root_id,o.quantity,c.name,c.rarity,c.description,c.support,c.power_bonus,c.ability,c.min_realm
         FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.power_bonus DESC,c.id`,[userId]),
-      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability,i.avatar
         FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
         WHERE i.user_id=$1 AND i.quantity>0
           AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
         ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
-      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,(p.equipped_technique_id=ct.id) AS equipped
+      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,ut.avatar,(p.equipped_technique_id=ct.id) AS equipped
         FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id
         WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[userId])
     ]);
     res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipped_technique_id:null,equipment_power:0},beasts:b.rows,roots:r.rows,artifacts:a.rows,techniques:techniques.rows});
   }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
+app.patch('/api/equipment/avatar',auth,async(req,res)=>{
+  try{
+    await ensureEquipmentSchema();
+    const type=String(req.body?.type||'');
+    const id=Number(req.body?.id);
+    let avatar=req.body?.avatar===undefined?null:String(req.body.avatar||'').trim();
+    if(!['beast','artifact','technique'].includes(type)||!Number.isInteger(id)||id<1)return res.status(400).json({error:'Vật phẩm hoặc công pháp không hợp lệ.'});
+    if(avatar!==null){
+      if(!avatar.startsWith('data:image/'))return res.status(400).json({error:'Ảnh đại diện phải là ảnh từ album.'});
+      if(avatar.length>900000)return res.status(400).json({error:'Ảnh quá lớn. Hãy chọn ảnh nhẹ hơn.'});
+      if(!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(avatar))return res.status(400).json({error:'Ảnh đại diện không hợp lệ.'});
+    }
+    const uid=req.session.user_id;
+    let r;
+    if(type==='beast') r=await query('UPDATE owned_spirit_beasts SET avatar=$3 WHERE user_id=$1 AND beast_id=$2 AND quantity>0 RETURNING avatar',[uid,id,avatar]);
+    else if(type==='artifact') r=await query(`UPDATE inventory i SET avatar=$3 FROM treasure_items ti WHERE i.user_id=$1 AND i.item_id=$2 AND i.item_id=ti.id AND i.quantity>0 AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí') RETURNING i.avatar`,[uid,id,avatar]);
+    else r=await query('UPDATE user_techniques SET avatar=$3 WHERE user_id=$1 AND technique_id=$2 RETURNING avatar',[uid,id,avatar]);
+    if(!r.rowCount)return res.status(404).json({error:'Không tìm thấy vật phẩm/công pháp thuộc về bạn.'});
+    res.json({ok:true,avatar:r.rows[0].avatar,message:'Đã đổi ảnh đại diện.'});
+  }catch(e){console.error('equipment avatar:',e);res.status(500).json({error:'Không thể đổi ảnh đại diện.'});}
+});
+
 app.post('/api/equipment/equip',auth,async(req,res)=>{
   await ensureEquipmentSchema();
   const client=await pool.connect();

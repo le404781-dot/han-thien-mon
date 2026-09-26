@@ -1,0 +1,19 @@
+HÀN THIÊN MÔN v3.6.48
+
+1. Ảnh đại diện vật phẩm/công pháp
+- Môn nhân có thể chọn ảnh từ album iPhone/thiết bị cho:
+  + Công pháp đã học.
+  + Linh thú đang sở hữu.
+  + Pháp khí/pháp bảo đang sở hữu.
+- Ảnh được tự thu nhỏ/nén phía trình duyệt trước khi gửi.
+- Ảnh lưu riêng theo từng tài khoản sở hữu, không làm thay đổi ảnh của môn nhân khác.
+- Có thể đổi ảnh bất kỳ lúc nào từ Tàng Thư Các hoặc Trang Bị.
+
+2. Hào quang cảnh giới
+- Ảnh đại diện của môn nhân được bao quanh bằng hào quang đối ứng 18 đại cảnh giới.
+- Hào quang tăng dần về độ sáng/độ mạnh từ Luyện Khí đến Tiên Đế.
+- Hào quang tự cập nhật theo linh lực/cảnh giới hiện tại.
+- Áp dụng trên Hồ Sơ, Môn Nhân, Xuất Quan, Thành Tích, Bằng Hữu, Khiêu Chiến, Chat, Bài Đăng và các khu vực hiển thị ảnh đại diện.
+
+3. Tương thích DB
+- Tự migration các cột avatar mới cho user_techniques, owned_spirit_beasts và inventory.
