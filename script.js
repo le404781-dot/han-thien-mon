@@ -477,6 +477,43 @@ async function loadTreasure(){
  }catch(e){const area=$('#treasureArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
+
+async function loadGlobalItemAvatarManager(){
+ const box=$('#globalItemAvatarManager'); if(!box||!getToken())return;
+ try{
+  const d=await api('/api/equipment/avatar-catalog',{headers:authHeaders()});
+  let mode='beast', search='';
+  const escImg=x=>x.avatar?avatarHtml(x.avatar):avatarHtml('');
+  const render=()=>{
+   const list=(mode==='beast'?d.beasts:mode==='artifact'?d.artifacts:d.techniques)||[];
+   const q=search.toLowerCase();
+   const filtered=list.filter(x=>`${x.name||''} ${x.rarity||''} ${x.grade||''} ${x.realm_name||''} ${x.category||''}`.toLowerCase().includes(q));
+   box.querySelector('.global-avatar-grid').innerHTML=filtered.map(x=>`<article class="global-avatar-card item-avatar-picker">
+      <div class="global-avatar-thumb item-avatar">${escImg(x)}</div>
+      <div class="global-avatar-info"><b>${esc(x.name)}</b><small>${esc(mode==='beast'?`${x.rarity||''} · ${x.beast_realm||''} ${x.beast_realm_tier||''}`:mode==='artifact'?(x.category||'Pháp khí'):`${x.realm_name||''} · ${x.grade||''}`)}</small></div>
+      <label class="item-avatar-upload">🖼 Thay ảnh<input class="global-item-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-type="${mode}" data-id="${x.id}"></label>
+    </article>`).join('')||`<div class="empty-state compact"><p>Không tìm thấy mục phù hợp.</p></div>`;
+   box.querySelector('.global-avatar-count').textContent=`${filtered.length}/${list.length} mục`;
+  };
+  box.innerHTML=`<div class="global-avatar-head"><div><span class="eyebrow">🖼 KHO ẢNH ĐẠI DIỆN TOÀN SƠN MÔN</span><h3>Thay ảnh cho mọi mục đang tồn tại</h3><p>Đây là quyền đặc biệt của <b>thienha_666</b>. Ảnh đặt tại đây áp dụng cho danh mục trên toàn Hàn Thiên Môn.</p></div><span class="global-avatar-count">0/0 mục</span></div>
+    <div class="global-avatar-tabs"><button class="btn small primary" data-avatar-mode="beast">🐉 Linh Thú</button><button class="btn small" data-avatar-mode="technique">📚 Công Pháp</button><button class="btn small" data-avatar-mode="artifact">⚔ Pháp Khí</button><input id="globalAvatarSearch" class="search" placeholder="Tìm tên..." autocomplete="off"></div>
+    <div class="global-avatar-grid"></div><p class="train-msg" id="globalAvatarMsg"></p>`;
+  box.querySelectorAll('[data-avatar-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.avatarMode;box.querySelectorAll('[data-avatar-mode]').forEach(x=>x.classList.toggle('primary',x===b));render();});
+  box.querySelector('#globalAvatarSearch').oninput=e=>{search=e.target.value.trim();render();};
+  box.addEventListener('change',async e=>{
+   const input=e.target.closest('.global-item-avatar-file'); if(!input)return;
+   try{
+    const f=input.files?.[0];if(!f)return;
+    const x=await prepareItemAvatar(f); input.disabled=true;
+    const r=await api('/api/equipment/avatar',{method:'PATCH',headers:authHeaders(),body:JSON.stringify({type:input.dataset.type,id:Number(input.dataset.id),avatar:x.data})});
+    box.querySelector('#globalAvatarMsg').textContent='🖼 '+(r.message||'Đã cập nhật ảnh đại diện toàn danh mục.');
+    const card=input.closest('.global-avatar-card');const preview=card?.querySelector('.item-avatar');if(preview)preview.innerHTML=avatarHtml(x.data);
+   }catch(e){box.querySelector('#globalAvatarMsg').textContent='❌ '+e.message;}finally{input.disabled=false;input.value='';}
+  });
+  render();
+ }catch(e){box.innerHTML=`<div class="empty-state compact"><h3>Không thể mở kho ảnh đại diện</h3><p>${esc(e.message)}</p></div>`;}
+}
+
 async function loadEquipment(){
  const area=$('#equipmentArea'); if(!area||!getToken())return;
  try{
@@ -489,12 +526,13 @@ async function loadEquipment(){
   const combat=Number(currentProfile?.attributes?.combatPower||0);
   const equippedTechnique=techniques.find(x=>x.equipped);
   const techniquePanel=`<div class="equipment-technique-panel item-avatar-picker"><div class="item-avatar">${avatarHtml(equippedTechnique?.avatar)}</div><div><span class="eyebrow">📚 CÔNG PHÁP TRANG BỊ</span><h3>${equippedTechnique?esc(equippedTechnique.name):'Chưa trang bị công pháp'}</h3><small>${equippedTechnique?`${esc(equippedTechnique.grade)} · ⚔ +${Number(equippedTechnique.power_bonus||0).toLocaleString('vi-VN')} · ${esc(equippedTechnique.ability||'')}`:'Chọn một công pháp đã học để làm công pháp đang sử dụng.'}</small></div><div class="technique-equip-row">${equippedTechnique?(currentProfile?.item_avatar_unlocked?`<label class="item-avatar-upload">🖼 Đổi ảnh<input class="item-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-type="technique" data-id="${equippedTechnique.id}"></label>`:`<small class="item-avatar-locked">🔒 Chưa mở đổi ảnh</small>`):''}<select id="equippedTechniqueSelect"><option value="0">— Chọn công pháp —</option>${techniques.map(x=>`<option value="${x.id}" ${x.equipped?'selected':''}>${esc(x.name)} · ${esc(x.grade)}</option>`).join('')}</select><button class="btn small primary" id="equipTechniqueBtn">📚 Đổi công pháp</button>${equippedTechnique?'<button class="btn small ghost" id="unequipTechniqueBtn">Tháo</button>':''}</div></div>`;
-  area.innerHTML=`<div class="equipment-power"><div><span class="eyebrow">⚔ CHIẾN LỰC HIỆN TẠI</span><p>Chiến lực đã bao gồm Linh Thú + Linh Căn + Pháp Khí đang trang bị.</p><small>Trang bị cộng thêm: +${power.toLocaleString('vi-VN')}</small></div><strong>${combat.toLocaleString('vi-VN')}</strong></div><div class="equipment-slots">${slot('beast','Linh Thú','🐉',e.beast)}${slot('root','Linh Căn','🌿',e.root)}${slot('artifact','Pháp Khí','⚔',e.artifact)}</div>${techniquePanel}<div><div class="friend-subtitle">📦 Linh Thú trong Tu Di Giới</div><div class="equipment-list">${beastCards||'<div class="equipment-empty">Chưa có Linh Thú.</div>'}</div></div><div><div class="friend-subtitle">📦 Linh Căn trong Tu Di Giới</div><div class="equipment-list">${rootCards||'<div class="equipment-empty">Chưa có Linh Căn.</div>'}</div></div><div><div class="friend-subtitle">📦 Pháp Khí trong Tu Di Giới</div><div class="equipment-list">${artifactCards||'<div class="equipment-empty">Chưa có Pháp Khí/Pháp Bảo.</div>'}</div></div><p id="equipmentMsg" class="train-msg"></p>`;
+  area.innerHTML=`<div class="equipment-power"><div><span class="eyebrow">⚔ CHIẾN LỰC HIỆN TẠI</span><p>Chiến lực đã bao gồm Linh Thú + Linh Căn + Pháp Khí đang trang bị.</p><small>Trang bị cộng thêm: +${power.toLocaleString('vi-VN')}</small></div><strong>${combat.toLocaleString('vi-VN')}</strong></div><div class="equipment-slots">${slot('beast','Linh Thú','🐉',e.beast)}${slot('root','Linh Căn','🌿',e.root)}${slot('artifact','Pháp Khí','⚔',e.artifact)}</div>${techniquePanel}<div><div class="friend-subtitle">📦 Linh Thú trong Tu Di Giới</div><div class="equipment-list">${beastCards||'<div class="equipment-empty">Chưa có Linh Thú.</div>'}</div></div><div><div class="friend-subtitle">📦 Linh Căn trong Tu Di Giới</div><div class="equipment-list">${rootCards||'<div class="equipment-empty">Chưa có Linh Căn.</div>'}</div></div><div><div class="friend-subtitle">📦 Pháp Khí trong Tu Di Giới</div><div class="equipment-list">${artifactCards||'<div class="equipment-empty">Chưa có Pháp Khí/Pháp Bảo.</div>'}</div></div>${currentProfile?.item_avatar_unlocked && String(currentProfile?.username||'').toLowerCase()==='thienha_666'?'<div id="globalItemAvatarManager" class="global-item-avatar-manager"></div>':''}<p id="equipmentMsg" class="train-msg"></p>`;
   document.querySelectorAll('[data-equip-type]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/equipment/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:b.dataset.equipType,id:Number(b.dataset.equipId)})});$('#equipmentMsg').textContent=`✅ ${x.message}`;await loadProfile();}catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;b.disabled=false;}});
   document.querySelectorAll('[data-unequip]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/api/equipment/unequip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:b.dataset.unequip})});$('#equipmentMsg').textContent='✅ Đã tháo trang bị.';await loadProfile();await loadEquipment();}catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;b.disabled=false;}});
   const et=$('#equipTechniqueBtn'); if(et)et.onclick=async()=>{const id=Number($('#equippedTechniqueSelect')?.value||0);if(!id){$('#equipmentMsg').textContent='❌ Hãy chọn công pháp.';return;}et.disabled=true;try{const x=await api('/api/techniques/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({techniqueId:id})});$('#equipmentMsg').textContent='✅ '+x.message;await loadProfile();await loadEquipment();}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;et.disabled=false;}};
   const ut=$('#unequipTechniqueBtn'); if(ut)ut.onclick=async()=>{ut.disabled=true;try{const x=await api('/api/techniques/unequip',{method:'POST',headers:authHeaders(),body:'{}'});$('#equipmentMsg').textContent='✅ '+x.message;await loadProfile();await loadEquipment();}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;ut.disabled=false;}};
   bindItemAvatarPickers(loadEquipment);
+  if(currentProfile?.item_avatar_unlocked && String(currentProfile?.username||'').toLowerCase()==='thienha_666') await loadGlobalItemAvatarManager();
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>Không thể mở Trang Bị</h3><p>${esc(e.message)}</p><button class="btn small primary" id="retryEquipmentBtn">↻ Thử lại</button></div>`;$('#retryEquipmentBtn').onclick=loadEquipment;}
 }
 

@@ -538,3 +538,51 @@ body.focus-mode .focus-bar{display:flex}.focus-bar-label{max-width:220px;white-s
 
 .item-avatar-locked{display:inline-block;margin:.35rem 0;padding:.28rem .5rem;border:1px dashed rgba(201,177,105,.45);border-radius:8px;color:#9c8d78;font-size:.72rem;background:rgba(255,255,255,.28)}
 .feature-unlocked{display:inline-flex;align-items:center;gap:.35rem;margin-top:.45rem;padding:.3rem .55rem;border-radius:999px;border:1px solid rgba(113,180,153,.45);background:rgba(113,180,153,.10);color:#2f6656;font-size:.75rem;font-weight:700}
+
+/* v3.6.51 · Dark night readability + global item avatar forge */
+body.dark{
+  --bg:#0b1211;
+  --paper:#121d1a;
+  --surface:#172521;
+  --text:#f2eee1;
+  --muted:#c0c9c1;
+  --line:#43574f;
+  --jade:#a9dfcb;
+  --jade2:#72aa97;
+  --gold:#e0bc70;
+  --red:#e27b70;
+  --shadow:0 24px 70px rgba(0,0,0,.58);
+  background:radial-gradient(circle at 50% -10%,rgba(111,151,135,.15),transparent 38%),var(--bg);
+}
+body.dark .topbar{background:rgba(10,19,17,.94);border-color:#3d5149;box-shadow:0 8px 28px rgba(0,0,0,.32)}
+body.dark .topbar nav.open{background:#101b18;border-color:#43574f}
+body.dark .topbar nav.open a{background:#172521;border-color:#43574f;color:#f2eee1}
+body.dark .hero{background-image:linear-gradient(90deg,rgba(6,15,13,.96) 0%,rgba(10,23,20,.86) 48%,rgba(10,23,20,.56) 100%),url('tien-hiep-bg.jpg')}
+body.dark .hero:before{background:linear-gradient(180deg,rgba(0,0,0,.14),transparent 38%,rgba(0,0,0,.28))}
+body.dark .hero-content{background:rgba(9,22,19,.84);border-color:rgba(224,188,112,.48);box-shadow:0 22px 70px rgba(0,0,0,.35)}
+body.dark .hero-sub,body.dark .hero-card p,body.dark .section-lead{color:#d0d7cf}
+body.dark .hero-card{background:linear-gradient(145deg,rgba(17,33,28,.96),rgba(21,42,36,.9));border-color:#d4af62}
+body.dark .hero-card:before{border-color:rgba(224,188,112,.42)}
+body.dark .section.alt{background:rgba(17,29,26,.82)}
+body.dark .member-card,body.dark .equipment-item,body.dark .codex-card,body.dark .treasure-card,body.dark .challenge-card,body.dark .friend-card,body.dark .global-avatar-card{background:#172521;border-color:#40554d;color:#f2eee1}
+body.dark .member-card p,body.dark .equipment-item p,body.dark .codex-card p,body.dark .treasure-card p,body.dark .friend-card small{color:#c5cec6}
+body.dark .search,body.dark .field input,body.dark select,body.dark textarea{background:#0f1a17;color:#f2eee1;border-color:#496057}
+body.dark .tag{background:#0f1a17;color:#d5ddd5;border-color:#455a51}
+body.dark .small{background:#172521;color:#f2eee1;border-color:#53685f}
+body.dark .ghost{color:#e9e4d7}
+body.dark .primary{background:#6eaa96;color:#07110f;border-color:#8bc9b2}
+body.dark .btn:hover{filter:brightness(1.08)}
+body.dark dialog{background:#121d1a;color:#f2eee1;border-color:#d0aa5d}
+body.dark dialog::backdrop{background:rgba(0,0,0,.78)}
+body.dark .tutorial-card{background:#121d1a;color:#f2eee1}
+body.dark .fact,body.dark .inventory-item,body.dark .equipment-slot{background:#101b18;border-color:#40554d}
+body.dark .live-pill{background:#162923;color:#b8e4d2;border-color:#4c7163}
+body.dark .item-avatar-upload{background:#1a3029;color:#dff3e9;border-color:#58786b}
+body.dark .item-avatar-locked{color:#b9c4bc}
+
+.global-item-avatar-manager{margin-top:26px;padding:22px;border:1px solid var(--gold);background:linear-gradient(145deg,color-mix(in srgb,var(--surface) 94%,transparent),color-mix(in srgb,var(--gold) 6%,var(--surface)));box-shadow:var(--shadow)}
+.global-avatar-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.global-avatar-head h3{font:700 1.35rem 'Noto Serif SC';color:var(--jade);margin-top:4px}.global-avatar-head p{color:var(--muted);font-size:.8rem;margin-top:5px}.global-avatar-count{white-space:nowrap;color:var(--gold);font-weight:900;font-size:.75rem}
+.global-avatar-tabs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}.global-avatar-tabs .search{margin-left:auto;min-width:190px}.global-avatar-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;max-height:620px;overflow:auto;padding-right:4px;overscroll-behavior:contain}
+.global-avatar-card{padding:12px;border:1px solid var(--line);background:var(--surface);display:grid;grid-template-columns:54px 1fr;gap:10px;align-items:center}.global-avatar-thumb{width:54px;height:54px;display:grid;place-items:center;border-radius:10px;overflow:hidden;background:linear-gradient(145deg,#dce8df,#efe6d0);font-size:2rem}.global-avatar-info{min-width:0}.global-avatar-info b{display:block;font:700 .9rem 'Noto Serif SC';white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.global-avatar-info small{display:block;color:var(--muted);font-size:.67rem;margin-top:2px}.global-avatar-card .item-avatar-upload{grid-column:1/-1;width:100%;justify-content:center}
+@media(max-width:900px){.global-avatar-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.global-item-avatar-manager{padding:16px}.global-avatar-head{flex-direction:column}.global-avatar-tabs{display:grid;grid-template-columns:1fr 1fr}.global-avatar-tabs .search{grid-column:1/-1;width:100%;min-width:0;margin:0}.global-avatar-grid{grid-template-columns:1fr;max-height:58vh}.global-avatar-card{grid-template-columns:58px 1fr}.global-avatar-thumb{width:58px;height:58px}}

@@ -126,6 +126,7 @@ async function ensureRuntimeSchema() {
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     -- v3.6.23: migrate old PostgreSQL schemas used before Tàng Thư Các / Động Phủ.
     -- CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_name TEXT NOT NULL DEFAULT 'Luyện Khí';
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Hạ Phẩm';
@@ -178,6 +179,7 @@ async function ensureRuntimeSchema() {
     -- without the columns used when a member enters/receives Bí Cảnh loot.
     ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS id BIGSERIAL;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Vật phẩm';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS price INTEGER NOT NULL DEFAULT 0;
@@ -188,6 +190,7 @@ async function ensureRuntimeSchema() {
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS support TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
@@ -1769,7 +1772,7 @@ app.get('/api/codex',auth,async(req,res)=>{
     if(!p)return res.status(404).json({error:'Không tìm thấy hồ sơ.'});
     const st=stageFor(Number(p.spirit_power)||0);
     const rows=(await query(`SELECT ct.id,ct.name,ct.realm_index,ct.realm_name,ct.grade,ct.description,ct.price_stones,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.ability,
-      (SELECT ut.avatar FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id LIMIT 1) AS avatar,
+      COALESCE((SELECT ut.avatar FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id LIMIT 1),ct.avatar) AS avatar,
       EXISTS(SELECT 1 FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id) AS learned
       FROM cultivation_techniques ct
       WHERE ct.realm_index <= $2
@@ -1993,7 +1996,7 @@ app.get('/api/treasury',auth,async(req,res)=>{
     await ensureProfile(req.session.user_id);
     const p=(await query(`SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
     const stage=stageFor(Number(p?.spirit_power)||0);
-    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.power_bonus,ti.ability,
+    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.power_bonus,ti.ability,ti.avatar,
       COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti
       LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
@@ -2423,7 +2426,7 @@ app.get('/api/beast-house',auth,async(req,res)=>{
     const cycle=Math.floor(Date.now()/300000);
     const nextRefreshMs=300000-(Date.now()%300000);
     const [catalog,profile]=await Promise.all([
-      query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill,power_bonus,ability
+      query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill,power_bonus,ability,avatar
         FROM spirit_beasts_catalog ORDER BY md5(id::text || $1::text) LIMIT 16`,[String(cycle)]),
       query('SELECT spirit_stones,spirit_power,rank,realm_tier,spirit_beast,spirit_beast_rarity,beast_realm,beast_realm_tier,equipped_beast_id FROM profiles WHERE user_id=$1',[uid])
     ]);
@@ -2566,24 +2569,39 @@ app.get('/api/equipment',auth,async(req,res)=>{
         COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0) +
         COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
         FROM profiles p WHERE p.user_id=$1`,[userId]),
-      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,o.avatar
+      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,COALESCE(o.avatar,c.avatar) AS avatar
         FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.power_bonus DESC,c.id`,[userId]),
       query(`SELECT o.id,o.root_id,o.quantity,c.name,c.rarity,c.description,c.support,c.power_bonus,c.ability,c.min_realm
         FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.power_bonus DESC,c.id`,[userId]),
-      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability,i.avatar
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability,COALESCE(i.avatar,ti.avatar) AS avatar
         FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
         WHERE i.user_id=$1 AND i.quantity>0
           AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
         ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
-      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,ut.avatar,(p.equipped_technique_id=ct.id) AS equipped
+      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,COALESCE(ut.avatar,ct.avatar) AS avatar,(p.equipped_technique_id=ct.id) AS equipped
         FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id
         WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[userId])
     ]);
     res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipped_technique_id:null,equipment_power:0},beasts:b.rows,roots:r.rows,artifacts:a.rows,techniques:techniques.rows});
   }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
+app.get('/api/equipment/avatar-catalog',auth,async(req,res)=>{
+  try{
+    await ensureEquipmentSchema();
+    const gate=(await query(`SELECT u.username,COALESCE(p.item_avatar_unlocked,FALSE) AS unlocked FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[req.session.user_id])).rows[0];
+    const allowed=Boolean(gate?.unlocked) || String(gate?.username||'').toLowerCase()==='thienha_666';
+    if(!allowed)return res.status(403).json({error:'Chức năng này chỉ dành cho tài khoản được mở khóa.'});
+    const [beasts,artifacts,techniques]=await Promise.all([
+      query(`SELECT id,name,rarity,beast_realm,beast_realm_tier,avatar FROM spirit_beasts_catalog ORDER BY min_realm,beast_realm_tier,id`),
+      query(`SELECT id,name,category,avatar FROM treasure_items WHERE LOWER(TRIM(category)) IN ('pháp bảo','pháp khí') ORDER BY min_realm,price,id`),
+      query(`SELECT id,name,realm_name,grade,avatar FROM cultivation_techniques ORDER BY realm_index,CASE grade WHEN 'Hạ Phẩm' THEN 1 WHEN 'Trung Phẩm' THEN 2 WHEN 'Thượng Phẩm' THEN 3 ELSE 9 END,id`)
+    ]);
+    res.json({ok:true,username:gate?.username,beasts:beasts.rows,artifacts:artifacts.rows,techniques:techniques.rows});
+  }catch(e){console.error('avatar catalog:',e);res.status(500).json({error:'Không thể mở kho ảnh đại diện vật phẩm.'});}
+});
+
 app.patch('/api/equipment/avatar',auth,async(req,res)=>{
   try{
     await ensureEquipmentSchema();
@@ -2599,12 +2617,12 @@ app.patch('/api/equipment/avatar',auth,async(req,res)=>{
       if(avatar.length>900000)return res.status(400).json({error:'Ảnh quá lớn. Hãy chọn ảnh nhẹ hơn.'});
       if(!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(avatar))return res.status(400).json({error:'Ảnh đại diện không hợp lệ.'});
     }
-    const uid=req.session.user_id;
     let r;
-    if(type==='beast') r=await query('UPDATE owned_spirit_beasts SET avatar=$3 WHERE user_id=$1 AND beast_id=$2 AND quantity>0 RETURNING avatar',[uid,id,avatar]);
-    else if(type==='artifact') r=await query(`UPDATE inventory i SET avatar=$3 FROM treasure_items ti WHERE i.user_id=$1 AND i.item_id=$2 AND i.item_id=ti.id AND i.quantity>0 AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí') RETURNING i.avatar`,[uid,id,avatar]);
-    else r=await query('UPDATE user_techniques SET avatar=$3 WHERE user_id=$1 AND technique_id=$2 RETURNING avatar',[uid,id,avatar]);
-    if(!r.rowCount)return res.status(404).json({error:'Không tìm thấy vật phẩm/công pháp thuộc về bạn.'});
+    // thienha_666 can customize any catalog entry that exists in the web.
+    if(type==='beast') r=await query('UPDATE spirit_beasts_catalog SET avatar=$2 WHERE id=$1 RETURNING avatar,name',[id,avatar]);
+    else if(type==='artifact') r=await query(`UPDATE treasure_items SET avatar=$2 WHERE id=$1 AND LOWER(TRIM(category)) IN ('pháp bảo','pháp khí') RETURNING avatar,name`,[id,avatar]);
+    else r=await query('UPDATE cultivation_techniques SET avatar=$2 WHERE id=$1 RETURNING avatar,name',[id,avatar]);
+    if(!r.rowCount)return res.status(404).json({error:'Không tìm thấy vật phẩm/công pháp trong danh mục của Hàn Thiên Môn.'});
     res.json({ok:true,avatar:r.rows[0].avatar,message:'Đã đổi ảnh đại diện.'});
   }catch(e){console.error('equipment avatar:',e);res.status(500).json({error:'Không thể đổi ảnh đại diện.'});}
 });

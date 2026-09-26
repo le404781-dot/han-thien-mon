@@ -1,0 +1,7 @@
+HÀN THIÊN MÔN v3.6.51
+- Tinh chỉnh giao diện đêm: nền xanh đen sâu hơn, chữ sáng rõ hơn, nút/ô nhập/liên kết tăng tương phản và giữ phong cách tiên hiệp cổ phong.
+- Tham chiếu nguyên tắc khả năng đọc: nội dung chữ, nút và thành phần giao diện phải có tương phản đủ rõ với nền.
+- thienha_666 được mở Kho Ảnh Đại Diện Toàn Sơn Môn.
+- Có thể chọn ảnh từ album cho BẤT KỲ Linh Thú, Công Pháp, Pháp Khí/Pháp Bảo nào tồn tại trong danh mục web, không cần sở hữu/học trước.
+- Ảnh danh mục được lưu trực tiếp trên catalog và trở thành ảnh mặc định khi hiển thị trong Thú Đường, Tàng Thư Các, Tàng Bảo Các và Trang Bị.
+- Có tìm kiếm, lọc theo 3 nhóm và danh sách cuộn riêng, tối ưu iPhone.
