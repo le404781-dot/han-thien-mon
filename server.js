@@ -1124,6 +1124,9 @@ async function initDb() {
 
   // Chạy migration trước seed để DB cũ có đủ cột cho Tàng Thư Các/Động Phủ.
   await ensureRuntimeSchema();
+  // Chuẩn bị Dược Đường/Dưỡng Thú một lần khi server khởi động.
+  // Không chạy CREATE/ALTER TABLE ở mỗi lần mở trang.
+  await ensureDuocDuongSchema();
   await seedDuocDuong();
   await ensureTienPhapSchema();
   await seedTienPhap();
@@ -2586,17 +2589,28 @@ async function ensureDuocDuongSchema(){
       equipped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(user_id,beast_id,slot)
     );
+    CREATE INDEX IF NOT EXISTS idx_owned_spirit_beasts_user_active ON owned_spirit_beasts(user_id) WHERE quantity > 0;
+    CREATE INDEX IF NOT EXISTS idx_spirit_beast_care_user ON spirit_beast_care(user_id,beast_id);
+    CREATE INDEX IF NOT EXISTS idx_spirit_beast_equipment_user_beast ON spirit_beast_equipment(user_id,beast_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_user_item ON inventory(user_id,item_id);
   `);
 }
 
 app.get('/api/duoc-duong',auth,async(req,res)=>{
   try{
-    await ensureDuocDuongSchema();
-    const p=(await query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
-    const items=(await query(`SELECT id,name,category,description,price,spirit_gain,min_realm,beast_food_gain,beast_joy_gain,beast_gear_slot,beast_gear_power,beast_gear_min_realm,is_khoi_loi FROM treasure_items WHERE category LIKE 'Dược Đường%' ORDER BY min_realm,price,id`)).rows;
-    const stage=stageFor(Number(p?.spirit_power)||0);
+    // Schema đã được chuẩn bị một lần trong initDb; không chạy DDL mỗi lần người dùng mở trang.
+    const uid=req.session.user_id;
+    const [pr,ir]=await Promise.all([
+      query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[uid]),
+      query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.beast_food_gain,ti.beast_joy_gain,ti.beast_gear_slot,ti.beast_gear_power,ti.beast_gear_min_realm,ti.is_khoi_loi,COALESCE(i.quantity,0)::int AS quantity
+        FROM treasure_items ti LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ti.id
+        WHERE ti.category LIKE 'Dược Đường%' ORDER BY ti.min_realm,ti.price,ti.id`,[uid])
+    ]);
+    const p=pr.rows[0]||{},items=ir.rows;
+    const stage=stageFor(Number(p.spirit_power)||0);
     const npcLines=['“Tiểu hữu, dược lực một phần, căn cơ một phần. Chớ tham đan mà quên luyện hóa.”','“Linh thú có tình, cũng có tâm. Cho chúng ăn đúng dược, vui thì linh lực tự sinh.”','“Trang bị cho linh thú phải thuận theo huyết mạch và cảnh giới, cưỡng ép chỉ tổ phản phệ.”','“Khôi Lỗi tuy vô tình, nhưng có thể làm linh thú vui lòng. Niềm vui cũng là một loại linh lực.”'];
-    res.json({items,profile:p||{},stage,npc:{name:'Dược Đồng · Mặc Ly',title:'Chấp sự Dược Đường',dialogue:npcLines[Math.floor(Date.now()/120000)%npcLines.length]}});
+    res.set('Cache-Control','private, max-age=8');
+    res.json({items,profile:p,stage,npc:{name:'Dược Đồng · Mặc Ly',title:'Chấp sự Dược Đường',dialogue:npcLines[Math.floor(Date.now()/120000)%npcLines.length]}});
   }catch(e){console.error('duoc duong:',e);res.status(500).json({error:'Không thể mở Dược Đường.'});}
 });
 app.post('/api/duoc-duong/buy',auth,async(req,res)=>{
@@ -2616,11 +2630,57 @@ app.post('/api/duoc-duong/buy',auth,async(req,res)=>{
 
 app.get('/api/duong-thu',auth,async(req,res)=>{
   const client=await pool.connect();
-  try{await ensureDuocDuongSchema(); await client.query('BEGIN');const uid=req.session.user_id;
-    const owned=(await client.query(`SELECT o.beast_id FROM owned_spirit_beasts o WHERE o.user_id=$1 AND o.quantity>0`,[uid])).rows;for(const b of owned)await settleBeastCare(client,uid,Number(b.beast_id));
-    const rows=(await client.query(`SELECT o.beast_id,o.quantity,o.unbound_quantity,o.acquisition_type,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.min_realm,bc.happiness,bc.anger,bc.love,bc.dislike,bc.joy,bc.pet_spirit,COALESCE((SELECT json_agg(json_build_object('slot',sbe.slot,'itemId',sbe.item_id,'name',ti.name,'power',ti.beast_gear_power)) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=o.user_id AND sbe.beast_id=o.beast_id),'[]'::json) AS gear FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id JOIN spirit_beast_care bc ON bc.user_id=o.user_id AND bc.beast_id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.id`,[uid])).rows;
-    const p=(await client.query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[uid])).rows[0];const stage=stageFor(Number(p?.spirit_power)||0);await client.query('COMMIT');res.json({profile:p||{},stage,bondChance:bondChanceFor(Number(p?.spirit_power)||0),beasts:rows.map(x=>({...x,gear:Array.isArray(x.gear)?x.gear:[]}))});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('duong thu load:',e);res.status(500).json({error:'Không thể mở Dưỡng Thú.'});}finally{client.release();}
+  try{
+    const uid=req.session.user_id;
+    // Một lần INSERT cho toàn bộ linh thú đang sở hữu, thay cho vòng lặp N lần.
+    await client.query(`INSERT INTO spirit_beast_care(user_id,beast_id)
+      SELECT o.user_id,o.beast_id FROM owned_spirit_beasts o
+      WHERE o.user_id=$1 AND o.quantity>0
+      ON CONFLICT(user_id,beast_id) DO NOTHING`,[uid]);
+    // Cập nhật linh lực/cảm xúc của tất cả linh thú trong một câu SQL.
+    await client.query(`WITH tick AS (
+      SELECT user_id,beast_id,
+        GREATEST(0,FLOOR(EXTRACT(EPOCH FROM (NOW()-last_tick_at))/60))::int AS minutes,
+        happiness,anger,love,dislike,joy,pet_spirit
+      FROM spirit_beast_care WHERE user_id=$1
+    ), calc AS (
+      SELECT *, ROUND(minutes * ((happiness+love-anger-dislike)::numeric/2) / 100)::int AS spirit_gain
+      FROM tick WHERE minutes>=1
+    )
+    UPDATE spirit_beast_care s SET
+      happiness=CASE WHEN c.happiness<50 THEN LEAST(50,c.happiness+FLOOR(c.minutes/30)::int) WHEN c.happiness>50 THEN GREATEST(50,c.happiness-FLOOR(c.minutes/30)::int) ELSE 50 END,
+      anger=CASE WHEN c.anger<50 THEN LEAST(50,c.anger+FLOOR(c.minutes/30)::int) WHEN c.anger>50 THEN GREATEST(50,c.anger-FLOOR(c.minutes/30)::int) ELSE 50 END,
+      love=CASE WHEN c.love<50 THEN LEAST(50,c.love+FLOOR(c.minutes/30)::int) WHEN c.love>50 THEN GREATEST(50,c.love-FLOOR(c.minutes/30)::int) ELSE 50 END,
+      dislike=CASE WHEN c.dislike<50 THEN LEAST(50,c.dislike+FLOOR(c.minutes/30)::int) WHEN c.dislike>50 THEN GREATEST(50,c.dislike-FLOOR(c.minutes/30)::int) ELSE 50 END,
+      joy=GREATEST(0,c.joy-FLOOR(c.minutes/45)::int),
+      pet_spirit=GREATEST(0,c.pet_spirit+c.spirit_gain),
+      last_tick_at=NOW(),updated_at=NOW()
+    FROM calc c WHERE s.user_id=c.user_id AND s.beast_id=c.beast_id`,[uid]);
+
+    const [rowsR,pR,shopR]=await Promise.all([
+      client.query(`WITH gear AS (
+        SELECT sbe.user_id,sbe.beast_id,
+          json_agg(json_build_object('slot',sbe.slot,'itemId',sbe.item_id,'name',ti.name,'power',ti.beast_gear_power) ORDER BY sbe.slot) AS gear
+        FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id
+        WHERE sbe.user_id=$1 GROUP BY sbe.user_id,sbe.beast_id
+      )
+      SELECT o.beast_id,o.quantity,o.unbound_quantity,o.acquisition_type,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.min_realm,
+        COALESCE(bc.happiness,50) AS happiness,COALESCE(bc.anger,20) AS anger,COALESCE(bc.love,50) AS love,COALESCE(bc.dislike,20) AS dislike,COALESCE(bc.joy,50) AS joy,COALESCE(bc.pet_spirit,0) AS pet_spirit,COALESCE(g.gear,'[]'::json) AS gear
+      FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
+      LEFT JOIN spirit_beast_care bc ON bc.user_id=o.user_id AND bc.beast_id=o.beast_id
+      LEFT JOIN gear g ON g.user_id=o.user_id AND g.beast_id=o.beast_id
+      WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.id`,[uid]),
+      client.query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[uid]),
+      client.query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.beast_food_gain,ti.beast_joy_gain,ti.beast_gear_slot,ti.beast_gear_power,ti.beast_gear_min_realm,ti.is_khoi_loi,COALESCE(i.quantity,0)::int AS quantity
+        FROM treasure_items ti LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ti.id
+        WHERE ti.category IN ('Dược Đường · Linh thú thức ăn','Dược Đường · Khôi Lỗi','Dược Đường · Linh thú trang bị')
+        ORDER BY ti.min_realm,ti.price,ti.id`,[uid])
+    ]);
+    const p=pR.rows[0]||{},stage=stageFor(Number(p.spirit_power)||0);
+    res.set('Cache-Control','private, max-age=4');
+    res.json({profile:p,stage,bondChance:bondChanceFor(Number(p.spirit_power)||0),beasts:rowsR.rows.map(x=>({...x,gear:Array.isArray(x.gear)?x.gear:[]})),items:shopR.rows});
+  }catch(e){console.error('duong thu load:',e);res.status(500).json({error:'Không thể mở Dưỡng Thú.'});}
+  finally{client.release();}
 });
 
 app.post('/api/duong-thu/bond',auth,async(req,res)=>{
