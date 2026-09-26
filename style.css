@@ -631,3 +631,69 @@ body:before{
 body.dark .mailbox-area{background:linear-gradient(145deg,rgba(28,43,39,.92),rgba(31,50,44,.78))}
 body.dark .mail-item{background:rgba(24,37,34,.72)}
 body.dark .xuatquan-tools{background:rgba(26,42,38,.68)}
+
+
+/* v3.6.51 · THỦY MẶC TIÊN HIỆP 2.0 · phối màu dịu, sáng và có chiều sâu */
+:root{
+  --bg:#e8eee8;
+  --paper:#f7f3e6;
+  --surface:#fbf9f0;
+  --text:#24332f;
+  --muted:#687873;
+  --line:#c8d0c7;
+  --jade:#315f55;
+  --jade2:#71958a;
+  --gold:#b28a46;
+  --red:#a84f45;
+  --mist:#d8e5df;
+  --ink:#263b36;
+  --shadow:0 20px 55px rgba(48,66,59,.12);
+}
+body.dark{
+  --bg:#12231f;
+  --paper:#1b302b;
+  --surface:#213a34;
+  --text:#edf0e7;
+  --muted:#aebdb5;
+  --line:#3b5950;
+  --jade:#9bc5b5;
+  --jade2:#6e9b8c;
+  --gold:#d0ae67;
+  --red:#d77a6c;
+  --mist:#2d4940;
+  --ink:#e6eee9;
+  --shadow:0 24px 70px rgba(0,0,0,.34);
+}
+body{
+  background:
+    radial-gradient(ellipse at 15% 8%,rgba(170,198,188,.34),transparent 30%),
+    radial-gradient(ellipse at 88% 24%,rgba(214,196,153,.22),transparent 28%),
+    linear-gradient(180deg,var(--bg),#f1f0e7 48%,#e5ece7 100%);
+}
+body.dark{
+  background:
+    radial-gradient(ellipse at 15% 5%,rgba(92,139,121,.18),transparent 30%),
+    radial-gradient(ellipse at 90% 20%,rgba(150,118,57,.10),transparent 28%),
+    linear-gradient(180deg,#10201c,#162b25 52%,#10221e 100%);
+}
+.section.alt{background:linear-gradient(180deg,rgba(239,243,235,.78),rgba(218,229,222,.48));}
+body.dark .section.alt{background:linear-gradient(180deg,rgba(25,47,41,.72),rgba(16,34,29,.66));}
+.topbar{background:color-mix(in srgb,var(--paper) 88%,transparent);box-shadow:0 4px 20px rgba(48,66,59,.05)}
+.hero-content,.hero-card{border-color:rgba(178,138,70,.38)}
+.hero-content{background:rgba(247,243,230,.70);backdrop-filter:blur(9px)}
+body.dark .hero-content{background:rgba(19,39,34,.72)}
+.hero-card{background:linear-gradient(145deg,rgba(250,247,237,.86),rgba(205,224,215,.66));}
+body.dark .hero-card{background:linear-gradient(145deg,rgba(27,49,43,.94),rgba(32,61,52,.82));}
+.member-card,.profile-card,.cultivation-card,.power-card,.daily-stone-card,.friends-panel,.mailbox-area,.challenge-block,.challenge-rules>div,.codex-card,.dan-cac-card,.mansion-card,.quest-card,.market-card{box-shadow:0 10px 30px rgba(45,65,57,.06)}
+.cultivation-card,.power-card,.daily-stone-card{border-color:rgba(112,142,130,.34)}
+.online-cultivation-card.online-ready{border-color:rgba(178,138,70,.62);background:linear-gradient(110deg,rgba(91,137,120,.13),rgba(219,193,133,.16));box-shadow:0 12px 32px rgba(67,91,78,.08)}
+.online-cultivation-card h3{color:var(--jade)}
+.online-numbers b{color:var(--gold)}
+.btn.primary{background:linear-gradient(135deg,#315f55,#48766a);border-color:#315f55}
+.btn.primary:hover{filter:brightness(1.05)}
+.eyebrow{color:var(--red)}
+.tag,.tier-badge,.live-pill{background:rgba(255,253,244,.58)}
+body.dark .tag,body.dark .tier-badge,body.dark .live-pill{background:rgba(31,56,48,.62)}
+.mailbox-area{background:linear-gradient(145deg,rgba(249,246,235,.88),rgba(216,229,222,.65));}
+body.dark .mailbox-area{background:linear-gradient(145deg,rgba(27,48,42,.94),rgba(30,58,49,.82));}
+.mist-a{background:#f4f0df;opacity:.20}.mist-b{background:#bcd4c9;opacity:.16}

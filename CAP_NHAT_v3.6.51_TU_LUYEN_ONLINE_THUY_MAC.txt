@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.51
+
+1. Tu luyện Online mở mặc định khi không vận hành Động Phủ.
+2. Linh lực tự động tích lũy theo thời gian Xuất Quan, tốc độ theo từng cảnh giới.
+3. Không còn yêu cầu hoàn thành đủ lượt Vận Công để mở Online.
+4. Không cộng linh lực khi môn nhân đã bế quan/offline; heartbeat xác nhận trạng thái Xuất Quan.
+5. Phối lại bảng màu theo thủy mặc tiên hiệp: ngọc thanh, mực xanh, giấy ngà, kim nhạt, chu sa.
+6. Giữ nguyên Vận Công thủ công và giới hạn lượt riêng mỗi ngày.

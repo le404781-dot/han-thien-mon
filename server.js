@@ -1681,14 +1681,14 @@ app.get('/api/profile',auth,async(req,res)=>{
     const trainCount=String(activity?.activity_date||'').slice(0,10)===today ? Number(activity.train_count)||0 : 0;
     const maxDaily=Math.max(2,10-stage.realmIndex);
     const onlineRate=onlineSpiritRate(stage.realmIndex);
-    const onlineUnlocked=trainCount>=maxDaily && !Boolean(mansion?.active);
+    const onlineUnlocked=!Boolean(mansion?.active);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     const activeBattle=(await query(`SELECT id,challenger_id,opponent_id,challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action,started_at FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) ORDER BY id DESC LIMIT 1`,[p.id])).rows[0]||null;
     const healthMax=challengeHealth({...p,equipment_power:equipmentPower});
     const healthCurrent=activeBattle ? (Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_hp):Number(activeBattle.opponent_hp)) : healthMax;
 
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:600}});
+    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:999999999}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -1936,22 +1936,21 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       await client.query('BEGIN');
       const mansionState=await settleMansionIncome(client,req.session.user_id);
       if(mansionState.active){await client.query('COMMIT');return res.status(423).json({mode:'mansion',active:false,locked:true,gain:mansionState.gain,mansion:mansionState.name,message:`Động phủ ${mansionState.name} đang khởi động; tích lũy Online cũng bị khóa cho đến khi ngưng động phủ.`});}
-      const p=(await client.query(`SELECT spirit_power,last_online_at,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
+      const p=(await client.query(`SELECT spirit_power,last_online_at,last_seen_at,presence_status,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
       const st=stageFor(Number(p.spirit_power)||0);
       const maxDaily=Math.max(2,10-st.realmIndex);
       const a=(await client.query(`SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id])).rows[0];
       const trainCount= a && String(a.activity_date).slice(0,10)===today ? Number(a.train_count)||0 : 0;
       const baseOnlineRate=onlineSpiritRate(st.realmIndex);
-      if(trainCount<maxDaily){
-        await client.query('COMMIT');
-        return res.status(423).json({mode:'locked',active:false,locked:true,gain:0,onlineEarned:0,rate:baseOnlineRate,maxDaily,trainCount,message:`Online chỉ mở sau khi hoàn thành ${maxDaily}/${maxDaily} lượt vận công hôm nay.`});
-      }
+      // Online được mở mặc định. Linh lực chỉ tích lũy khi môn nhân thực sự đang Xuất Quan
+      // (heartbeat còn mới); tránh cộng thời gian khi đã đóng trình duyệt/bế quan.
+      const presenceFresh=String(p.presence_status||'')==='online' && p.last_seen_at && (Date.now()-new Date(p.last_seen_at).getTime())<90000;
       let earned=String(p.online_spirit_date||'').slice(0,10)===today ? Number(p.online_spirit_earned)||0 : 0;
       let last=p.last_online_at?new Date(p.last_online_at).getTime():Date.now();
-      if(!p.last_online_at || String(p.online_spirit_date||'').slice(0,10)!==today) last=Date.now();
-      const elapsed=Math.max(0,Date.now()-last);
+      if(!p.last_online_at || String(p.online_spirit_date||'').slice(0,10)!==today || !presenceFresh) last=Date.now();
+      const elapsed=presenceFresh?Math.max(0,Date.now()-last):0;
       const minutes=Math.floor(elapsed/60000);
-      const dailyCap=600;
+      const dailyCap=999999999;
       const techRows=(await client.query(`SELECT ct.training_bonus_percent FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1`,[req.session.user_id])).rows;
       const techniqueBonus=techniqueTrainingBonusFor(techRows);
       const rate=Math.max(1,Math.round(onlineSpiritRate(st.realmIndex)*(1+techniqueBonus/100)));
@@ -1970,7 +1969,7 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       await client.query('COMMIT');
       const ns=stageFor(spirit);
       const stoneReward=breakthroughRewards.reduce((sum,x)=>sum+Number(x.amount||0),0);
-      res.json({mode:'online',active:true,gain,onlineEarned:earned,dailyCap,rate,ratePerHour:rate*60,realm:ns.realm,realmIndex:ns.realmIndex,stage:ns.stage,nextTickSeconds:60,breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
+      res.json({mode:'online',active:presenceFresh,gain,onlineEarned:earned,dailyCap,rate,ratePerHour:rate*60,realm:ns.realm,realmIndex:ns.realmIndex,stage:ns.stage,nextTickSeconds:60,onlineLabel:presenceFresh?'Đang xuất quan · tự động tụ linh':'Đang bế quan · chờ xuất quan',breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
   }catch(e){console.error('online cultivation:',e);res.status(500).json({error:'Không thể cập nhật linh lực trực tuyến.'});}
 });
