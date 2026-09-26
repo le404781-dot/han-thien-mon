@@ -2506,11 +2506,7 @@ app.get('/api/duoc-duong',auth,async(req,res)=>{
   try{
     await ensureRuntimeSchema();
     const p=(await query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
-    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.beast_food_gain,ti.beast_joy_gain,ti.beast_gear_slot,ti.beast_gear_power,ti.beast_gear_min_realm,ti.is_khoi_loi,COALESCE(i.quantity,0)::int AS quantity
-      FROM treasure_items ti
-      LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
-      WHERE ti.category LIKE 'Dược Đường%'
-      ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
+    const items=(await query(`SELECT id,name,category,description,price,spirit_gain,min_realm,beast_food_gain,beast_joy_gain,beast_gear_slot,beast_gear_power,beast_gear_min_realm,is_khoi_loi FROM treasure_items WHERE category LIKE 'Dược Đường%' ORDER BY min_realm,price,id`)).rows;
     const stage=stageFor(Number(p?.spirit_power)||0);
     const npcLines=['“Tiểu hữu, dược lực một phần, căn cơ một phần. Chớ tham đan mà quên luyện hóa.”','“Linh thú có tình, cũng có tâm. Cho chúng ăn đúng dược, vui thì linh lực tự sinh.”','“Trang bị cho linh thú phải thuận theo huyết mạch và cảnh giới, cưỡng ép chỉ tổ phản phệ.”','“Khôi Lỗi tuy vô tình, nhưng có thể làm linh thú vui lòng. Niềm vui cũng là một loại linh lực.”'];
     res.json({items,profile:p||{},stage,npc:{name:'Dược Đồng · Mặc Ly',title:'Chấp sự Dược Đường',dialogue:npcLines[Math.floor(Date.now()/120000)%npcLines.length]}});
