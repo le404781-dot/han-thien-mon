@@ -535,3 +535,6 @@ body.focus-mode .focus-bar{display:flex}.focus-bar-label{max-width:220px;white-s
   .stats{margin-top:28px;padding-top:18px;gap:8px;display:grid;grid-template-columns:repeat(3,1fr)}
   .stats div{min-width:0}.stats b{font-size:1.55rem}.stats span{font-size:.61rem;letter-spacing:.04em}
 }
+
+.item-avatar-locked{display:inline-block;margin:.35rem 0;padding:.28rem .5rem;border:1px dashed rgba(201,177,105,.45);border-radius:8px;color:#9c8d78;font-size:.72rem;background:rgba(255,255,255,.28)}
+.feature-unlocked{display:inline-flex;align-items:center;gap:.35rem;margin-top:.45rem;padding:.3rem .55rem;border-radius:999px;border:1px solid rgba(113,180,153,.45);background:rgba(113,180,153,.10);color:#2f6656;font-size:.75rem;font-weight:700}

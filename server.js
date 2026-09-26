@@ -61,6 +61,14 @@ async function ensureRuntimeSchema() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS item_avatar_unlocked BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+  // Unlock the item-avatar customization feature for the designated account.
+  // This is idempotent and also repairs existing Render databases automatically.
+  await query(`
+    UPDATE profiles p SET item_avatar_unlocked=TRUE, updated_at=NOW()
+    FROM users u
+    WHERE u.id=p.user_id AND LOWER(u.username)=LOWER('thienha_666')
   `);
   await query(`
     CREATE TABLE IF NOT EXISTS daily_activity (
@@ -1651,6 +1659,8 @@ app.get('/api/profile',auth,async(req,res)=>{
       COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count
       FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[req.session.user_id]);
     const p=r.rows[0];
+    // The feature flag is account-scoped; thienha_666 is force-unlocked by migration above.
+    p.item_avatar_unlocked=Boolean(p.item_avatar_unlocked) || String(p.username||'').toLowerCase()==='thienha_666';
     await ensureAchievements(p.id,p.spirit_power);
     const stage=stageFor(p.spirit_power);
     const eq=(await query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,
@@ -2577,6 +2587,9 @@ app.get('/api/equipment',auth,async(req,res)=>{
 app.patch('/api/equipment/avatar',auth,async(req,res)=>{
   try{
     await ensureEquipmentSchema();
+    const gate=(await query(`SELECT u.username,COALESCE(p.item_avatar_unlocked,FALSE) AS unlocked FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[req.session.user_id])).rows[0];
+    const allowed=Boolean(gate?.unlocked) || String(gate?.username||'').toLowerCase()==='thienha_666';
+    if(!allowed)return res.status(403).json({error:'Chức năng đổi ảnh đại diện Linh Thú, Công Pháp và Pháp Khí chưa được mở cho tài khoản này.'});
     const type=String(req.body?.type||'');
     const id=Number(req.body?.id);
     let avatar=req.body?.avatar===undefined?null:String(req.body.avatar||'').trim();

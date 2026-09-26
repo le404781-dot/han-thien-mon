@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.50 — MỞ KHÓA ẢNH ĐẠI DIỆN VẬT PHẨM
+
+- Mở chức năng đổi ảnh đại diện từ album cho Linh Thú, Công Pháp đã học và Pháp Khí/Pháp Bảo.
+- Chức năng được kiểm soát theo tài khoản bằng cờ item_avatar_unlocked.
+- Tài khoản thienha_666 được tự động mở khóa khi ứng dụng khởi động, kể cả trên database Render cũ.
+- API từ chối tài khoản chưa được mở khóa để tránh tự ý sử dụng chức năng.
+- Giao diện hiển thị nút 🖼 Đổi ảnh khi đã mở; tài khoản khác thấy trạng thái khóa.
+- Ảnh được nén phía trình duyệt trước khi gửi và vẫn dùng endpoint /api/equipment/avatar hiện có.
