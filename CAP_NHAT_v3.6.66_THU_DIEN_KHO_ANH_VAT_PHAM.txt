@@ -1,0 +1,20 @@
+HÀN THIÊN MÔN v3.6.66
+
+1. THÚ DIỆN 🖲️
+- Vùng nội dung Thú Diện có khung cuộn riêng, chống cuộn dây chuyền sang toàn trang khi đang lướt trong khu vực.
+- Phân trang tối đa 10 trang; số trang tự tính theo lượng nội dung. Mỗi trang tối thiểu 24 mục và khi dữ liệu lớn sẽ tự dàn đều để không mất mục sau trang 10.
+- Ba nhóm quản lý ảnh mặc định: Linh Thú/Tiên Thú, Công Pháp, Pháp Khí/Pháp Bảo.
+- Tìm kiếm, lọc chỉ nội dung đang sở hữu, tìm ảnh trên web, tải ảnh từ thiết bị, dán URL.
+- Đặt ảnh làm mặc định ở cấp catalog; các override ảnh cá nhân của các bản thể/công pháp/pháp khí tương ứng được xóa để đồng bộ ảnh mặc định mới.
+- Ảnh mặc định Công Pháp và Pháp Khí được dùng làm fallback khi bản sở hữu chưa có ảnh riêng.
+- Cửu Vĩ Thiên Hồ tiếp tục giữ hiệu ứng viền hoàng kim + hào quang tím.
+- Đệ Tử Bảng/Hồ Sơ dùng ảnh Linh Thú mặc định mới hoặc ảnh cá nhân nếu còn override.
+
+2. TÀNG BẢO CÁC / TU DI GIỚI
+- Tàng Bảo Các mua vật phẩm từ 1–99 mỗi lần; backend giới hạn an toàn 1–99.
+- Tu Di Giới hấp thụ đan dược từ 1–99 mỗi lần; tổng linh lực nhận được = linh lực/vật phẩm × số lượng.
+- Không cho dùng vượt quá số lượng đang sở hữu.
+
+3. TƯƠNG THÍCH
+- Không xóa dữ liệu cũ.
+- Tự bổ sung các cột avatar_url cần thiết cho PostgreSQL cũ bằng IF NOT EXISTS.

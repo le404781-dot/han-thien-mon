@@ -148,6 +148,7 @@ async function ensureRuntimeSchema() {
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_power INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_min_realm INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS is_khoi_loi BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar_url TEXT;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS avatar_url TEXT;
@@ -164,6 +165,7 @@ async function ensureRuntimeSchema() {
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS training_bonus_percent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS required_comprehension INTEGER NOT NULL DEFAULT 10;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS avatar_url TEXT;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS avatar TEXT;
@@ -1715,9 +1717,9 @@ app.get('/api/data',async(req,res)=>{
       FROM legends l JOIN users u ON u.id=l.user_id JOIN profiles p ON p.user_id=u.id ORDER BY l.updated_at DESC,l.id DESC LIMIT 200`)).rows.map(x=>({...x,charLimit:legendCharLimit(x.realm_index)}));
     const [accounts] = await Promise.all([
       query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier,p.presence_status,p.last_seen_at,
-             b.name AS equipped_beast_name,b.avatar_url AS equipped_beast_avatar,b.beast_realm AS equipped_beast_realm,b.beast_realm_tier AS equipped_beast_realm_tier,
+             b.name AS equipped_beast_name,COALESCE(ob.avatar,b.avatar_url) AS equipped_beast_avatar,b.beast_realm AS equipped_beast_realm,b.beast_realm_tier AS equipped_beast_realm_tier,
              COALESCE((SELECT SUM(ti.beast_gear_power) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=u.id AND sbe.beast_id=p.equipped_beast_id),0)::int AS equipped_beast_gear_power
-             FROM users u JOIN profiles p ON p.user_id=u.id LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id ORDER BY u.id`)
+             FROM users u JOIN profiles p ON p.user_id=u.id LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id LEFT JOIN owned_spirit_beasts ob ON ob.user_id=u.id AND ob.beast_id=p.equipped_beast_id ORDER BY u.id`)
     ]);
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
@@ -1828,7 +1830,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const eq=(await query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,
       b.name AS beast_name,b.power_bonus AS beast_power,b.ability AS beast_ability,COALESCE(ob.avatar,b.avatar_url) AS beast_avatar,
       r.name AS root_name,r.power_bonus AS root_power,r.ability AS root_ability,
-      a.name AS artifact_name,a.power_bonus AS artifact_power,a.ability AS artifact_ability,ia.avatar AS artifact_avatar
+      a.name AS artifact_name,a.power_bonus AS artifact_power,a.ability AS artifact_ability,COALESCE(ia.avatar,a.avatar_url) AS artifact_avatar
       FROM profiles p
       LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id
       LEFT JOIN owned_spirit_beasts ob ON ob.user_id=p.user_id AND ob.beast_id=p.equipped_beast_id
@@ -1836,7 +1838,7 @@ app.get('/api/profile',auth,async(req,res)=>{
       LEFT JOIN treasure_items a ON a.id=p.equipped_artifact_id
       LEFT JOIN inventory ia ON ia.user_id=p.user_id AND ia.item_id=p.equipped_artifact_id
       WHERE p.user_id=$1`,[p.id])).rows[0]||{};
-    const techniqueRows=(await query(`SELECT ct.id,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.name,ct.grade,ct.ability,ut.avatar, (p.equipped_technique_id=ct.id) AS equipped
+    const techniqueRows=(await query(`SELECT ct.id,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.name,ct.grade,ct.ability,COALESCE(ut.avatar,ct.avatar_url) AS avatar, (p.equipped_technique_id=ct.id) AS equipped
       FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[p.id])).rows;
     const mansion=(await query(`SELECT um.active,m.id,m.name,m.grade,m.spirit_per_hour,um.last_tick_at FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1`,[p.id])).rows[0]||null;
     const baseAttr=attributesFor(p.spirit_power,p.comprehension);
@@ -2801,6 +2803,7 @@ async function ensureEquipmentSchema(){
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar_url TEXT;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
@@ -2813,6 +2816,7 @@ async function ensureEquipmentSchema(){
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS avatar_url TEXT;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
@@ -2830,6 +2834,7 @@ async function ensureEquipmentSchema(){
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS required_comprehension INTEGER NOT NULL DEFAULT 10;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS avatar_url TEXT;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS avatar TEXT;
@@ -2879,18 +2884,18 @@ app.get('/api/equipment',auth,async(req,res)=>{
         COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0) +
         COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
         FROM profiles p WHERE p.user_id=$1`,[userId]),
-      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,o.avatar
+      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,COALESCE(o.avatar,c.avatar_url) AS avatar
         FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.power_bonus DESC,c.id`,[userId]),
       query(`SELECT o.id,o.root_id,o.quantity,c.name,c.rarity,c.description,c.support,c.power_bonus,c.ability,c.min_realm
         FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.power_bonus DESC,c.id`,[userId]),
-      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability,i.avatar
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability,COALESCE(i.avatar,ti.avatar_url) AS avatar
         FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
         WHERE i.user_id=$1 AND i.quantity>0
           AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
         ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
-      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,ut.avatar,(p.equipped_technique_id=ct.id) AS equipped
+      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,COALESCE(ut.avatar,ct.avatar_url) AS avatar,(p.equipped_technique_id=ct.id) AS equipped
         FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id
         WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[userId])
     ]);
@@ -4319,49 +4324,64 @@ app.post('/api/friends/:userId/messages',auth,async(req,res)=>{
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// THÚ DIỆN 🖲️ · Quản lý ảnh đại diện mặc định cho Linh Thú / Tiên Thú
-app.get('/api/beast-face/catalog',auth,async(req,res)=>{
+// THÚ DIỆN 🖲️ · Quản lý ảnh mặc định cho Linh Thú / Tiên Thú / Công Pháp / Pháp Khí
+app.get('/api/thudien/catalog',auth,async(req,res)=>{
   try{
     await ensureRuntimeSchema();
+    const uid=req.session.user_id;
+    const type=['beast','technique','artifact'].includes(String(req.query?.type||''))?String(req.query.type):'beast';
     const q=String(req.query?.q||'').trim().slice(0,80);
-    const rarity=String(req.query?.rarity||'').trim().slice(0,40);
     const ownedOnly=String(req.query?.ownedOnly||'')==='1';
-    const params=[req.session.user_id];
-    const where=[`1=1`];
-    if(q){params.push(`%${q}%`);where.push(`(c.name ILIKE $${params.length} OR c.description ILIKE $${params.length} OR c.rarity ILIKE $${params.length})`);}
-    if(rarity){params.push(rarity);where.push(`c.rarity=$${params.length}`);}
-    if(ownedOnly) where.push(`EXISTS (SELECT 1 FROM owned_spirit_beasts oo WHERE oo.user_id=$1 AND oo.beast_id=c.id AND oo.quantity>0)`);
-    const rows=(await query(`SELECT c.id,c.name,c.rarity,c.beast_type,c.description,c.beast_realm,c.beast_realm_tier,c.avatar_url,
-      EXISTS(SELECT 1 FROM owned_spirit_beasts oo WHERE oo.user_id=$1 AND oo.beast_id=c.id AND oo.quantity>0) AS owned,
-      (SELECT COALESCE(SUM(oo.quantity),0)::int FROM owned_spirit_beasts oo WHERE oo.beast_id=c.id) AS owner_quantity
-      FROM spirit_beasts_catalog c WHERE ${where.join(' AND ')} ORDER BY c.beast_realm_tier DESC,c.rarity DESC,c.name LIMIT 100`,params)).rows;
-    res.json({rows});
-  }catch(e){console.error('beast face catalog:',e);res.status(500).json({error:'Không thể mở Thú Diện.'});}
+    const page=Math.max(1,Math.min(10,Number(req.query?.page)||1));
+    let pageSize=24;
+    const params=[uid]; let where=[]; let rows=[]; let total=0;
+    if(type==='beast'){
+      where=['1=1']; if(q){params.push(`%${q}%`);where.push(`(c.name ILIKE $${params.length} OR c.description ILIKE $${params.length} OR c.rarity ILIKE $${params.length})`)}
+      if(ownedOnly)where.push(`EXISTS(SELECT 1 FROM owned_spirit_beasts oo WHERE oo.user_id=$1 AND oo.beast_id=c.id AND oo.quantity>0)`);
+      total=Number((await query(`SELECT COUNT(*)::int c FROM spirit_beasts_catalog c WHERE ${where.join(' AND ')}`,params)).rows[0]?.c||0); pageSize=Math.max(24,Math.ceil(total/10));
+      const off=(page-1)*pageSize; const rp=params.concat([pageSize,off]);
+      rows=(await query(`SELECT c.id,c.name,c.rarity,c.beast_type,c.description,c.beast_realm,c.beast_realm_tier,c.avatar_url,
+        EXISTS(SELECT 1 FROM owned_spirit_beasts oo WHERE oo.user_id=$1 AND oo.beast_id=c.id AND oo.quantity>0) AS owned,
+        (SELECT COALESCE(SUM(oo.quantity),0)::int FROM owned_spirit_beasts oo WHERE oo.beast_id=c.id) AS owner_quantity
+        FROM spirit_beasts_catalog c WHERE ${where.join(' AND ')} ORDER BY c.beast_realm_tier DESC,c.rarity DESC,c.name LIMIT $${rp.length-1} OFFSET $${rp.length}`,rp)).rows;
+    }else if(type==='technique'){
+      where=['1=1']; if(q){params.push(`%${q}%`);where.push(`(c.name ILIKE $${params.length} OR c.description ILIKE $${params.length} OR c.grade ILIKE $${params.length})`)}
+      if(ownedOnly)where.push(`EXISTS(SELECT 1 FROM user_techniques ut0 WHERE ut0.user_id=$1 AND ut0.technique_id=c.id)`);
+      total=Number((await query(`SELECT COUNT(*)::int c FROM cultivation_techniques c WHERE ${where.join(' AND ')}`,params)).rows[0]?.c||0); pageSize=Math.max(24,Math.ceil(total/10));
+      const off=(page-1)*pageSize; const rp=params.concat([pageSize,off]);
+      rows=(await query(`SELECT c.id,c.name,c.grade,c.description,c.realm_name,c.realm_index,c.avatar_url,
+        EXISTS(SELECT 1 FROM user_techniques ut0 WHERE ut0.user_id=$1 AND ut0.technique_id=c.id) AS owned
+        FROM cultivation_techniques c WHERE ${where.join(' AND ')} ORDER BY c.realm_index,c.id LIMIT $${rp.length-1} OFFSET $${rp.length}`,rp)).rows;
+    }else{
+      where=[`LOWER(TRIM(c.category)) IN ('pháp bảo','pháp khí')`]; if(q){params.push(`%${q}%`);where.push(`(c.name ILIKE $${params.length} OR c.description ILIKE $${params.length} OR c.category ILIKE $${params.length})`)}
+      if(ownedOnly)where.push(`EXISTS(SELECT 1 FROM inventory ii WHERE ii.user_id=$1 AND ii.item_id=c.id AND ii.quantity>0)`);
+      total=Number((await query(`SELECT COUNT(*)::int c FROM treasure_items c WHERE ${where.join(' AND ')}`,params)).rows[0]?.c||0); pageSize=Math.max(24,Math.ceil(total/10));
+      const off=(page-1)*pageSize; const rp=params.concat([pageSize,off]);
+      rows=(await query(`SELECT c.id,c.name,c.category,c.description,c.min_realm,c.power_bonus,c.ability,c.avatar_url,
+        EXISTS(SELECT 1 FROM inventory ii WHERE ii.user_id=$1 AND ii.item_id=c.id AND ii.quantity>0) AS owned,
+        COALESCE((SELECT ii.quantity FROM inventory ii WHERE ii.user_id=$1 AND ii.item_id=c.id),0)::int AS owner_quantity
+        FROM treasure_items c WHERE ${where.join(' AND ')} ORDER BY c.min_realm,c.power_bonus DESC,c.id LIMIT $${rp.length-1} OFFSET $${rp.length}`,rp)).rows;
+    }
+    res.json({ok:true,type,rows,page,pageSize,total,totalPages:Math.max(1,Math.min(10,Math.ceil(total/pageSize)))});
+  }catch(e){console.error('thudien catalog:',e);res.status(500).json({error:'Không thể mở Thú Diện.'});}
 });
-app.post('/api/beast-face/default',auth,async(req,res)=>{
+
+app.post('/api/thudien/default',auth,async(req,res)=>{
   try{
     await ensureRuntimeSchema();
-    const id=Number(req.body?.beastId); const avatar=req.body?.avatar===undefined?null:String(req.body.avatar||'').trim();
-    if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Linh thú không hợp lệ.'});
+    const type=String(req.body?.type||''); const id=Number(req.body?.id); const avatar=req.body?.avatar===undefined?null:String(req.body.avatar||'').trim();
+    if(!['beast','technique','artifact'].includes(type)||!Number.isInteger(id)||id<1)return res.status(400).json({error:'Đối tượng ảnh đại diện không hợp lệ.'});
     if(avatar!==null){
-      if(avatar.startsWith('data:image/')){
-        if(!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(avatar))return res.status(400).json({error:'Ảnh đại diện không hợp lệ.'});
-        if(avatar.length>1500000)return res.status(400).json({error:'Ảnh quá lớn. Hãy chọn ảnh nhẹ hơn.'});
-      }else if(!/^https?:\/\//i.test(avatar)) return res.status(400).json({error:'Hãy tải ảnh lên hoặc nhập URL ảnh http/https.'});
-      else if(avatar.length>1200)return res.status(400).json({error:'URL ảnh quá dài.'});
+      if(avatar.startsWith('data:image/')){if(!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(avatar))return res.status(400).json({error:'Ảnh đại diện không hợp lệ.'});if(avatar.length>1500000)return res.status(400).json({error:'Ảnh quá lớn. Hãy chọn ảnh nhẹ hơn.'});}
+      else if(!/^https?:\/\//i.test(avatar)||avatar.length>1200)return res.status(400).json({error:'URL ảnh không hợp lệ hoặc quá dài.'});
     }
-    const client=await pool.connect();
-    try{
-      await client.query('BEGIN');
-      const beast=(await client.query('SELECT id,name,rarity FROM spirit_beasts_catalog WHERE id=$1 FOR UPDATE',[id])).rows[0];
-      if(!beast){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Linh Thú/Tiên Thú.'});}
-      await client.query('UPDATE spirit_beasts_catalog SET avatar_url=$2 WHERE id=$1',[id,avatar]);
-      // Thay ảnh mặc định: xóa override cá nhân để tất cả chủ sở hữu dùng ảnh mặc định mới.
-      await client.query('UPDATE owned_spirit_beasts SET avatar=NULL WHERE beast_id=$1',[id]);
-      await client.query('COMMIT');
-      res.json({ok:true,beastId:id,name:beast.name,avatar,message:`Đã cập nhật ảnh mặc định cho ${beast.name}.`});
+    const client=await pool.connect(); try{await client.query('BEGIN'); let row;
+      if(type==='beast'){row=(await client.query('SELECT id,name FROM spirit_beasts_catalog WHERE id=$1 FOR UPDATE',[id])).rows[0]; if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Linh Thú/Tiên Thú.'});} await client.query('UPDATE spirit_beasts_catalog SET avatar_url=$2 WHERE id=$1',[id,avatar]); await client.query('UPDATE owned_spirit_beasts SET avatar=NULL WHERE beast_id=$1',[id]);}
+      else if(type==='technique'){row=(await client.query('SELECT id,name FROM cultivation_techniques WHERE id=$1 FOR UPDATE',[id])).rows[0]; if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy công pháp.'});} await client.query('UPDATE cultivation_techniques SET avatar_url=$2 WHERE id=$1',[id,avatar]); await client.query('UPDATE user_techniques SET avatar=NULL WHERE technique_id=$1',[id]);}
+      else {row=(await client.query(`SELECT id,name FROM treasure_items WHERE id=$1 AND LOWER(TRIM(category)) IN ('pháp bảo','pháp khí') FOR UPDATE`,[id])).rows[0]; if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy pháp khí/pháp bảo.'});} await client.query('UPDATE treasure_items SET avatar_url=$2 WHERE id=$1',[id,avatar]); await client.query('UPDATE inventory SET avatar=NULL WHERE item_id=$1',[id]);}
+      await client.query('COMMIT'); res.json({ok:true,type,id,name:row.name,avatar,message:`Đã cập nhật ảnh mặc định cho ${row.name}.`});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
-  }catch(e){console.error('beast face default:',e);res.status(500).json({error:'Không thể cập nhật ảnh đại diện Linh Thú.'});}
+  }catch(e){console.error('thudien default:',e);res.status(500).json({error:'Không thể cập nhật ảnh mặc định.'});}
 });
 
 app.post('/api/members',auth,async(req,res)=>{
