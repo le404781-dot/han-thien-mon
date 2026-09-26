@@ -697,36 +697,3 @@ body.dark .mail-item.mail-actionable{border-color:rgba(224,188,112,.62);backgrou
  .mail-actions .btn{width:100%;min-width:0;}
  #members .section-head,#xuatquan .section-head{align-items:flex-start;}
 }
-
-/* v3.6.59 · Khung ảnh đại diện theo cảnh giới · tùy chọn */
-.profile-avatar-frame{position:relative;display:grid;place-items:center;width:100%;height:100%;border-radius:24px;padding:7px;box-sizing:border-box;isolation:isolate;background:linear-gradient(145deg,rgba(20,30,42,.98),rgba(7,13,22,.98));border:2px solid var(--frame,#a9823a);box-shadow:0 0 0 1px rgba(255,255,255,.08),0 0 18px var(--frame-glow,rgba(169,130,58,.28)),inset 0 0 18px rgba(255,255,255,.06);overflow:visible}
-.profile-avatar-frame .avatar-aura{width:100%;height:100%;border:0;box-shadow:none}
-.profile-avatar-frame .avatar-aura::before{box-shadow:0 0 0 1px var(--frame),0 0 9px 2px var(--frame);opacity:.55}
-.profile-avatar-frame .avatar-aura::after{box-shadow:0 0 18px 4px var(--frame);opacity:.35}
-.profile-avatar-frame::before{content:"";position:absolute;inset:2px;border-radius:20px;border:1px solid rgba(255,255,255,.12);pointer-events:none;z-index:2}
-.frame-corner{position:absolute;width:15px;height:15px;border-color:var(--frame);border-style:solid;z-index:3;filter:drop-shadow(0 0 5px var(--frame-glow))}
-.frame-corner.tl{left:-2px;top:-2px;border-width:3px 0 0 3px;border-radius:8px 0 0 0}.frame-corner.tr{right:-2px;top:-2px;border-width:3px 3px 0 0;border-radius:0 8px 0 0}.frame-corner.bl{left:-2px;bottom:-2px;border-width:0 0 3px 3px;border-radius:0 0 0 8px}.frame-corner.br{right:-2px;bottom:-2px;border-width:0 3px 3px 0;border-radius:0 0 8px 0}
-.frame-realm-0{--frame:#9ca3af;--frame-glow:rgba(156,163,175,.32)}
-.frame-realm-1{--frame:#79c7c1;--frame-glow:rgba(121,199,193,.34)}
-.frame-realm-2{--frame:#4fb3aa;--frame-glow:rgba(79,179,170,.36)}
-.frame-realm-3{--frame:#5f9fd6;--frame-glow:rgba(95,159,214,.38)}
-.frame-realm-4{--frame:#6f82d8;--frame-glow:rgba(111,130,216,.4)}
-.frame-realm-5{--frame:#7f6fc8;--frame-glow:rgba(127,111,200,.42)}
-.frame-realm-6{--frame:#9b69c5;--frame-glow:rgba(155,105,197,.44)}
-.frame-realm-7{--frame:#b46d9c;--frame-glow:rgba(180,109,156,.46)}
-.frame-realm-8{--frame:#c56b62;--frame-glow:rgba(197,107,98,.48)}
-.frame-realm-9{--frame:#d2a44f;--frame-glow:rgba(210,164,79,.5)}
-.frame-realm-10{--frame:#e0b75d;--frame-glow:rgba(224,183,93,.54)}
-.frame-realm-11{--frame:#73b9c9;--frame-glow:rgba(115,185,201,.52)}
-.frame-realm-12{--frame:#6b9de0;--frame-glow:rgba(107,157,224,.54)}
-.frame-realm-13{--frame:#8776cf;--frame-glow:rgba(135,118,207,.58)}
-.frame-realm-14{--frame:#c99b4c;--frame-glow:rgba(201,155,76,.62)}
-.frame-realm-15{--frame:#df735f;--frame-glow:rgba(223,115,95,.64)}
-.frame-realm-16{--frame:#ead18a;--frame-glow:rgba(234,209,138,.7);border-width:2px;box-shadow:0 0 0 1px rgba(234,209,138,.25),0 0 24px var(--frame-glow),inset 0 0 22px rgba(234,209,138,.08)}
-.frame-realm-17{--frame:#f3df9a;--frame-glow:rgba(243,223,154,.82);border-width:3px;box-shadow:0 0 0 1px rgba(115,185,201,.55),0 0 30px var(--frame-glow),0 0 60px rgba(234,209,138,.22),inset 0 0 26px rgba(243,223,154,.12)}
-.frame-realm-9::after,.frame-realm-10::after,.frame-realm-14::after,.frame-realm-15::after,.frame-realm-16::after,.frame-realm-17::after{content:"✦";position:absolute;right:-8px;top:-10px;color:var(--frame);font-size:12px;text-shadow:0 0 8px var(--frame-glow);z-index:4;animation:profileFrameSpark 2.8s ease-in-out infinite}
-.frame-realm-14::after,.frame-realm-15::after,.frame-realm-16::after,.frame-realm-17::after{content:"✦ ･ ✧";font-size:11px;right:-15px;top:-13px}
-@keyframes profileFrameSpark{0%,100%{opacity:.45;transform:scale(.8) rotate(0)}50%{opacity:1;transform:scale(1.15) rotate(12deg)}}
-.toggle-row{display:flex;align-items:center;gap:10px;cursor:pointer;padding:11px 13px;border:1px solid var(--line);background:var(--surface);border-radius:11px;color:var(--text);font-weight:700}.toggle-row input{width:20px;height:20px;accent-color:#bfa25b}.profile-frame-setting small{display:block;margin-top:7px;color:var(--muted);line-height:1.5}
-.profile-avatar-frame .avatar-img{border-radius:16px}.profile-avatar-frame .avatar-aura{border-radius:16px}
-@media(max-width:620px){.profile-avatar-frame{padding:6px;border-radius:20px}.profile-avatar-frame::before{border-radius:16px}.frame-corner{width:12px;height:12px}}

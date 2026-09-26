@@ -61,7 +61,6 @@ async function ensureRuntimeSchema() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_frame_enabled BOOLEAN NOT NULL DEFAULT FALSE;
   `);
   await query(`
     CREATE TABLE IF NOT EXISTS daily_activity (
@@ -307,7 +306,6 @@ async function ensureBicanhSchema() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_frame_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
     -- v3.6.32: Cửu Đại Bí Cảnh luôn được khởi động. Mỗi Bí Cảnh đối xứng
@@ -968,7 +966,6 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_secret_realm_runs_realm ON secret_realm_runs(realm_id,created_at DESC);
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_frame_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 
     CREATE TABLE IF NOT EXISTS sect_quests (
       id SERIAL PRIMARY KEY,
@@ -1813,7 +1810,7 @@ app.get('/api/profile',auth,async(req,res)=>{
 
 app.patch('/api/profile',auth,async(req,res)=>{
   try {
-    const {displayName,title,sect,position,birthday,hobby,bio,avatar,avatarFrameEnabled}=req.body||{};
+    const {displayName,title,sect,position,birthday,hobby,bio,avatar}=req.body||{};
     if(displayName!==undefined){const dn=String(displayName).trim().slice(0,40);if(!dn)return res.status(400).json({error:'Danh xưng không được để trống.'});await query('UPDATE users SET display_name=$2 WHERE id=$1',[req.session.user_id,dn]);}
     await ensureProfile(req.session.user_id);
     let safeAvatar=avatar===undefined?undefined:String(avatar).trim();
@@ -1827,7 +1824,7 @@ app.patch('/api/profile',auth,async(req,res)=>{
     const ps=stageFor(Number(pr?.spirit_power)||0);
     let chosenPosition=position?.toString().trim();
     if(chosenPosition){ const allowed=positionOptionsFor(ps.realmIndex); if(!allowed.includes(chosenPosition)) return res.status(400).json({error:`Chức vị ${chosenPosition} không phù hợp với ${ps.stage}.`}); }
-    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), avatar_frame_enabled=COALESCE($9,avatar_frame_enabled), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),safeAvatar,avatarFrameEnabled===undefined?undefined:Boolean(avatarFrameEnabled)]);
+    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),safeAvatar]);
     res.json({ok:true});
   } catch(e){res.status(500).json({error:'Không thể cập nhật hồ sơ.'});}
 });
@@ -3739,7 +3736,6 @@ async function ensureChallengeSchema(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_frame_enabled BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
