@@ -23,15 +23,6 @@ async function sendPresenceHeartbeat(){
  if(!getToken())return;
  try{await api('/api/presence/heartbeat',{method:'POST',headers:authHeaders(),body:'{}'});}catch(e){}
 }
-let presenceTimer=null;
-function startPresenceHeartbeat(){
- if(presenceTimer)clearInterval(presenceTimer);
- if(!getToken())return;
- sendPresenceHeartbeat();
- presenceTimer=setInterval(()=>{if(getToken())sendPresenceHeartbeat();else{clearInterval(presenceTimer);presenceTimer=null;}},20000);
-}
-startPresenceHeartbeat();
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')sendPresenceHeartbeat();});
 async function loadData(){
  try{
   const data=await api('/api/data'); members=data.members; memories=data.memories; timeline=data.timeline;
@@ -40,13 +31,13 @@ async function loadData(){
  }catch(e){console.error(e);}
 }
 function renderMembers(list=members){
- $('#membersGrid').innerHTML=list.length?list.map((m)=>`<article class="member-card" data-index="${members.indexOf(m)}"><div class="avatar">${avatarHtml(m.emoji,'',m.realmIndex)}</div><div class="member-info"><span class="nickname">${esc(m.nick||'')}</span><h3>${esc(m.name)}</h3><p>${esc(m.role||'Đệ tử')}</p><div class="presence-status ${m.online?'online':'offline'}"><span class="presence-dot"></span>${esc(m.presenceLabel||'Đã bế quan')}</div><div class="tags">${(Array.isArray(m.tags)?m.tags:[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${m.equipped_beast_name?`<div class="member-beast-badge">🐉 ${esc(m.equipped_beast_name)} · ${esc(m.equipped_beast_realm||'Linh thú')} ${Number(m.equipped_beast_realm_tier||1)} · +${Number(m.equipped_beast_gear_power||0)} trang bị</div>`:''}</div></article>`).join(''):`<p>Không tìm thấy môn nhân phù hợp.</p>`;
+ $('#membersGrid').innerHTML=list.length?list.map((m)=>`<article class="member-card" data-index="${members.indexOf(m)}"><div class="avatar">${avatarHtml(m.emoji,'',m.realmIndex)}</div><div class="member-info"><span class="nickname">${esc(m.nick||'')}</span><h3>${esc(m.name)}</h3><p>${esc(m.role||'Đệ tử')}</p><div class="presence-status ${m.online?'online':'offline'}"><span class="presence-dot"></span>${esc(m.presenceLabel||'Đã bế quan')}</div><div class="tags">${(Array.isArray(m.tags)?m.tags:[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div></article>`).join(''):`<p>Không tìm thấy môn nhân phù hợp.</p>`;
  document.querySelectorAll('.member-card').forEach(c=>c.onclick=()=>openMember(+c.dataset.index));
 }
 function renderXuatQuan(){
  const grid=$('#xuatQuanGrid'),count=$('#xuatQuanCount'); if(!grid)return;
  const online=members.filter(m=>m.online); if(count)count.textContent=`${online.length} ĐANG XUẤT QUAN`;
- grid.innerHTML=online.length?online.map(m=>`<article class="member-card"><div class="avatar">${avatarHtml(m.emoji,'',m.realmIndex)}</div><div class="member-info"><span class="nickname">${esc(m.nick||'')}</span><h3>${esc(m.name)}</h3><p>${esc(m.role||'Đệ tử')}</p><div class="presence-status online"><span class="presence-dot"></span>Đang xuất quan</div><div class="tags">${(Array.isArray(m.tags)?m.tags:[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${m.equipped_beast_name?`<div class="member-beast-badge">🐉 ${esc(m.equipped_beast_name)} · ${esc(m.equipped_beast_realm||'Linh thú')} ${Number(m.equipped_beast_realm_tier||1)} · +${Number(m.equipped_beast_gear_power||0)} trang bị</div>`:''}</div></article>`).join(''):`<div class="empty-state compact"><h3>Không có môn nhân đang xuất quan</h3><p>Hiện tại chưa có môn nhân nào đang hoạt động trên sơn môn.</p></div>`;
+ grid.innerHTML=online.length?online.map(m=>`<article class="member-card"><div class="avatar">${avatarHtml(m.emoji,'',m.realmIndex)}</div><div class="member-info"><span class="nickname">${esc(m.nick||'')}</span><h3>${esc(m.name)}</h3><p>${esc(m.role||'Đệ tử')}</p><div class="presence-status online"><span class="presence-dot"></span>Đang xuất quan</div><div class="tags">${(Array.isArray(m.tags)?m.tags:[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div></article>`).join(''):`<div class="empty-state compact"><h3>Không có môn nhân đang xuất quan</h3><p>Hiện tại chưa có môn nhân nào đang hoạt động trên sơn môn.</p></div>`;
 }
 function renderGallery(){
  const grid=$('#galleryGrid'); if(!grid)return;
@@ -66,7 +57,7 @@ function renderTimeline(){ $('#timelineList').innerHTML=timeline.map(e=>`<articl
 function openMember(i){
  const m=members[i];if(!m)return;
  const isSelf=currentUser&&Number(m.id)===Number(currentUser.id);
- $('#modalContent').innerHTML=`<div class="modal-avatar">${avatarHtml(m.emoji,'',m.realmIndex)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${(m.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${m.equipped_beast_name?`<div class="member-beast-detail"><span class="eyebrow">🐉 LINH THÚ ĐANG TRIỆU HỒI</span><h3>${esc(m.equipped_beast_name)}</h3><p>${esc(m.equipped_beast_realm||'')} ${Number(m.equipped_beast_realm_tier||1)} · Trang bị linh thú +${Number(m.equipped_beast_gear_power||0)}</p></div>`:''}${!getToken()||isSelf?'':`<div class="friend-actions" id="memberFriendActions"><button class="btn small primary" id="memberFriendBtn">🤝 Đang kiểm tra...</button><button class="btn small ghost hidden" id="memberChatBtn">💬 Chat riêng</button></div><div class="discipleship-actions" id="memberDiscipleshipActions"><button class="btn small primary" id="memberDiscipleshipBtn">👑 Đang kiểm tra Sư Đồ...</button></div><p id="memberDiscipleshipMsg" class="train-msg"></p><div class="challenge-actions"><button class="btn small primary" id="memberOnlineChallengeBtn">⚔ Mở lôi đài Online</button><button class="btn small ghost" id="memberOfflineChallengeBtn">🌓 Khiêu chiến Offline</button></div><p id="memberFriendMsg" class="train-msg"></p><p id="memberChallengeMsg" class="train-msg"></p>`}</div>`;
+ $('#modalContent').innerHTML=`<div class="modal-avatar">${avatarHtml(m.emoji,'',m.realmIndex)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${(m.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${!getToken()||isSelf?'':`<div class="friend-actions" id="memberFriendActions"><button class="btn small primary" id="memberFriendBtn">🤝 Đang kiểm tra...</button><button class="btn small ghost hidden" id="memberChatBtn">💬 Chat riêng</button></div><div class="discipleship-actions" id="memberDiscipleshipActions"><button class="btn small primary" id="memberDiscipleshipBtn">👑 Đang kiểm tra Sư Đồ...</button></div><p id="memberDiscipleshipMsg" class="train-msg"></p><div class="challenge-actions"><button class="btn small primary" id="memberOnlineChallengeBtn">⚔ Mở lôi đài Online</button><button class="btn small ghost" id="memberOfflineChallengeBtn">🌓 Khiêu chiến Offline</button></div><p id="memberFriendMsg" class="train-msg"></p><p id="memberChallengeMsg" class="train-msg"></p>`}</div>`;
  const friendsHost=$('#memberModal').showModal();
  if(getToken()&&!isSelf){
   refreshMemberFriendState(Number(m.id));
@@ -332,14 +323,14 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadDuongThu();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadBeastHouse();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
  catch{localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}
 }
 function renderGuestAreas(){
  $('#profileArea').innerHTML=`<div class="empty-state"><div class="empty-seal">寒</div><h3>Đệ tử chưa nhập môn</h3><p>Đăng ký hoặc đăng nhập để mở hồ sơ, linh lực, cảnh giới và thành tích cá nhân.</p><button class="btn primary" onclick="renderAuth('register')">✦ Ghi danh</button></div>`;
  $('#cultivationArea').innerHTML=`<div class="empty-state compact"><h3>Thiên đạo chờ người hữu duyên</h3><p>Đăng nhập để bắt đầu vận công và tích lũy linh lực.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
  $('#chatArea').innerHTML=`<div class="empty-state compact"><h3>Truyền âm bị phong</h3><p>Chỉ môn nhân đã nhập môn mới có thể vào Chat tổng.</p><button class="btn primary" onclick="renderAuth('register')">Đăng ký</button></div>`; $('#sectPostsArea').innerHTML=`<div class="empty-state compact"><h3>📜 Bài Đăng đang phong ấn</h3><p>Đăng nhập để xem bài đăng của Môn Phái. Hóa Thần trở lên mới được đăng.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
- $('#challengeArea').innerHTML=`<div class="empty-state compact"><h3>Lôi đài đang phong ấn</h3><p>Đăng nhập để khiêu chiến môn nhân và mô phỏng đối thủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#arenaLiveArea').innerHTML=`<div class="empty-state compact"><h3>👁 Lôi Đài Trực Chiến đang phong ấn</h3><p>Đăng nhập để theo dõi các trận đấu đang diễn ra và đặt cược linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#bicanhArea').innerHTML=`<div class="empty-state compact"><h3>Bí Cảnh đang phong ấn</h3><p>Đăng nhập để đóng góp linh thạch, khởi động và thám hiểm Cửu Đại Bí Cảnh.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#treasureArea').innerHTML=`<div class="empty-state compact"><h3>Tàng Bảo Các đang phong ấn</h3><p>Đăng nhập để nhận linh thạch hằng ngày và mua vật phẩm.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#danCacArea').innerHTML=`<div class="empty-state compact"><h3>Đan Các đang phong ấn</h3><p>Đăng nhập để bán vật phẩm và nhận linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; ['#duocDuongArea','#duongThuArea','#beastHouseArea','#linhPhapArea','#equipmentArea'].forEach(sel=>{const el=$(sel);if(el)el.innerHTML=`<div class="empty-state compact"><h3>Đường vào đang phong ấn</h3><p>Đăng nhập để dùng linh thạch mua Linh Thú và Linh Căn.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;}); $('#questsArea').innerHTML=`<div class="empty-state compact"><h3>Nhiệm Vụ Đường đang phong ấn</h3><p>Đăng nhập để nhận nhiệm vụ và linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#professionsArea').innerHTML=`<div class="empty-state compact"><h3>Nghiệp Vụ đang phong ấn</h3><p>Đăng nhập để tiếp nhận nghề và nhận thù lao linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; ['#codexArea','#mansionArea'].forEach(sel=>{const el=$(sel);if(el)el.innerHTML=`<div class="empty-state compact"><h3>Đường vào đang phong ấn</h3><p>Đăng nhập để mở công pháp và động phủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;}); renderLegendEditor();
+ $('#challengeArea').innerHTML=`<div class="empty-state compact"><h3>Lôi đài đang phong ấn</h3><p>Đăng nhập để khiêu chiến môn nhân và mô phỏng đối thủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#arenaLiveArea').innerHTML=`<div class="empty-state compact"><h3>👁 Lôi Đài Trực Chiến đang phong ấn</h3><p>Đăng nhập để theo dõi các trận đấu đang diễn ra và đặt cược linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#bicanhArea').innerHTML=`<div class="empty-state compact"><h3>Bí Cảnh đang phong ấn</h3><p>Đăng nhập để đóng góp linh thạch, khởi động và thám hiểm Cửu Đại Bí Cảnh.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#treasureArea').innerHTML=`<div class="empty-state compact"><h3>Tàng Bảo Các đang phong ấn</h3><p>Đăng nhập để nhận linh thạch hằng ngày và mua vật phẩm.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#danCacArea').innerHTML=`<div class="empty-state compact"><h3>Đan Các đang phong ấn</h3><p>Đăng nhập để bán vật phẩm và nhận linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; ['#beastHouseArea','#linhPhapArea','#equipmentArea'].forEach(sel=>{const el=$(sel);if(el)el.innerHTML=`<div class="empty-state compact"><h3>Đường vào đang phong ấn</h3><p>Đăng nhập để dùng linh thạch mua Linh Thú và Linh Căn.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;}); $('#questsArea').innerHTML=`<div class="empty-state compact"><h3>Nhiệm Vụ Đường đang phong ấn</h3><p>Đăng nhập để nhận nhiệm vụ và linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#professionsArea').innerHTML=`<div class="empty-state compact"><h3>Nghiệp Vụ đang phong ấn</h3><p>Đăng nhập để tiếp nhận nghề và nhận thù lao linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; ['#codexArea','#mansionArea'].forEach(sel=>{const el=$(sel);if(el)el.innerHTML=`<div class="empty-state compact"><h3>Đường vào đang phong ấn</h3><p>Đăng nhập để mở công pháp và động phủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;}); renderLegendEditor();
  loadLeaderboard(); loadSect(); loadCodex(); loadSpiritRankings();
 }
 
@@ -348,7 +339,7 @@ async function loadCultivationSafe(){
   try{const d=await api('/api/profile',{headers:authHeaders()}); if(d.profile){currentProfile=d.profile;renderCultivation(currentProfile);}}catch(e){const a=$('#cultivationArea');if(a)a.innerHTML=`<div class="empty-state compact"><h3>Không thể mở Vận Công</h3><p>${esc(e.message)}</p><button class="btn small primary" id="retryCultivationBtn">↻ Mở lại Vận Công</button></div>`;$('#retryCultivationBtn')?.addEventListener('click',loadCultivationSafe);}
 }
 async function loadProfile(){
- try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();loadDisciples();loadChallenges();loadCodex();loadTienPhap();loadSpiritRankings();loadMansion();if(!Boolean(currentProfile?.mansion?.active))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadDanCac();loadBeastHouse();loadLinhPhap();loadEquipment();loadBicanh();loadProfessions();loadQuests();renderLegendEditor();}
+ try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();loadDisciples();loadChallenges();loadCodex();loadTienPhap();loadSpiritRankings();loadMansion();if(String(currentProfile?.presence_status||'offline')==='online' && !Boolean(currentProfile?.mansion?.active))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadDanCac();loadBeastHouse();loadLinhPhap();loadEquipment();loadBicanh();loadProfessions();loadQuests();renderLegendEditor();}
  catch(e){if(e.message.includes('đăng nhập')){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}}
 }
 function renderProfile(p){
@@ -374,61 +365,28 @@ function openProfileEditor(){
 
 let onlineTimer=null;
 async function onlineCultivationTick(){
-  if(!getToken()||Boolean(currentProfile?.mansion?.active))return;
+  if(!getToken()||!currentProfile)return;
   try{
     const d=await api('/api/cultivation/online',{method:'POST',headers:authHeaders(),body:'{}'});
-    window.__onlineRate=Number(d.rate||0);
-    window.__onlineActive=Boolean(d.active);
-    window.__onlineEarned=Number(d.onlineEarned||0);
-    window.__onlineRemainder=Number(d.remainderSeconds||0);
-    window.__onlineSyncedAt=Number(d.serverTime||Date.now());
-    const status=$('#onlineStatus'),gainEl=$('#onlineGain');
-    if(status)status.textContent=d.active?`🟢 Xuất Quan · đang tụ linh theo thời gian thực · +${Number(d.rate||0).toLocaleString('vi-VN')}/phút · ${Number(d.ratePerHour||0).toLocaleString('vi-VN')}/giờ · ${esc(d.realm||currentProfile?.realm||'cảnh giới hiện tại')}`:'🌙 Đã Bế Quan · tạm dừng tụ linh, chờ Xuất Quan';
-    if(gainEl)gainEl.textContent=`+${Number(d.onlineEarned||0).toLocaleString('vi-VN')} linh lực đã tụ · +${Number(d.rate||0).toLocaleString('vi-VN')}/phút`;
-    const live=$('#onlineLiveCounter');if(live)live.textContent=d.active?'Đang tích lũy từng nhịp thời gian':'Tạm dừng';
-    if(d.gain>0){
-      const gain=Number(d.gain)||0;
-      if(currentProfile){
-        currentProfile.spirit_power=Number(currentProfile.spirit_power||0)+gain;
-        currentProfile.onlineEarned=Number(d.onlineEarned||0);
-        currentProfile.realm=d.realm||currentProfile.realm;
-        currentProfile.stage=d.stage||currentProfile.stage;
+    const status=$('#onlineStatus'), gainEl=$('#onlineGain');
+    if(d.mode==='auto'){
+      if(status)status.textContent=`🟢 Đang Xuất Quan · +${Number(d.rate||0).toLocaleString('vi-VN')} linh lực/phút · khoảng ${Number(d.ratePerHour||0).toLocaleString('vi-VN')}/giờ · ${esc(d.realm||currentProfile.realm||'')}`;
+      if(gainEl)gainEl.textContent=d.gain>0?`Vừa tu luyện ${Number(d.gain).toLocaleString('vi-VN')} linh lực trong ${Number(d.minutes||0)} phút`:`Tu luyện đang chạy · +${Number(d.rate||0).toLocaleString('vi-VN')} linh lực/phút`;
+      if(d.gain>0){
+        const msg=$('#trainMsg'); if(msg)msg.textContent=d.message||`☁ Xuất Quan tu luyện: +${d.gain} linh lực trong ${d.minutes} phút.`;
+        await loadProfile();
       }
-      const msg=$('#trainMsg'); if(msg)msg.textContent=d.message||`☁ Online: +${gain.toLocaleString('vi-VN')} linh lực · ${Number(d.rate||0).toLocaleString('vi-VN')}/phút.`;
-      renderProfile(currentProfile);
-      renderCultivation(currentProfile);
-      await loadProfile();
-      await loadLeaderboard();
+    }else if(d.mansionLocked){
+      if(status)status.textContent='🏯 Động phủ đang hoạt động · Tu luyện Xuất Quan tạm khóa.';
     }
   }catch(e){
     const status=$('#onlineStatus');
-    if(status && !Boolean(currentProfile?.mansion?.active)) status.textContent='☁ Chờ Xuất Quan · hệ thống sẽ tự động tiếp tục tụ linh khi trạng thái hoạt động được xác nhận';
+    if(status)status.textContent='⚠️ Tu luyện đang chờ kết nối lại…';
   }
 }
 function startOnlineCultivation(){
   if(onlineTimer)clearInterval(onlineTimer);
-  if(window.__onlineRealtimeTimer)clearInterval(window.__onlineRealtimeTimer);
-  onlineTimer=setInterval(onlineCultivationTick,5000);
-  window.__onlineRealtimeTimer=setInterval(()=>{
-    const status=$('#onlineStatus'),gainEl=$('#onlineGain');
-    if(!status||!gainEl||!currentProfile||Boolean(currentProfile?.mansion?.active))return;
-    const rate=Number(window.__onlineRate||currentProfile.onlineRate||0);
-    const active=Boolean(window.__onlineActive);
-    const syncedAt=Number(window.__onlineSyncedAt||0);
-    const base=Number(window.__onlineEarned||0);
-    const remainder=Number(window.__onlineRemainder||0);
-    if(!rate||!active||!syncedAt)return;
-    const elapsed=Math.max(0,Math.floor((Date.now()-syncedAt)/1000));
-    const projected=Math.floor((remainder+elapsed)*rate/60);
-    const next=Math.max(1,Math.ceil(60/rate));
-    gainEl.textContent=`+${(base+projected).toLocaleString('vi-VN')} linh lực đã tụ · +${rate.toLocaleString('vi-VN')}/phút`;
-    status.textContent=`🟢 Xuất Quan · đang tụ linh theo thời gian thực · khoảng ${(rate*60).toLocaleString('vi-VN')} linh lực/giờ · cảnh giới ${currentProfile.realm||currentProfile.stage}`;
-    const panel=$('#onlineCultivationPanel'); if(panel)panel.classList.add('online-ready');
-    const live=$('#onlineLiveCounter'); if(live)live.textContent=`+${projected.toLocaleString('vi-VN')} linh lực đang tích lũy`;
-    if(projected>0 && projected%1===0){
-      const progress=$('#onlineRealtimeBar'); if(progress)progress.style.width=`${Math.min(100,(elapsed%next)/next*100)}%`;
-    }
-  },1000);
+  onlineTimer=setInterval(onlineCultivationTick,30000);
   onlineCultivationTick();
 }
 function renderCultivation(p){
@@ -438,14 +396,14 @@ function renderCultivation(p){
  const atTribulation=String(p.realm)==='Độ Kiếp' && Number(p.tier)===9;
  const mansionActive=Boolean(p.mansion?.active);
  const onlineRate=Number(p.onlineRate||Math.max(1,18-Number(p.progress?.realmIndex||0)));
- const onlineUnlocked=!mansionActive;
+ const onlineUnlocked=!mansionActive && String(p.presence_status||'offline')==='online';
  $('#cultivationArea').innerHTML=`<div class="cultivation-grid">
  <article class="cultivation-card"><div class="rank-emblem">${avatarHtml(p.avatar)}</div><div><span class="eyebrow">CẢNH GIỚI HIỆN TẠI</span><h3>${esc(p.stage)}</h3><p class="muted">${esc(p.title)} · ${esc(p.sect)}</p><div class="tier-badge">${esc(p.tierName||(`Tầng ${p.tier}/9`))} · ${esc(p.realm)}</div></div><button class="btn primary train-btn" id="trainBtn" ${trainCount>=maxDaily||mansionActive?'disabled':''}>${mansionActive?'🏯 Động phủ đang khóa vận công':trainCount>=maxDaily?'☁ Đã đủ lượt':'⚔ Vận công'}</button></article>
  <article class="power-card"><div class="power-head"><div><span>Linh lực</span><strong>${Number(p.spirit_power).toLocaleString('vi-VN')}</strong></div><span>${prog.next?`Còn ${prog.remaining.toLocaleString('vi-VN')} để tiến vào ${esc(prog.next)}`:'Đã đạt cảnh giới tối cao'}</span></div><div class="progress"><i style="width:${prog.percent}%"></i></div><div class="rank-ladder">${realms.map(r=>`<span class="${r===p.realm?'on':''}">${r}</span>`).join('')}</div></article>
  </div>
  ${atTribulation?`<div class="daily-stone-card" id="ascensionPanel"><div><span class="eyebrow">🌌 PHI THĂNG · ĐỘ KIẾP</span><h3>Cửu Trọng Thiên Kiếp</h3><p>Đạt <b>Độ Kiếp Cửu Tầng</b> để vượt qua 9 lần thiên kiếp. Mỗi lần thành công <b>không xóa chiến lực, trang bị hay vật phẩm</b>. Hoàn tất lần thứ 9 sẽ lập tức phi thăng lên <b>Nhân Tiên Nhất Tầng</b>.</p></div><div><button class="btn primary" id="ascensionBtn">⚡ Độ kiếp lần 1/9</button><p id="ascensionMsg" class="train-msg">Đang kiểm tra Cửu Trọng Thiên Kiếp...</p></div></div>`:''}
  <div class="daily-stone-card"><div><span class="eyebrow">💎 LINH THẠCH HẰNG NGÀY</span><h3>Kho linh thạch: <b id="stoneCount">${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</b></h3><p>Mỗi ngày nhận <b>100 linh thạch</b> để sử dụng tại Tàng Bảo Các.</p></div><button class="btn primary" id="claimStoneBtn" ${p.canClaimStones?'':'disabled'}>${p.canClaimStones?'💎 Nhận 100 linh thạch':'✓ Đã nhận hôm nay'}</button></div>
- <div class="online-cultivation-card ${onlineUnlocked?'online-ready':'online-locked'}" id="onlineCultivationPanel"><div class="online-cultivation-copy"><span class="eyebrow">☁ TU LUYỆN ONLINE · THỜI GIAN THỰC</span><h3>${onlineUnlocked?'Tự động tụ linh khi Xuất Quan':'Chưa mở Online'}</h3><p id="onlineStatus">${mansionActive?`🏯 ${esc(p.mansion.name)} đang khởi động · tạm khóa tự động tụ linh.`:`🟢 +${onlineRate.toLocaleString('vi-VN')} linh lực/phút · khoảng ${(onlineRate*60).toLocaleString('vi-VN')} linh lực/giờ · tốc độ tăng theo ${esc(p.realm)}.`}</p><div class="online-progress"><i id="onlineRealtimeBar" style="width:0%"></i></div><small id="onlineLiveCounter" class="online-live-counter">${onlineUnlocked?'Đang chờ nhịp Xuất Quan…':'Đang khóa do Động Phủ'}</small></div><div class="online-numbers"><b id="onlineGain">${onlineUnlocked?`+${Number(p.onlineEarned||0).toLocaleString('vi-VN')} linh lực đã tụ · +${onlineRate.toLocaleString('vi-VN')}/phút`:'Đang khóa do Động Phủ'}</b><small>Tự động theo từng giây · không cần bấm Vận Công</small></div></div><p id="trainMsg" class="train-msg">${mansionActive?`🏯 ${esc(p.mansion.name)} đang khởi động: tự động +${Number(p.mansion.spiritPerHour||0).toLocaleString('vi-VN')} linh lực/giờ. Vận công bị khóa hoàn toàn.`:`☁ Tu luyện Online đã mở: linh lực tự động cộng theo thời gian <b>Xuất Quan</b>, tốc độ thay đổi theo từng cảnh giới. Vận công thủ công vẫn có lượt riêng mỗi ngày.`}</p>`;
+ <div class="online-cultivation-card ${onlineUnlocked?'online-ready':'online-locked'}" id="onlineCultivationPanel"><div><span class="eyebrow">☁ TU LUYỆN ONLINE</span><h3>${onlineUnlocked?'Tự động tích lũy linh lực':'Chưa mở Online'}</h3><p id="onlineStatus">${mansionActive?`🏯 ${esc(p.mansion.name)} đang khởi động · Tu luyện Xuất Quan tạm khóa.`:onlineUnlocked?`🟢 Tu luyện theo thời gian Xuất Quan · +${onlineRate.toLocaleString('vi-VN')} linh lực/phút · khoảng ${(onlineRate*60).toLocaleString('vi-VN')} linh lực/giờ · tốc độ tự động theo cảnh giới.`:`⚪ Đang bế quan · đăng nhập/hoạt động lại để bắt đầu tu luyện.`}</p></div><div class="online-numbers"><b id="onlineGain">${onlineUnlocked?'Tự động cộng theo từng phút Xuất Quan · không giới hạn/ngày':'Đang chờ Xuất Quan'}</b><small>Không tiêu hao thêm lượt vận công</small></div></div><p id="trainMsg" class="train-msg">${mansionActive?`🏯 ${esc(p.mansion.name)} đang khởi động: tự động +${Number(p.mansion.spiritPerHour||0).toLocaleString('vi-VN')} linh lực/giờ. Vận công bị khóa hoàn toàn.`:`Lượt tu luyện hôm nay = lượt vận công: <b>${trainCount}/${maxDaily}</b>. ${trainCount>=maxDaily?'Đã hết lượt vận công hôm nay; Online đã mở.':'Khi hết lượt, nút Vận công sẽ tự khóa; Online sẽ mở tự động.'}`}</p>`;
  $('#trainBtn').onclick=async()=>{const b=$('#trainBtn');b.disabled=true;b.textContent='☁ Đang vận công...';try{const d=await api('/api/cultivation/train',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=d.message||`+${d.gain} linh lực → ${d.stage} · Lượt vận công/tu luyện hôm nay ${d.trainCount}/${d.maxDaily}. ${d.progress.next?`Còn ${d.progress.remaining} linh lực để tiến vào ${d.progress.next}.`:'Đã đạt cảnh giới tối cao.'}`;await loadProfile();await loadLeaderboard();}catch(e){$('#trainMsg').textContent=e.message;}finally{const latest=Number(currentProfile?.trainCount||0)>=Number(currentProfile?.maxDaily||10);const locked=Boolean(currentProfile?.mansion?.active);b.disabled=latest||locked;b.textContent=locked?'🏯 Động phủ đang khóa vận công':latest?'☁ Đã đủ lượt':'⚔ Vận công';}};
  $('#claimStoneBtn').onclick=async()=>{const b=$('#claimStoneBtn');b.disabled=true;try{const d=await api('/api/spirit-stones/claim',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=`💎 ${d.amount} linh thạch đã nhập kho. Có thể dùng tại Tàng Bảo Các.`;await loadProfile();await loadTreasure();}catch(e){$('#trainMsg').textContent=e.message;b.disabled=false;}};
  if(atTribulation){
@@ -662,24 +620,6 @@ async function loadDanCac(){
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>Không thể mở Đan Các</h3><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadDanCac()">↻ Thử lại</button></div>`;}
 }
 
-async function loadDuocDuong(){
- const area=$('#duocDuongArea'); if(!area||!getToken())return;
- try{const d=await api('/api/duoc-duong',{headers:authHeaders()});const items=d.items||[];const p=d.profile||{};
-  area.innerHTML=`<div class="duoc-npc"><div class="duoc-npc-seal">💊</div><div><span class="eyebrow">NPC · ${esc(d.npc?.title||'Dược Đường')}</span><h3>${esc(d.npc?.name||'Dược Đồng')}</h3><p>${esc(d.npc?.dialogue||'')}</p></div><div class="duoc-wallet">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</div></div><div class="duoc-grid">${items.map(x=>{const locked=Number(d.stage?.realmIndex||0)<Number(x.min_realm||0);const icon=x.category.includes('thức ăn')?'🍖':x.category.includes('Khôi')?'🪆':x.category.includes('trang bị')?'🛡️':'◈';return `<article class="duoc-card ${locked?'locked':''}"><div class="duoc-icon">${icon}</div><span class="eyebrow">${esc(x.category.replace('Dược Đường · ',''))}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p>${x.beast_food_gain?`<small>🐉 +${Number(x.beast_food_gain)} linh lực linh thú · 💗 +${Number(x.beast_joy_gain)} niềm vui</small>`:''}${x.is_khoi_loi?`<small>🪆 +${Number(x.beast_joy_gain)} niềm vui</small>`:''}${x.beast_gear_slot?`<small>⚔ +${Number(x.beast_gear_power)} linh thú · yêu cầu ${esc(REALM_NAMES[Number(x.beast_gear_min_realm)]||'cao hơn')}</small>`:''}<div class="duoc-buy"><b>💎 ${Number(x.price||0).toLocaleString('vi-VN')}</b><input class="duoc-qty" data-id="${x.id}" type="number" min="1" max="99" value="1" ${locked?'disabled':''}><button class="btn small primary duoc-buy-btn" data-id="${x.id}" ${locked?'disabled':''}>${locked?'🔒 Chưa đủ cảnh giới':'Mua'}</button></div></article>`}).join('')}</div><p id="duocMsg" class="train-msg">${esc(d.npc?.name||'Mặc Ly')}: “Dược đúng căn cơ, thú đúng tâm tính.”</p>`;
-  document.querySelectorAll('.duoc-buy-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;const q=Number(document.querySelector(`.duoc-qty[data-id="${b.dataset.id}"]`)?.value||1);try{const x=await api('/api/duoc-duong/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:q})});$('#duocMsg').textContent='✅ '+x.message;await Promise.all([loadProfile(),loadDuocDuong(),loadTuDi(),loadDuongThu()]);}catch(e){$('#duocMsg').textContent='❌ '+e.message;b.disabled=false;}});
- }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
-}
-async function loadDuongThu(){
- const area=$('#duongThuArea'); if(!area||!getToken())return;
- try{const [d,shop]=await Promise.all([api('/api/duong-thu',{headers:authHeaders()}),api('/api/duoc-duong',{headers:authHeaders()})]);const foods=(shop.items||[]).filter(x=>x.category==='Dược Đường · Linh thú thức ăn');const puppets=(shop.items||[]).filter(x=>x.is_khoi_loi);const gears=(shop.items||[]).filter(x=>x.beast_gear_slot);const chance=Number(d.bondChance||0);
-  area.innerHTML=`<div class="duong-thu-summary"><div><span class="eyebrow">🐉 TÂM THÚ · CẢM XÚC</span><h3>Tỷ lệ nhận chủ hiện tại: ${chance}%</h3><p>Cảm xúc tốt (Hỉ, Ái) giúp linh thú sinh linh lực; Nộ, Ố cao sẽ làm linh lực suy giảm theo thời gian.</p></div><div class="duong-thu-wallet">💎 ${Number(d.profile?.spirit_stones||0).toLocaleString('vi-VN')}</div></div><div class="beast-care-grid">${(d.beasts||[]).map(x=>{const bonded=Math.max(0,Number(x.quantity||0)-Number(x.unbound_quantity||0));const mood=[['Hỉ','happiness','😊'],['Nộ','anger','😡'],['Ái','love','💗'],['Ố','dislike','😒']];return `<article class="beast-care-card"><div class="beast-care-head"><div class="beast-care-icon">🐉</div><div><span class="eyebrow">${esc(x.rarity)} · ${esc(x.beast_realm)} ${Number(x.beast_realm_tier||1)}</span><h3>${esc(x.name)}</h3><p>☯ Linh lực thú: <b>${Number(x.pet_spirit||0).toLocaleString('vi-VN')}</b> · Đã nhận chủ: ${bonded}/${Number(x.quantity||0)}</p></div></div><div class="emotion-grid">${mood.map(([label,key,ic])=>`<div><span>${ic} ${label}</span><b>${Number(x[key]||0)}</b><i><em style="width:${Number(x[key]||0)}%"></em></i></div>`).join('')}</div><div class="joy-meter"><span>✨ Niềm vui</span><b>${Number(x.joy||0)}/100</b><i><em style="width:${Number(x.joy||0)}%"></em></i></div><div class="beast-care-actions">${Number(x.unbound_quantity||0)>0?`<button class="btn small primary beast-bond" data-id="${x.beast_id}">🔗 Nhận chủ · ${chance}%</button>`:'<span class="tag">✓ Đã nhận chủ</span>'}<select class="beast-food-select" data-beast="${x.beast_id}"><option value="0">🍖 Chọn thức ăn</option>${foods.map(f=>`<option value="${f.id}">${esc(f.name)} · ×${Number(f.quantity||0)}</option>`).join('')}</select><button class="btn small beast-feed" data-id="${x.beast_id}">Cho ăn</button><select class="beast-puppet-select" data-beast="${x.beast_id}"><option value="0">🪆 Chọn Khôi Lỗi</option>${puppets.map(f=>`<option value="${f.id}">${esc(f.name)} · ×${Number(f.quantity||0)}</option>`).join('')}</select><button class="btn small beast-puppet" data-id="${x.beast_id}">Dùng</button></div><div class="beast-gear-box"><b>⚔ Trang bị linh thú</b><div>${(x.gear||[]).length?(x.gear||[]).map(g=>`<span class="tag">${esc(g.name)} · +${Number(g.power||0)}</span>`).join(''):'<small>Chưa có trang bị riêng.</small>'}</div><select class="beast-gear-select" data-beast="${x.beast_id}"><option value="0">Chọn trang bị</option>${gears.map(g=>`<option value="${g.id}">${esc(g.name)} · +${Number(g.beast_gear_power||0)}</option>`).join('')}</select><button class="btn small primary beast-gear" data-id="${x.beast_id}">Trang bị</button></div></article>`}).join('')||'<div class="empty-state compact"><h3>Chưa có linh thú</h3><p>Hãy thám hiểm Bí Cảnh để có cơ hội nhận linh thú vô chủ.</p></div>'}</div><p id="duongThuMsg" class="train-msg"></p>`;
-  document.querySelectorAll('.beast-bond').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/duong-thu/bond',{method:'POST',headers:authHeaders(),body:JSON.stringify({beastId:Number(b.dataset.id)})});$('#duongThuMsg').textContent=(x.ok?'🔗 ':'⚠️ ')+x.message;await Promise.all([loadDuongThu(),loadData()]);}catch(e){$('#duongThuMsg').textContent='❌ '+e.message;b.disabled=false;}});
-  document.querySelectorAll('.beast-feed').forEach(b=>b.onclick=async()=>{const id=Number(document.querySelector(`.beast-food-select[data-beast="${b.dataset.id}"]`)?.value||0);if(!id){$('#duongThuMsg').textContent='❌ Hãy chọn thức ăn.';return;}b.disabled=true;try{const x=await api('/api/duong-thu/feed',{method:'POST',headers:authHeaders(),body:JSON.stringify({beastId:Number(b.dataset.id),itemId:id,quantity:1})});$('#duongThuMsg').textContent='🍖 '+x.message;await Promise.all([loadDuongThu(),loadTuDi()]);}catch(e){$('#duongThuMsg').textContent='❌ '+e.message;b.disabled=false;}});
-  document.querySelectorAll('.beast-puppet').forEach(b=>b.onclick=async()=>{const id=Number(document.querySelector(`.beast-puppet-select[data-beast="${b.dataset.id}"]`)?.value||0);if(!id){$('#duongThuMsg').textContent='❌ Hãy chọn Khôi Lỗi.';return;}b.disabled=true;try{const x=await api('/api/duong-thu/puppet',{method:'POST',headers:authHeaders(),body:JSON.stringify({beastId:Number(b.dataset.id),itemId:id,quantity:1})});$('#duongThuMsg').textContent='🪆 '+x.message;await loadDuongThu();}catch(e){$('#duongThuMsg').textContent='❌ '+e.message;b.disabled=false;}});
-  document.querySelectorAll('.beast-gear').forEach(b=>b.onclick=async()=>{const id=Number(document.querySelector(`.beast-gear-select[data-beast="${b.dataset.id}"]`)?.value||0);if(!id){$('#duongThuMsg').textContent='❌ Hãy chọn trang bị.';return;}b.disabled=true;try{const x=await api('/api/duong-thu/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({beastId:Number(b.dataset.id),itemId:id})});$('#duongThuMsg').textContent='⚔ '+x.message;await Promise.all([loadDuongThu(),loadEquipment(),loadData()]);}catch(e){$('#duongThuMsg').textContent='❌ '+e.message;b.disabled=false;}});
- }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
-}
-
 async function loadBeastHouse(){
  const area=$('#beastHouseArea'); if(!area||!getToken())return;
  try{
@@ -852,70 +792,40 @@ async function loadArenaLive(){
  }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
 }
 
-async function respondMailboxAction(id, type, actionData, actionBtn){
-  if(!actionData?.action || !actionData?.requestId && !actionData?.invitationId) return;
-  const endpoint=actionData.action==='friend'
-    ? '/api/friends/respond'
-    : actionData.action==='challenge'
-      ? '/api/challenges/online/respond'
-      : actionData.action==='bicanh_invite'
-        ? '/api/bicanh/invite/respond' : '';
-  if(!endpoint)return;
-  const body=actionData.action==='friend'
-    ? {requestId:Number(actionData.requestId),action}
-    : actionData.action==='challenge'
-      ? {requestId:Number(actionData.requestId),action}
-      : {invitationId:Number(actionData.invitationId),action};
-  actionBtn?.setAttribute('disabled','disabled');
-  try{
-    const result=await api(endpoint,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
-    const mail=document.querySelector(`.mail-item[data-id="${id}"]`);
-    if(mail){
-      const actions=mail.querySelector('.mail-actions');
-      if(actions) actions.innerHTML=`<span class="mail-result">✓ ${action==='accept'?'Đã chấp nhận':'Đã từ chối'}</span>`;
-      mail.classList.remove('unread');
-    }
-    await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(id)})});
-    await loadMailbox();
-    if(actionData.action==='challenge') await loadChallenges?.();
-    if(actionData.action==='friend'){ await loadFriends?.(); await loadData?.(); }
-    if(actionData.action==='bicanh_invite') await loadBicanh?.();
-  }catch(e){
-    if(actionBtn)actionBtn.removeAttribute('disabled');
-    const mail=document.querySelector(`.mail-item[data-id="${id}"]`);
-    const msg=mail?.querySelector('.mail-action-msg'); if(msg)msg.textContent='❌ '+e.message;
-  }
-}
-
 async function loadMailbox(){
  const area=$('#mailboxArea'),badge=$('#mailboxBadge'); if(!area||!getToken())return;
  try{
   const d=await api('/api/mailbox',{headers:authHeaders()});
-  if(badge)badge.style.display=Number(d.unread||0)>0?'inline-flex':'none';
-  area.innerHTML=`<div class="mailbox-toolbar"><label><input id="mailboxToggle" type="checkbox" ${d.enabled?'checked':''}> 🔔 Nhận thông báo Hòm Thư</label><button id="mailboxReadAll" class="btn small ghost">Đánh dấu tất cả đã đọc</button><span>Chưa đọc: <b>${Number(d.unread||0)}</b></span></div><div class="mailbox-list">${(d.rows||[]).map(x=>{
-    const a=x.actionData||null;
-    const actionable=Boolean(a?.action && (a.requestId||a.invitationId) && !x.read_at);
-    const icon=x.type==='challenge'?'⚔️':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='chat_total'?'☯':'📬';
-    const buttons=actionable?`<div class="mail-actions"><button class="btn small primary mail-accept" data-id="${x.id}">✓ Đồng ý</button><button class="btn small ghost mail-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div>`:'';
-    return `<article class="mail-item ${x.read_at?'':'unread'} ${actionable?'mail-actionable':''}" data-id="${x.id}"><div class="mail-icon">${icon}</div><div class="mail-content"><b>${esc(x.title)}</b><p>${esc(x.message)}</p><small>${new Date(x.created_at).toLocaleString('vi-VN')}</small>${buttons}</div>${x.read_at?'':'<span class="mail-new">MỚI</span>'}</article>`;
-  }).join('')||'<div class="empty-state compact"><p>Hòm thư đang tĩnh lặng.</p></div>'}</div>`;
+  const actionButtons=(x)=>{
+   if(!x.action||!x.actionId)return '';
+   if(x.action==='challenge') return `<div class="mail-actions"><button class="btn small primary mail-action" data-action="challenge-accept" data-id="${x.actionId}">⚔ Tiếp nhận</button><button class="btn small ghost mail-action" data-action="challenge-reject" data-id="${x.actionId}">Từ chối</button></div>`;
+   if(x.action==='bicanh') return `<div class="mail-actions"><button class="btn small primary mail-action" data-action="bicanh-accept" data-id="${x.actionId}">🌌 Tham gia</button><button class="btn small ghost mail-action" data-action="bicanh-reject" data-id="${x.actionId}">Từ chối</button></div>`;
+   if(x.action==='friend') return `<div class="mail-actions"><button class="btn small primary mail-action" data-action="friend-accept" data-id="${x.actionId}">🤝 Kết giao</button><button class="btn small ghost mail-action" data-action="friend-reject" data-id="${x.actionId}">Từ chối</button></div>`;
+   return '';
+  };
+  area.innerHTML=`<div class="mailbox-toolbar"><label><input id="mailboxToggle" type="checkbox" ${d.enabled?'checked':''}> 🔔 Nhận thông báo Hòm Thư</label><button id="mailboxReadAll" class="btn small ghost">Đánh dấu tất cả đã đọc</button><span>Chưa đọc: <b>${Number(d.unread||0)}</b></span></div><div class="mailbox-hint">⚡ <b>Xử lý trực tiếp:</b> lời mời Khiêu Chiến, Bí Cảnh và Kết Giao có thể tiếp nhận hoặc từ chối ngay tại đây.</div><div class="mailbox-list">${(d.rows||[]).map(x=>`<article class="mail-item ${x.read_at?'':'unread'} ${x.action?'mail-actionable':''}" data-id="${x.id}"><div class="mail-icon">${x.type==='challenge'?'⚔️':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='chat_total'?'☯':'📬'}</div><div class="mail-main"><b>${esc(x.title)}</b><p>${esc(x.message)}</p><small>${new Date(x.created_at).toLocaleString('vi-VN')}</small>${actionButtons(x)}</div>${x.read_at?'':'<span class="mail-new">MỚI</span>'}</article>`).join('')||'<div class="empty-state compact"><p>Hòm thư đang tĩnh lặng.</p></div>'}</div>`;
   $('#mailboxToggle').onchange=async e=>{try{await api('/api/mailbox/toggle',{method:'POST',headers:authHeaders(),body:JSON.stringify({enabled:e.target.checked})});}catch(err){e.target.checked=!e.target.checked;}};
   $('#mailboxReadAll').onclick=async()=>{await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({})});await loadMailbox();};
-  document.querySelectorAll('.mail-item.unread').forEach(el=>el.onclick=async ev=>{
-    if(ev.target.closest('.mail-actions'))return;
-    await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(el.dataset.id)})});await loadMailbox();
+  document.querySelectorAll('.mail-action').forEach(btn=>btn.onclick=async()=>{
+   btn.disabled=true;
+   const action=btn.dataset.action,id=Number(btn.dataset.id);
+   try{
+    let url='',body={};
+    if(action==='challenge-accept'||action==='challenge-reject'){url='/api/challenges/online/respond';body={requestId:id,action:action.endsWith('accept')?'accept':'reject'};}
+    else if(action==='bicanh-accept'||action==='bicanh-reject'){url='/api/bicanh/invite/respond';body={invitationId:id,action:action.endsWith('accept')?'accept':'reject'};}
+    else if(action==='friend-accept'||action==='friend-reject'){url='/api/friends/respond';body={requestId:id,action:action.endsWith('accept')?'accept':'reject'};}
+    const result=await api(url,{method:'POST',headers:authHeaders(),body:JSON.stringify(body)});
+    await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(btn.closest('.mail-item')?.dataset.id||0)})});
+    const item=btn.closest('.mail-item'); if(item){item.classList.add('mail-processed');const actions=item.querySelector('.mail-actions');if(actions)actions.innerHTML=`<span class="mail-result">✓ ${esc(result.message||'Đã xử lý lời mời.')}</span>`;}
+    await loadMailbox();
+    if(action.startsWith('challenge-')){await loadChallenges();await loadArenaLive();}
+    if(action.startsWith('bicanh-')){await loadBicanh();}
+    if(action.startsWith('friend-')){await loadFriends();await loadData();}
+   }catch(err){btn.disabled=false;const item=btn.closest('.mail-item');let msg=item?.querySelector('.mail-error');if(!msg){msg=document.createElement('span');msg.className='mail-error';item?.querySelector('.mail-main')?.appendChild(msg);}if(msg)msg.textContent='❌ '+err.message;}
   });
-  document.querySelectorAll('.mail-accept').forEach(btn=>btn.onclick=async ev=>{
-    ev.stopPropagation();
-    const id=Number(btn.dataset.id),row=(d.rows||[]).find(x=>Number(x.id)===id);
-    await respondMailboxAction(id,'accept',row?.actionData,btn);
-  });
-  document.querySelectorAll('.mail-reject').forEach(btn=>btn.onclick=async ev=>{
-    ev.stopPropagation();
-    const id=Number(btn.dataset.id),row=(d.rows||[]).find(x=>Number(x.id)===id);
-    await respondMailboxAction(id,'reject',row?.actionData,btn);
-  });
- }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
+  document.querySelectorAll('.mail-item.unread:not(.mail-actionable)').forEach(el=>el.onclick=async()=>{await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(el.dataset.id)})});await loadMailbox();});
+  if(badge){badge.style.display=Number(d.unread||0)>0?'inline-flex':'none';}
+ }catch(e){area.innerHTML=`<div class="empty-state compact"><p>❌ ${esc(e.message)}</p></div>`;}
 }
 async function loadChat(){
  if(!getToken())return;
@@ -939,7 +849,7 @@ function renderAuth(mode){
  const register=mode==='register';
  $('#accountContent').innerHTML=`<div class="auth-title">寒天門</div><div class="auth-sub">Ghi danh môn nhân · Dữ liệu được lưu trong PostgreSQL</div><div class="tabs"><button class="tab ${!register?'active':''}" data-mode="login">Đăng nhập</button><button class="tab ${register?'active':''}" data-mode="register">Đăng ký</button></div><form id="authForm" class="auth-form"><div class="field ${register?'':'hidden'}"><label>Danh xưng</label><input id="displayName" maxlength="40" ${register?'required':''} placeholder="Tên hiển thị"></div><div class="field"><label>Tên tài khoản</label><input id="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="tu_tien_01"></div><div class="field"><label>Mật khẩu</label><input id="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Ít nhất 6 ký tự"></div><button class="btn primary" type="submit">${register?'Ghi danh vào sơn môn':'Nhập môn'}</button><div id="authMsg" class="auth-msg"></div></form>`;
  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>renderAuth(b.dataset.mode));
- $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadDisciples();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadDuongThu();await loadLinhPhap();await loadEquipment();await loadTuDi();await loadMarket();await loadProfessions();await loadData();await loadSectPosts();await loadChallenges();await loadArenaLive();maybeShowTutorial();}}catch(err){msg.textContent=err.message;}};
+ $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadDisciples();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadBeastHouse();await loadLinhPhap();await loadEquipment();await loadTuDi();await loadMarket();await loadProfessions();await loadData();await loadSectPosts();await loadChallenges();await loadArenaLive();maybeShowTutorial();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }
 async function logout(){try{await api('/api/logout',{method:'POST',headers:authHeaders()});}catch{}finally{localStorage.removeItem(tokenKey);currentProfile=null;accountUI(null);$('#accountModal').close();renderGuestAreas();}}
@@ -949,22 +859,20 @@ $('#memberModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.clos
 $('#searchInput').oninput=e=>{const q=e.target.value.toLowerCase().trim();renderMembers(members.filter(m=>[m.name,m.nick,m.role,...m.tags].join(' ').toLowerCase().includes(q)));};
 $('#accountBtn').onclick=openAccount;$('#joinBtn').onclick=()=>getToken()?accountSummary():renderAuth('register');
 $('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');const dark=document.body.classList.contains('dark');$('#themeBtn').textContent=dark?'☀':'☾';localStorage.setItem('theme',dark?'dark':'light');};
-$('#colorModeBtn').onclick=()=>{document.body.classList.toggle('color-flow');const enabled=document.body.classList.contains('color-flow');localStorage.setItem('colorMode',enabled?'flow':'normal');$('#colorModeBtn').textContent=enabled?'✨':'🌈';};
 $('#menuBtn').onclick=()=>$('#nav').classList.toggle('open');document.querySelectorAll('#nav a').forEach(a=>a.onclick=()=>$('#nav').classList.remove('open'));$('#topBtn').onclick=()=>scrollTo({top:0,behavior:'smooth'});
 if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$('#themeBtn').textContent='☀';}
-if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('color-flow');$('#colorModeBtn').textContent='✨';}
 setupTutorial();
 
 loadData();loadSect();checkSession();
-setInterval(()=>{if(getToken()){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},15000);
+setInterval(()=>{if(getToken()){sendPresenceHeartbeat();loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},5000);
 setInterval(()=>{if(getToken())sendPresenceHeartbeat();},30000);
-window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
+window.addEventListener('beforeunload',()=>{const token=getToken();if(token){navigator.sendBeacon('/api/presence/offline',new Blob([JSON.stringify({token})],{type:'application/json'}));}});
 
 /* v3.6.47 · Điều hướng tập trung theo từng chức năng */
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','dan-cac':'⚗️ Đan Các','duoc-duong':'💊 Dược Đường','beast-house':'🐉 Thú Đường','duong-thu':'💗 Dưỡng Thú','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','dan-cac':'⚗️ Đan Các','beast-house':'🐉 Thú Đường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Danh Sách Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
@@ -994,64 +902,3 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  window.addEventListener('popstate',()=>{const id=location.hash.slice(1);if(id&&labels[id])enterFocus(id,false);else exitFocus(false);});
  const initial=location.hash.slice(1);if(initial&&labels[initial])setTimeout(()=>enterFocus(initial,false),0);
 })();
-
-/* v3.6.57 · Trình phát nhạc nền kiểu streaming · MP4/AAC + MP3 fallback + Media Session */
-(function setupBackgroundMusic(){
- const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
- if(!audio||!playBtn||!stopBtn)return;
- const musicKey='htm_background_music',volumeKey='htm_background_volume';
- let savedVolume=parseFloat(localStorage.getItem(volumeKey));
- if(!Number.isFinite(savedVolume))savedVolume=.5;
- savedVolume=Math.max(0,Math.min(1,savedVolume));
- audio.volume=savedVolume; if(volume)volume.value=String(savedVolume);
- if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
- let desiredPlay=localStorage.getItem(musicKey)==='on';
- let loadingPromise=null;
- function setStatus(playing,text){
-   if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
-   if(msg)msg.textContent=text;
-   playBtn.disabled=playing;stopBtn.disabled=!playing;
- }
- function mediaMeta(){
-   if(!('mediaSession' in navigator))return;
-   try{navigator.mediaSession.metadata=new MediaMetadata({title:'Tinh Vệ · Hàn Thiên Môn',artist:'Hàn Thiên Môn',album:'Nhạc nền tiên hiệp'});}catch{}
- }
- async function waitForReady(){
-   if(audio.readyState>=2)return;
-   if(loadingPromise)return loadingPromise;
-   loadingPromise=new Promise((resolve,reject)=>{
-     const ok=()=>{cleanup();resolve();}, bad=()=>{cleanup();reject(new Error('audio-load'))};
-     const cleanup=()=>{audio.removeEventListener('canplay',ok);audio.removeEventListener('error',bad);};
-     audio.addEventListener('canplay',ok,{once:true});audio.addEventListener('error',bad,{once:true});
-     audio.load();
-   }).finally(()=>{loadingPromise=null;});
-   return loadingPromise;
- }
- async function start(fromGesture=false){
-   desiredPlay=true; localStorage.setItem(musicKey,'on');
-   try{
-     audio.loop=true; audio.muted=false; audio.volume=savedVolume;
-     await waitForReady();
-     await audio.play();
-     mediaMeta(); setStatus(true,'Nhạc nền đang phát liên tục.');
-   }catch(e){
-     setStatus(false,fromGesture?'Không phát được âm thanh. Hãy chạm Khởi Nhạc thêm một lần.':'Đã ghi nhớ phát nhạc. Chạm vào trang để trình duyệt cho phép âm thanh.');
-   }
- }
- function stop(){desiredPlay=false;localStorage.setItem(musicKey,'off');audio.pause();try{audio.currentTime=0;}catch{}setStatus(false,'Đã ngưng nhạc nền.');}
- playBtn.addEventListener('click',()=>start(true));
- stopBtn.addEventListener('click',stop);
- if(volume)volume.addEventListener('input',()=>{savedVolume=Math.max(0,Math.min(1,Number(volume.value)));audio.volume=savedVolume;localStorage.setItem(volumeKey,String(savedVolume));if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';});
- audio.addEventListener('play',()=>{mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');});
- audio.addEventListener('pause',()=>{if(!audio.ended&&desiredPlay)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');else if(!audio.ended)setStatus(false,'Đã ngưng nhạc nền.');});
- audio.addEventListener('ended',()=>{if(desiredPlay){audio.currentTime=0;start(false);}});
- audio.addEventListener('error',()=>setStatus(false,'Không đọc được luồng nhạc. Đang thử định dạng dự phòng…'));
- audio.addEventListener('stalled',()=>{if(desiredPlay)setTimeout(()=>{if(audio.paused)start(false);},800);});
- document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&desiredPlay&&audio.paused)start(false);});
- ['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev,()=>{if(desiredPlay&&audio.paused)start(false);},{passive:true}));
- if('mediaSession' in navigator){
-   try{navigator.mediaSession.setActionHandler('play',()=>start(true));navigator.mediaSession.setActionHandler('pause',stop);navigator.mediaSession.setActionHandler('stop',stop);}catch{}
- }
- setStatus(false,desiredPlay?'Đã ghi nhớ phát nhạc · chạm màn hình để mở khóa âm thanh.':'Đang ngưng nhạc.');
-})();
-
