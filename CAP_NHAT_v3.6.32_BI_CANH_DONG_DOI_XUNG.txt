@@ -1,0 +1,31 @@
+HÀN THIÊN MÔN v3.6.32 – CỬU ĐẠI BÍ CẢNH ĐỒNG ĐỘI
+
+1. Khởi động toàn bộ Cửu Đại Bí Cảnh
+- 9 Bí Cảnh từ Luyện Khí đến Độ Kiếp được tự động chuyển sang trạng thái active.
+- Không còn yêu cầu đóng góp linh thạch để mở cửa.
+
+2. Bí Cảnh đối xứng với cảnh giới
+- Mỗi đại cảnh giới chỉ được tham gia Bí Cảnh đúng cảnh giới tương ứng.
+- Không còn cho cảnh giới cao hơn đi xuống Bí Cảnh thấp hơn.
+
+3. Hàng chờ tối thiểu 2 người
+- Môn nhân phải nhấn “Tham gia” trước.
+- Khi chưa đủ 2 người, nút tiến vào bị khóa.
+- Từ 2 người trở lên mới có thể “Tiến vào Bí Cảnh”.
+
+4. Mời Bằng Hữu
+- Chỉ Bằng Hữu đã kết giao mới được mời.
+- Người được mời phải cùng đúng cảnh giới với Bí Cảnh.
+- Có danh sách lời mời và nút Chấp nhận/Từ chối.
+
+5. PostgreSQL
+- Thêm secret_realm_participants.
+- Thêm secret_realm_invitations.
+- Runtime migration và unique indexes để tương thích database Render cũ.
+
+6. Tương thích
+- Giữ lịch sử secret_realm_runs.
+- Giữ hệ thống phần thưởng, debuff và cơ chế thám hiểm hiện có.
+- Endpoint đóng góp cũ trả thông báo 410 vì Bí Cảnh đã được khởi động sẵn.
+
+Đã kiểm tra node --check server.js và script.js.

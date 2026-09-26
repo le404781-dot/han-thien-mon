@@ -254,10 +254,47 @@ async function ensureBicanhSchema() {
     ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
     ALTER TABLE secret_realm_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+    CREATE TABLE IF NOT EXISTS secret_realm_participants (
+      id BIGSERIAL PRIMARY KEY,
+      realm_id INTEGER NOT NULL REFERENCES secret_realms(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'joined' CHECK(status IN ('joined','entered','left')),
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      entered_at TIMESTAMPTZ,
+      left_at TIMESTAMPTZ,
+      UNIQUE(realm_id,user_id)
+    );
+    ALTER TABLE secret_realm_participants ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'joined';
+    ALTER TABLE secret_realm_participants ADD COLUMN IF NOT EXISTS joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE secret_realm_participants ADD COLUMN IF NOT EXISTS entered_at TIMESTAMPTZ;
+    ALTER TABLE secret_realm_participants ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ;
+    CREATE INDEX IF NOT EXISTS idx_secret_realm_participants_realm_status ON secret_realm_participants(realm_id,status,joined_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_secret_realm_participants_realm_user ON secret_realm_participants(realm_id,user_id);
+
+    CREATE TABLE IF NOT EXISTS secret_realm_invitations (
+      id BIGSERIAL PRIMARY KEY,
+      realm_id INTEGER NOT NULL REFERENCES secret_realms(id) ON DELETE CASCADE,
+      inviter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      invitee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected','expired')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      UNIQUE(realm_id,inviter_id,invitee_id)
+    );
+    ALTER TABLE secret_realm_invitations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
+    ALTER TABLE secret_realm_invitations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE secret_realm_invitations ADD COLUMN IF NOT EXISTS responded_at TIMESTAMPTZ;
+    CREATE INDEX IF NOT EXISTS idx_secret_realm_invites_invitee_status ON secret_realm_invitations(invitee_id,status,created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_secret_realm_invitations_key ON secret_realm_invitations(realm_id,inviter_id,invitee_id);
+
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+    -- v3.6.32: Cửu Đại Bí Cảnh luôn được khởi động. Mỗi Bí Cảnh đối xứng
+    -- đúng một đại cảnh giới; không còn phụ thuộc quỹ linh thạch khởi động.
+    UPDATE secret_realms SET status='active', active_until=NULL, paused_until=NULL, funded_stones=0;
 
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Vật phẩm';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
@@ -2357,27 +2394,58 @@ app.get('/api/bicanh',auth,async(req,res)=>{
   try{
     await ensureBicanhSchema();
     const uid=req.session.user_id;
-    const me=(await query(`SELECT spirit_power,spirit_stones,secret_realm_debuff_until,secret_realm_debuff_percent FROM profiles WHERE user_id=$1`,[uid])).rows[0];
+    const me=(await query(`SELECT spirit_stones,spirit_power,secret_realm_debuff_until,secret_realm_debuff_percent FROM profiles WHERE user_id=$1`,[uid])).rows[0];
     if(!me) return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});
     const stage=stageFor(Number(me.spirit_power)||0);
-    // Repair expired realms before returning the list. All parameters are explicit.
-    await query(`UPDATE secret_realms SET status='funding',funded_stones=0,active_until=NULL WHERE status='active' AND active_until IS NOT NULL AND active_until<=NOW()`);
-    await query(`UPDATE secret_realms SET status='funding',funded_stones=0,paused_until=NULL WHERE status='paused' AND paused_until IS NOT NULL AND paused_until<=NOW()`);
     const raw=(await query(`
       SELECT sr.id,sr.name,sr.description,sr.required_realm_index,sr.required_realm_name,
              sr.activation_cost,sr.funded_stones,sr.status,sr.active_until,sr.paused_until,
              sr.danger_percent,sr.debuff_percent,sr.loot_tier,sr.created_at,
-             COALESCE((SELECT SUM(src.amount) FROM secret_realm_contributions src WHERE src.realm_id=sr.id),0)::int AS contributed_total
+             COALESCE((SELECT COUNT(*) FROM secret_realm_participants sp WHERE sp.realm_id=sr.id AND sp.status IN ('joined','entered')),0)::int AS participant_count
       FROM secret_realms sr
       ORDER BY sr.required_realm_index ASC, sr.id ASC
     `)).rows;
-    const realms=raw.map(r=>({...r,
-      funded_stones:Number(r.funded_stones)||0,
-      contributed_total:Number(r.contributed_total)||0,
-      canEnter:stage.realmIndex>=Number(r.required_realm_index),
-      realm:stageFor(Number(RANKS[Number(r.required_realm_index)]?.min||0)).realm
-    }));
-    res.json({realms,me:{...me,stage:stage.stage,realmIndex:stage.realmIndex}});
+    const participantRows=(await query(`
+      SELECT sp.realm_id,sp.user_id,sp.status,sp.joined_at,u.display_name,p.avatar,p.rank,p.spirit_power
+      FROM secret_realm_participants sp
+      JOIN users u ON u.id=sp.user_id
+      JOIN profiles p ON p.user_id=sp.user_id
+      WHERE sp.status IN ('joined','entered')
+      ORDER BY sp.realm_id,sp.joined_at,sp.user_id
+    `)).rows;
+    const friends=(await query(`
+      SELECT u.id,u.display_name,p.avatar,p.rank,p.spirit_power,p.realm_tier
+      FROM friend_requests fr
+      JOIN users u ON u.id=CASE WHEN fr.requester_id=$1 THEN fr.addressee_id ELSE fr.requester_id END
+      JOIN profiles p ON p.user_id=u.id
+      WHERE (fr.requester_id=$1 OR fr.addressee_id=$1) AND fr.status='accepted'
+      ORDER BY u.display_name,u.id
+    `,[uid])).rows;
+    const invites=(await query(`
+      SELECT i.id,i.realm_id,i.inviter_id,i.created_at,sr.name AS realm_name,sr.required_realm_index,sr.required_realm_name,
+             u.display_name AS inviter_name,p.avatar AS inviter_avatar
+      FROM secret_realm_invitations i
+      JOIN secret_realms sr ON sr.id=i.realm_id
+      JOIN users u ON u.id=i.inviter_id
+      JOIN profiles p ON p.user_id=u.id
+      WHERE i.invitee_id=$1 AND i.status='pending'
+      ORDER BY i.created_at DESC
+    `,[uid])).rows;
+    const realms=raw.map(r=>{
+      const ps=participantRows.filter(x=>Number(x.realm_id)===Number(r.id));
+      const joined=ps.some(x=>Number(x.user_id)===Number(uid));
+      const matching=stage.realmIndex===Number(r.required_realm_index);
+      return {...r,
+        funded_stones:Number(r.funded_stones)||0,
+        participant_count:ps.length,
+        participants:ps,
+        joined,
+        canJoin:matching && r.status==='active',
+        canEnter:matching && r.status==='active' && ps.length>=2 && joined,
+        realm:RANKS[Number(r.required_realm_index)]?.name||r.required_realm_name
+      };
+    });
+    res.json({realms,me:{...me,stage:stage.stage,realmIndex:stage.realmIndex},friends,invites});
   }catch(e){
     console.error('bicanh load:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,position:e?.position,where:e?.where,query:e?.query,table:e?.table,column:e?.column});
     res.status(500).json({error:`Không thể mở Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});
@@ -2385,33 +2453,81 @@ app.get('/api/bicanh',auth,async(req,res)=>{
 });
 
 app.post('/api/bicanh/contribute',auth,async(req,res)=>{
+  return res.status(410).json({error:'Cửu Đại Bí Cảnh đã được khởi động sẵn. Không cần đóng góp linh thạch để mở cửa.'});
+});
+
+app.post('/api/bicanh/join',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
     await ensureBicanhSchema();
-    const uid=req.session.user_id, realmId=Number(req.body?.realmId), amount=Math.floor(Number(req.body?.amount));
-    if(!Number.isInteger(realmId)||realmId<1||!Number.isInteger(amount)||amount<1)return res.status(400).json({error:'Số linh thạch đóng góp không hợp lệ.'});
+    const uid=req.session.user_id, realmId=Number(req.body?.realmId);
+    if(!Number.isInteger(realmId)||realmId<1)return res.status(400).json({error:'Bí Cảnh không hợp lệ.'});
     await client.query('BEGIN');
     const realm=(await client.query(`SELECT * FROM secret_realms WHERE id=$1 FOR UPDATE`,[realmId])).rows[0];
-    const p=(await client.query(`SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    const p=(await client.query(`SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
     if(!realm||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Bí Cảnh hoặc hồ sơ.'});}
-    if(realm.status!=='funding'){await client.query('ROLLBACK');return res.status(409).json({error:realm.status==='active'?'Bí Cảnh đã khởi động.':'Bí Cảnh đang tạm hoãn.'});}
+    if(realm.status!=='active'){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh hiện không hoạt động.'});}
     const st=stageFor(Number(p.spirit_power)||0);
-    if(st.realmIndex<Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần ${realm.required_realm_name} trở lên để đóng góp vào Bí Cảnh này.`});}
-    if(Number(p.spirit_stones)<amount){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ linh thạch.'});}
-    const remaining=Math.max(0,Number(realm.activation_cost)-Number(realm.funded_stones));
-    const pay=Math.min(amount,remaining);
-    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,pay]);
-    await client.query(`INSERT INTO secret_realm_contributions(realm_id,user_id,amount) VALUES($1,$2,$3)`,[realmId,pay]);
-    const funded=Number(realm.funded_stones)+pay;
-    if(funded>=Number(realm.activation_cost)){
-      await client.query(`UPDATE secret_realms SET funded_stones=0,status='active',active_until=NOW()+INTERVAL '60 minutes' WHERE id=$1`,[realmId]);
-      await client.query('COMMIT');
-      return res.json({ok:true,activated:true,paid:pay,message:`${realm.name} đã được khởi động! Mở cửa trong 60 phút.`});
-    }
-    await client.query(`UPDATE secret_realms SET funded_stones=$2 WHERE id=$1`,[realmId,funded]);
+    if(st.realmIndex!==Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`${realm.name} chỉ dành cho ${realm.required_realm_name} tương ứng. Cảnh giới hiện tại: ${st.realm}.`});}
+    await client.query(`INSERT INTO secret_realm_participants(realm_id,user_id,status,joined_at,left_at,entered_at) VALUES($1,$2,'joined',NOW(),NULL,NULL)
+      ON CONFLICT(realm_id,user_id) DO UPDATE SET status='joined',joined_at=NOW(),left_at=NULL,entered_at=NULL`,[realmId,uid]);
+    const count=Number((await client.query(`SELECT COUNT(*)::int AS c FROM secret_realm_participants WHERE realm_id=$1 AND status IN ('joined','entered')`,[realmId])).rows[0].c)||0;
     await client.query('COMMIT');
-    res.json({ok:true,activated:false,paid:pay,funded,remaining:Number(realm.activation_cost)-funded,message:`Đã đóng ${pay} linh thạch. Còn ${Number(realm.activation_cost)-funded} linh thạch để khởi động.`});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh contribute:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,table:e?.table,column:e?.column,query:e?.query});res.status(500).json({error:`Đóng góp Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
+    res.json({ok:true,participantCount:count,canEnter:count>=2,message:count>=2?`Đã tham gia ${realm.name}. Đủ ${count} người, có thể tiến vào Bí Cảnh.`:`Đã tham gia ${realm.name}. Cần ít nhất 2 môn nhân nhấn tham gia (${count}/2).`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh join:',e);res.status(500).json({error:`Không thể tham gia Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
+});
+
+app.post('/api/bicanh/leave',auth,async(req,res)=>{
+  try{
+    await ensureBicanhSchema();
+    const uid=req.session.user_id, realmId=Number(req.body?.realmId);
+    if(!Number.isInteger(realmId)||realmId<1)return res.status(400).json({error:'Bí Cảnh không hợp lệ.'});
+    const r=await query(`UPDATE secret_realm_participants SET status='left',left_at=NOW() WHERE realm_id=$1 AND user_id=$2 AND status='joined' RETURNING id`,[realmId,uid]);
+    if(!r.rows.length)return res.status(404).json({error:'Bạn chưa tham gia phòng Bí Cảnh này.'});
+    res.json({ok:true,message:'Đã rời hàng chờ Bí Cảnh.'});
+  }catch(e){res.status(500).json({error:'Không thể rời Bí Cảnh.'});}
+});
+
+app.post('/api/bicanh/invite',auth,async(req,res)=>{
+  try{
+    await ensureBicanhSchema();
+    const uid=req.session.user_id, realmId=Number(req.body?.realmId), friendId=Number(req.body?.friendId);
+    if(!Number.isInteger(realmId)||!Number.isInteger(friendId)||friendId<1||friendId===uid)return res.status(400).json({error:'Lời mời không hợp lệ.'});
+    if(!(await areFriends(uid,friendId)))return res.status(403).json({error:'Chỉ có thể mời Bằng Hữu đã kết giao.'});
+    const realm=(await query(`SELECT * FROM secret_realms WHERE id=$1`,[realmId])).rows[0];
+    if(!realm)return res.status(404).json({error:'Không tìm thấy Bí Cảnh.'});
+    const me=(await query(`SELECT spirit_power FROM profiles WHERE user_id=$1`,[uid])).rows[0];
+    const friend=(await query(`SELECT spirit_power FROM profiles WHERE user_id=$1`,[friendId])).rows[0];
+    if(!me||!friend)return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});
+    if(stageFor(Number(me.spirit_power)||0).realmIndex!==Number(realm.required_realm_index))return res.status(403).json({error:'Bạn chỉ có thể mời trong Bí Cảnh đối xứng với cảnh giới của mình.'});
+    if(stageFor(Number(friend.spirit_power)||0).realmIndex!==Number(realm.required_realm_index))return res.status(400).json({error:`Bằng Hữu phải ở đúng cảnh giới ${realm.required_realm_name} mới có thể tham gia Bí Cảnh này.`});
+    const r=await query(`INSERT INTO secret_realm_invitations(realm_id,inviter_id,invitee_id,status) VALUES($1,$2,$3,'pending') ON CONFLICT(realm_id,inviter_id,invitee_id) DO UPDATE SET status='pending',created_at=NOW(),responded_at=NULL RETURNING id`,[realmId,uid,friendId]);
+    res.json({ok:true,id:r.rows[0].id,message:'Đã gửi lời mời tham gia Bí Cảnh cho Bằng Hữu.'});
+  }catch(e){console.error('bicanh invite:',e);res.status(500).json({error:`Không thể gửi lời mời Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}
+});
+
+app.post('/api/bicanh/invite/respond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await ensureBicanhSchema();
+    const uid=req.session.user_id, invitationId=Number(req.body?.invitationId), action=String(req.body?.action||'');
+    if(!Number.isInteger(invitationId)||!['accept','reject'].includes(action))return res.status(400).json({error:'Lời mời không hợp lệ.'});
+    await client.query('BEGIN');
+    const inv=(await client.query(`SELECT i.*,sr.name AS realm_name,sr.required_realm_index,sr.required_realm_name FROM secret_realm_invitations i JOIN secret_realms sr ON sr.id=i.realm_id WHERE i.id=$1 AND i.invitee_id=$2 AND i.status='pending' FOR UPDATE`,[invitationId,uid])).rows[0];
+    if(!inv){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời không còn hiệu lực.'});}
+    if(action==='reject'){
+      await client.query(`UPDATE secret_realm_invitations SET status='rejected',responded_at=NOW() WHERE id=$1`,[invitationId]);
+      await client.query('COMMIT');return res.json({ok:true,status:'rejected',message:'Đã từ chối lời mời Bí Cảnh.'});
+    }
+    const p=(await client.query(`SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    const st=stageFor(Number(p?.spirit_power)||0);
+    if(st.realmIndex!==Number(inv.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Bạn phải ở đúng cảnh giới ${inv.required_realm_name} mới có thể nhận lời mời.`});}
+    await client.query(`UPDATE secret_realm_invitations SET status='accepted',responded_at=NOW() WHERE id=$1`,[invitationId]);
+    await client.query(`INSERT INTO secret_realm_participants(realm_id,user_id,status,joined_at,left_at,entered_at) VALUES($1,$2,'joined',NOW(),NULL,NULL) ON CONFLICT(realm_id,user_id) DO UPDATE SET status='joined',joined_at=NOW(),left_at=NULL,entered_at=NULL`,[inv.realm_id,uid]);
+    const count=Number((await client.query(`SELECT COUNT(*)::int AS c FROM secret_realm_participants WHERE realm_id=$1 AND status IN ('joined','entered')`,[inv.realm_id])).rows[0].c)||0;
+    await client.query('COMMIT');
+    res.json({ok:true,status:'accepted',participantCount:count,canEnter:count>=2,message:count>=2?'Đã tham gia. Bí Cảnh đủ 2 người, có thể tiến vào.':'Đã nhận lời mời và tham gia hàng chờ Bí Cảnh.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh invite respond:',e);res.status(500).json({error:'Không thể xử lý lời mời Bí Cảnh.'});}finally{client.release();}
 });
 
 app.post('/api/bicanh/enter',auth,async(req,res)=>{
@@ -2424,15 +2540,20 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
     const realm=(await client.query(`SELECT * FROM secret_realms WHERE id=$1 FOR UPDATE`,[realmId])).rows[0];
     const p=(await client.query(`SELECT p.*,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1 FOR UPDATE`,[uid])).rows[0];
     if(!realm||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Bí Cảnh hoặc hồ sơ.'});}
-    if(realm.status!=='active'||!realm.active_until||new Date(realm.active_until)<=new Date()){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh chưa được khởi động hoặc đã đóng.'});}
+    if(realm.status!=='active'){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh hiện không hoạt động.'});}
     const st=stageFor(Number(p.spirit_power)||0);
-    if(st.realmIndex<Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần ${realm.required_realm_name} trở lên mới có thể bước vào.`});}
-    const gap=st.realmIndex-Number(realm.required_realm_index);
+    if(st.realmIndex!==Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Chỉ cảnh giới ${realm.required_realm_name} mới có thể vào Bí Cảnh đối xứng này.`});}
+    const joined=(await client.query(`SELECT status FROM secret_realm_participants WHERE realm_id=$1 AND user_id=$2 FOR UPDATE`,[realmId,uid])).rows[0];
+    if(!joined || !['joined','entered'].includes(joined.status)){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn phải nhấn Tham gia Bí Cảnh trước.'});}
+    const participantCount=Number((await client.query(`SELECT COUNT(*)::int AS c FROM secret_realm_participants WHERE realm_id=$1 AND status IN ('joined','entered')`,[realmId])).rows[0].c)||0;
+    if(participantCount<2){await client.query('ROLLBACK');return res.status(409).json({error:`Bí Cảnh cần tối thiểu 2 môn nhân nhấn tham gia (${participantCount}/2). Hãy mời Bằng Hữu.`});}
+    const gap=Math.abs(st.realmIndex-Number(realm.required_realm_index));
     const breakChance=Math.min(65,Math.max(0,gap*12-4));
     if(gap>=2 && crypto.randomInt(1,101)<=breakChance){
       const pauseMinutes=Math.min(90,20+gap*10);
       await client.query(`UPDATE secret_realms SET status='paused',paused_until=NOW() + ($2::double precision * INTERVAL '1 minute'),active_until=NULL,funded_stones=0 WHERE id=$1`,[realmId,String(pauseMinutes)]);
       await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,reward_type,note) VALUES($1,$2,'broken','','Cảnh giới cao phá vỡ linh áp, Bí Cảnh tạm hoãn ${pauseMinutes} phút.')`,[realmId,uid]);
+      await client.query(`UPDATE secret_realm_participants SET status='entered',entered_at=NOW() WHERE realm_id=$1 AND user_id=$2`,[realmId,uid]);
       await client.query('COMMIT');
       return res.json({ok:true,outcome:'broken',message:`Thiên uy của ${st.stage} áp đảo ${realm.name}, Bí Cảnh bị phá vỡ và tạm hoãn ${pauseMinutes} phút.`});
     }
@@ -2446,6 +2567,7 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
       await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,secret_realm_debuff_until=NULL,secret_realm_debuff_percent=0,updated_at=NOW() WHERE user_id=$1`,[uid,newSpirit,spiritGain,ns.realm,ns.tier]);
       const itemId=loot.item?.id||null;
       await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,reward_type,reward_item_id,reward_quantity,reward_stones,spirit_gain,note) VALUES($1,$2,'success',$3,$4,$5,$6,$7,$8)`,[realmId,uid,loot.type,itemId,loot.quantity||0,loot.stones||0,spiritGain,`Thành công tại ${realm.name}.`]);
+      await client.query(`UPDATE secret_realm_participants SET status='entered',entered_at=NOW() WHERE realm_id=$1 AND user_id=$2`,[realmId,uid]);
       await client.query('COMMIT');
       const rewardText=loot.type==='stones'?`+${loot.stones} linh thạch`:loot.type==='root'?`Linh Căn ${loot.item.name}`:loot.type==='beast'?`Linh Thú ${loot.item.name}`:`${loot.item?.name||'Vật phẩm'} ×1`;
       return res.json({ok:true,outcome:'success',successChance,spiritGain,newSpirit,stage:ns.stage,reward:loot,message:`Bí Cảnh thành công! +${spiritGain} linh lực, nhận ${rewardText}.`});
@@ -2458,6 +2580,7 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
     await client.query(`UPDATE profiles SET spirit_power=$2,experience=GREATEST(0,experience-$3),rank=$4,realm_tier=$5,secret_realm_debuff_until=NOW() + ($6::double precision * INTERVAL '1 minute'),secret_realm_debuff_percent=$7,updated_at=NOW() WHERE user_id=$1`,[uid,newSpirit,Math.floor(loss/2),ns.realm,ns.tier,String(duration),debuff]);
     const note=`Bí Cảnh thất bại: mất ${loss} linh lực, debuff -${debuff}% trong ${duration} phút.`;
     await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,debuff_percent,debuff_until,note) VALUES($1,$2,'failure',$3,NOW() + ($4::double precision * INTERVAL '1 minute'),$5)`,[realmId,uid,debuff,String(duration),note]);
+    await client.query(`UPDATE secret_realm_participants SET status='entered',entered_at=NOW() WHERE realm_id=$1 AND user_id=$2`,[realmId,uid]);
     await client.query('COMMIT');
     res.json({ok:true,outcome:'failure',successChance,lossSpirit:loss,newSpirit,stage:ns.stage,debuffPercent:debuff,debuffMinutes:duration,message:note});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh enter:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,table:e?.table,column:e?.column,query:e?.query});res.status(500).json({error:`Tham gia Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
