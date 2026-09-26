@@ -382,6 +382,13 @@ function stageFor(spirit) {
 }
 function rankFor(spirit) { return RANKS[realmIndexFor(spirit)]; }
 
+// Online: cảnh giới càng cao thì tốc độ tích lũy linh lực càng thấp.
+// Có 18 đại cảnh giới -> Luyện Khí +18/phút, Tiên Đế +1/phút.
+function onlineSpiritRate(realmIndex){
+  const ri=Math.max(0,Math.min(RANKS.length-1,Number(realmIndex)||0));
+  return Math.max(1,RANKS.length-ri);
+}
+
 const TECHNIQUE_GRADES = ['Hạ Phẩm','Trung Phẩm','Thượng Phẩm'];
 function techniqueSlots(realmIndex){ return Math.min(18, 2 + Math.floor(Math.max(0,Number(realmIndex)||0)/2)); }
 
@@ -1510,13 +1517,15 @@ app.get('/api/profile',auth,async(req,res)=>{
     const activity=(await query('SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1',[p.id])).rows[0];
     const trainCount=String(activity?.activity_date||'').slice(0,10)===today ? Number(activity.train_count)||0 : 0;
     const maxDaily=Math.max(2,10-stage.realmIndex);
+    const onlineRate=onlineSpiritRate(stage.realmIndex);
+    const onlineUnlocked=trainCount>=maxDaily && !Boolean(mansion?.active);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     const activeBattle=(await query(`SELECT id,challenger_id,opponent_id,challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action,started_at FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) ORDER BY id DESC LIMIT 1`,[p.id])).rows[0]||null;
     const healthMax=challengeHealth({...p,equipment_power:equipmentPower});
     const healthCurrent=activeBattle ? (Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_hp):Number(activeBattle.opponent_hp)) : healthMax;
 
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,techniqueSlots:techniqueSlots(stage.realmIndex),mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily}});
+    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,techniqueSlots:techniqueSlots(stage.realmIndex),mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:600}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -1713,16 +1722,16 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
     try{
       await client.query('BEGIN');
       const mansionState=await settleMansionIncome(client,req.session.user_id);
-      if(mansionState.active){await client.query('COMMIT');return res.json({mode:'mansion',active:true,gain:mansionState.gain,mansion:mansionState.name,message:`Động phủ ${mansionState.name} đang hoạt động; vận công online bị khóa.`});}
+      if(mansionState.active){await client.query('COMMIT');return res.status(423).json({mode:'mansion',active:false,locked:true,gain:mansionState.gain,mansion:mansionState.name,message:`Động phủ ${mansionState.name} đang khởi động; tích lũy Online cũng bị khóa cho đến khi ngưng động phủ.`});}
       const p=(await client.query(`SELECT spirit_power,last_online_at,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
       const st=stageFor(Number(p.spirit_power)||0);
       const maxDaily=Math.max(2,10-st.realmIndex);
       const a=(await client.query(`SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id])).rows[0];
       const trainCount= a && String(a.activity_date).slice(0,10)===today ? Number(a.train_count)||0 : 0;
+      const baseOnlineRate=onlineSpiritRate(st.realmIndex);
       if(trainCount<maxDaily){
-        await client.query('UPDATE profiles SET last_online_at=NOW(),online_spirit_date=$2,online_spirit_earned=0 WHERE user_id=$1',[req.session.user_id,today]);
         await client.query('COMMIT');
-        return res.json({mode:'cultivation',active:false,gain:0,onlineEarned:0});
+        return res.status(423).json({mode:'locked',active:false,locked:true,gain:0,onlineEarned:0,rate:baseOnlineRate,maxDaily,trainCount,message:`Online chỉ mở sau khi hoàn thành ${maxDaily}/${maxDaily} lượt vận công hôm nay.`});
       }
       let earned=String(p.online_spirit_date||'').slice(0,10)===today ? Number(p.online_spirit_earned)||0 : 0;
       let last=p.last_online_at?new Date(p.last_online_at).getTime():Date.now();
@@ -1731,7 +1740,8 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       const minutes=Math.floor(elapsed/60000);
       const dailyCap=600;
       const techRows=(await client.query(`SELECT ct.training_bonus_percent FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1`,[req.session.user_id])).rows;
-      const rate=(1+st.realmIndex)*(1+techniqueTrainingBonusFor(techRows)/100);
+      const techniqueBonus=techniqueTrainingBonusFor(techRows);
+      const rate=Math.max(1,Math.round(onlineSpiritRate(st.realmIndex)*(1+techniqueBonus/100)));
       const gain=Math.max(0,Math.min(minutes*rate,dailyCap-earned));
       let spirit=Number(p.spirit_power)||0;
       let breakthroughRewards=[];
@@ -1747,7 +1757,7 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       await client.query('COMMIT');
       const ns=stageFor(spirit);
       const stoneReward=breakthroughRewards.reduce((sum,x)=>sum+Number(x.amount||0),0);
-      res.json({mode:'online',active:true,gain,onlineEarned:earned,dailyCap,rate,spirit,stage:ns.stage,nextTickSeconds:60,breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
+      res.json({mode:'online',active:true,gain,onlineEarned:earned,dailyCap,rate,ratePerHour:rate*60,realm:ns.realm,realmIndex:ns.realmIndex,stage:ns.stage,nextTickSeconds:60,breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
   }catch(e){console.error('online cultivation:',e);res.status(500).json({error:'Không thể cập nhật linh lực trực tuyến.'});}
 });
@@ -2201,8 +2211,51 @@ app.post('/api/linh-phap/buy',auth,async(req,res)=>{
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('linh phap buy:',e);res.status(500).json({error:'Mua linh căn thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}
 });
 
+// v3.6.34: self-healing schema for Trang Bị / Công Pháp.
+async function ensureEquipmentSchema(){
+  await query(`
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Vật phẩm';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm_tier INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS attack INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS defense INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS speed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS spirit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS skill TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS support TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    CREATE TABLE IF NOT EXISTS owned_spirit_beasts (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,beast_id));
+    CREATE TABLE IF NOT EXISTS owned_spirit_roots (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,root_id INTEGER NOT NULL REFERENCES spirit_roots_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,root_id));
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_index INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Hạ Phẩm';
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+  `);
+}
+
 // CÔNG PHÁP TRANG BỊ · đổi công pháp đang sử dụng
 app.post('/api/techniques/equip',auth,async(req,res)=>{
+  await ensureEquipmentSchema();
   const client=await pool.connect();
   try{
     const techniqueId=Number(req.body?.techniqueId);
@@ -2216,13 +2269,13 @@ app.post('/api/techniques/equip',auth,async(req,res)=>{
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('technique equip:',e);res.status(500).json({error:'Không thể thay đổi công pháp đang trang bị.'});}finally{client.release();}
 });
 app.post('/api/techniques/unequip',auth,async(req,res)=>{
-  try{await query('UPDATE profiles SET equipped_technique_id=NULL,updated_at=NOW() WHERE user_id=$1',[req.session.user_id]);res.json({ok:true,message:'Đã tháo công pháp đang trang bị.'});}
+  try{await ensureEquipmentSchema(); await query('UPDATE profiles SET equipped_technique_id=NULL,updated_at=NOW() WHERE user_id=$1',[req.session.user_id]);res.json({ok:true,message:'Đã tháo công pháp đang trang bị.'});}
   catch(e){res.status(500).json({error:'Không thể tháo công pháp.'});}
 });
 
 // TRANG BỊ · quản lý Linh Thú, Linh Căn và Pháp Khí sở hữu
 app.get('/api/equipment',auth,async(req,res)=>{
-  try{
+  try{await ensureEquipmentSchema();
     const userId=req.session.user_id;
     await ensureProfile(userId);
     // Heal stale equipment before reading it. This also handles items removed by older migrations.
@@ -2262,6 +2315,7 @@ app.get('/api/equipment',auth,async(req,res)=>{
   }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
 app.post('/api/equipment/equip',auth,async(req,res)=>{
+  await ensureEquipmentSchema();
   const client=await pool.connect();
   try{
     await client.query('BEGIN'); const type=String(req.body?.type||''); const id=Number(req.body?.id);
@@ -2289,7 +2343,7 @@ app.post('/api/equipment/equip',auth,async(req,res)=>{
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('equipment equip:',e);res.status(500).json({error:'Không thể trang bị vật phẩm.'});}finally{client.release();}
 });
 app.post('/api/equipment/unequip',auth,async(req,res)=>{
-  try{const type=String(req.body?.type||''); const col={beast:'equipped_beast_id',root:'equipped_root_id',artifact:'equipped_artifact_id'}[type]; if(!col)return res.status(400).json({error:'Ô trang bị không hợp lệ.'}); await query(`UPDATE profiles SET ${col}=NULL,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id]); res.json({ok:true});}
+  try{await ensureEquipmentSchema();const type=String(req.body?.type||''); const col={beast:'equipped_beast_id',root:'equipped_root_id',artifact:'equipped_artifact_id'}[type]; if(!col)return res.status(400).json({error:'Ô trang bị không hợp lệ.'}); await query(`UPDATE profiles SET ${col}=NULL,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id]); res.json({ok:true});}
   catch(e){res.status(500).json({error:'Không thể tháo trang bị.'});}
 });
 
@@ -2434,14 +2488,19 @@ app.get('/api/bicanh',auth,async(req,res)=>{
     const realms=raw.map(r=>{
       const ps=participantRows.filter(x=>Number(x.realm_id)===Number(r.id));
       const joined=ps.some(x=>Number(x.user_id)===Number(uid));
-      const matching=stage.realmIndex===Number(r.required_realm_index);
+      const eligible=stage.realmIndex>=Number(r.required_realm_index);
+      const gap=Math.max(0,stage.realmIndex-Number(r.required_realm_index));
+      const breakChance=gap>0?Math.min(65,Math.max(8,gap*12-4)):0;
       return {...r,
         funded_stones:Number(r.funded_stones)||0,
         participant_count:ps.length,
         participants:ps,
         joined,
-        canJoin:matching && r.status==='active',
-        canEnter:matching && r.status==='active' && ps.length>=2 && joined,
+        eligible,
+        realm_gap:gap,
+        break_chance:breakChance,
+        canJoin:eligible && r.status==='active',
+        canEnter:eligible && r.status==='active' && ps.length>=2 && joined,
         realm:RANKS[Number(r.required_realm_index)]?.name||r.required_realm_name
       };
     });
@@ -2468,7 +2527,7 @@ app.post('/api/bicanh/join',auth,async(req,res)=>{
     if(!realm||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Bí Cảnh hoặc hồ sơ.'});}
     if(realm.status!=='active'){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh hiện không hoạt động.'});}
     const st=stageFor(Number(p.spirit_power)||0);
-    if(st.realmIndex!==Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`${realm.name} chỉ dành cho ${realm.required_realm_name} tương ứng. Cảnh giới hiện tại: ${st.realm}.`});}
+    if(st.realmIndex<Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`${realm.name} yêu cầu từ ${realm.required_realm_name} trở lên. Cảnh giới hiện tại: ${st.realm}.`});}
     await client.query(`INSERT INTO secret_realm_participants(realm_id,user_id,status,joined_at,left_at,entered_at) VALUES($1,$2,'joined',NOW(),NULL,NULL)
       ON CONFLICT(realm_id,user_id) DO UPDATE SET status='joined',joined_at=NOW(),left_at=NULL,entered_at=NULL`,[realmId,uid]);
     const count=Number((await client.query(`SELECT COUNT(*)::int AS c FROM secret_realm_participants WHERE realm_id=$1 AND status IN ('joined','entered')`,[realmId])).rows[0].c)||0;
@@ -2499,8 +2558,8 @@ app.post('/api/bicanh/invite',auth,async(req,res)=>{
     const me=(await query(`SELECT spirit_power FROM profiles WHERE user_id=$1`,[uid])).rows[0];
     const friend=(await query(`SELECT spirit_power FROM profiles WHERE user_id=$1`,[friendId])).rows[0];
     if(!me||!friend)return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});
-    if(stageFor(Number(me.spirit_power)||0).realmIndex!==Number(realm.required_realm_index))return res.status(403).json({error:'Bạn chỉ có thể mời trong Bí Cảnh đối xứng với cảnh giới của mình.'});
-    if(stageFor(Number(friend.spirit_power)||0).realmIndex!==Number(realm.required_realm_index))return res.status(400).json({error:`Bằng Hữu phải ở đúng cảnh giới ${realm.required_realm_name} mới có thể tham gia Bí Cảnh này.`});
+    if(stageFor(Number(me.spirit_power)||0).realmIndex<Number(realm.required_realm_index))return res.status(403).json({error:`Bạn phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể mời vào Bí Cảnh này.`});
+    if(stageFor(Number(friend.spirit_power)||0).realmIndex<Number(realm.required_realm_index))return res.status(400).json({error:`Bằng Hữu phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể tham gia Bí Cảnh này.`});
     const r=await query(`INSERT INTO secret_realm_invitations(realm_id,inviter_id,invitee_id,status) VALUES($1,$2,$3,'pending') ON CONFLICT(realm_id,inviter_id,invitee_id) DO UPDATE SET status='pending',created_at=NOW(),responded_at=NULL RETURNING id`,[realmId,uid,friendId]);
     res.json({ok:true,id:r.rows[0].id,message:'Đã gửi lời mời tham gia Bí Cảnh cho Bằng Hữu.'});
   }catch(e){console.error('bicanh invite:',e);res.status(500).json({error:`Không thể gửi lời mời Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}
@@ -2521,7 +2580,7 @@ app.post('/api/bicanh/invite/respond',auth,async(req,res)=>{
     }
     const p=(await client.query(`SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
     const st=stageFor(Number(p?.spirit_power)||0);
-    if(st.realmIndex!==Number(inv.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Bạn phải ở đúng cảnh giới ${inv.required_realm_name} mới có thể nhận lời mời.`});}
+    if(st.realmIndex<Number(inv.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Bạn phải từ cảnh giới ${inv.required_realm_name} trở lên mới có thể nhận lời mời.`});}
     await client.query(`UPDATE secret_realm_invitations SET status='accepted',responded_at=NOW() WHERE id=$1`,[invitationId]);
     await client.query(`INSERT INTO secret_realm_participants(realm_id,user_id,status,joined_at,left_at,entered_at) VALUES($1,$2,'joined',NOW(),NULL,NULL) ON CONFLICT(realm_id,user_id) DO UPDATE SET status='joined',joined_at=NOW(),left_at=NULL,entered_at=NULL`,[inv.realm_id,uid]);
     const count=Number((await client.query(`SELECT COUNT(*)::int AS c FROM secret_realm_participants WHERE realm_id=$1 AND status IN ('joined','entered')`,[inv.realm_id])).rows[0].c)||0;
@@ -2542,14 +2601,14 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
     if(!realm||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Bí Cảnh hoặc hồ sơ.'});}
     if(realm.status!=='active'){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh hiện không hoạt động.'});}
     const st=stageFor(Number(p.spirit_power)||0);
-    if(st.realmIndex!==Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Chỉ cảnh giới ${realm.required_realm_name} mới có thể vào Bí Cảnh đối xứng này.`});}
+    if(st.realmIndex<Number(realm.required_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Bạn phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể vào Bí Cảnh này.`});}
     const joined=(await client.query(`SELECT status FROM secret_realm_participants WHERE realm_id=$1 AND user_id=$2 FOR UPDATE`,[realmId,uid])).rows[0];
     if(!joined || !['joined','entered'].includes(joined.status)){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn phải nhấn Tham gia Bí Cảnh trước.'});}
     const participantCount=Number((await client.query(`SELECT COUNT(*)::int AS c FROM secret_realm_participants WHERE realm_id=$1 AND status IN ('joined','entered')`,[realmId])).rows[0].c)||0;
     if(participantCount<2){await client.query('ROLLBACK');return res.status(409).json({error:`Bí Cảnh cần tối thiểu 2 môn nhân nhấn tham gia (${participantCount}/2). Hãy mời Bằng Hữu.`});}
-    const gap=Math.abs(st.realmIndex-Number(realm.required_realm_index));
-    const breakChance=Math.min(65,Math.max(0,gap*12-4));
-    if(gap>=2 && crypto.randomInt(1,101)<=breakChance){
+    const gap=Math.max(0,st.realmIndex-Number(realm.required_realm_index));
+    const breakChance=gap>0?Math.min(65,Math.max(8,gap*12-4)):0;
+    if(gap>0 && crypto.randomInt(1,101)<=breakChance){
       const pauseMinutes=Math.min(90,20+gap*10);
       await client.query(`UPDATE secret_realms SET status='paused',paused_until=NOW() + ($2::double precision * INTERVAL '1 minute'),active_until=NULL,funded_stones=0 WHERE id=$1`,[realmId,String(pauseMinutes)]);
       await client.query(`INSERT INTO secret_realm_runs(realm_id,user_id,outcome,reward_type,note) VALUES($1,$2,'broken','','Cảnh giới cao phá vỡ linh áp, Bí Cảnh tạm hoãn ${pauseMinutes} phút.')`,[realmId,uid]);

@@ -1,0 +1,25 @@
+HÀN THIÊN MÔN v3.6.34
+
+1. TRANG BỊ
+- Thêm self-healing schema guard cho /api/equipment và các API đổi/tháo công pháp.
+- Tự bổ sung các cột equipped_beast_id, equipped_root_id, equipped_artifact_id, equipped_technique_id.
+- Tự bổ sung các cột catalog/tu di cần thiết cho Linh Thú, Linh Căn, Pháp Khí và Công Pháp.
+- Giữ nguyên chức năng trang bị/tháo Linh Thú, Linh Căn, Pháp Khí và thay đổi công pháp đang trang bị.
+
+2. BÍ CẢNH
+- Toàn bộ Cửu Đại Bí Cảnh vẫn mở sẵn.
+- Bí Cảnh đối xứng theo cảnh giới làm mốc.
+- Môn nhân được vào Bí Cảnh đúng cảnh giới hoặc Bí Cảnh thấp hơn.
+- Không được vào Bí Cảnh cao hơn cảnh giới hiện tại.
+- Cảnh giới càng cao đi vào Bí Cảnh thấp hơn càng có nguy cơ phá toái.
+- Công thức nguy cơ: chênh 1 cảnh giới = 8%; mỗi cảnh giới chênh thêm +12%; giới hạn 65%.
+- Nguy cơ được kiểm tra khi nhấn Tiến vào Bí Cảnh; nếu xảy ra, Bí Cảnh bị phá toái và tạm hoãn.
+- Vẫn yêu cầu tối thiểu 2 môn nhân tham gia trước khi tiến vào.
+- Có thể mời Bằng Hữu nếu người mời và người được mời đều từ cảnh giới của Bí Cảnh trở lên.
+
+3. Tương thích PostgreSQL Render
+- Các endpoint tự kiểm tra schema trước khi thao tác để giảm lỗi Missing Column trên database cũ.
+
+Kiểm tra cú pháp:
+- node --check server.js: OK
+- node --check script.js: OK

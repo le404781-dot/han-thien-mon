@@ -1,0 +1,29 @@
+HÀN THIÊN MÔN v3.6.33 – KHÓA VẬN CÔNG + ONLINE LINH LỰC THEO CẢNH GIỚI
+
+1. Vận công hằng ngày:
+- Khi đủ số lượt vận công trong ngày, nút Vận công tự khóa.
+- Server vẫn chặn giao dịch vượt giới hạn bằng HTTP 429.
+- Số lượt tối đa vẫn phụ thuộc cảnh giới: max(2, 10 - realmIndex).
+
+2. Động phủ:
+- Khi Động Phủ đang khởi động, Vận công bị khóa.
+- Online cũng bị khóa tương tự để không cộng linh lực chồng chéo.
+
+3. Tu luyện Online:
+- Hiển thị riêng một thẻ TU LUYỆN ONLINE trong mục Tu luyện.
+- Online chỉ mở sau khi hoàn thành đủ lượt vận công trong ngày.
+- Nếu Động Phủ đang hoạt động, Online bị khóa.
+- Tốc độ linh lực theo đại cảnh giới và giảm dần khi cảnh giới cao hơn:
+  Luyện Khí +18/phút ... Tiên Đế +1/phút.
+- Công pháp tăng hiệu quả vận công vẫn có thể cộng hệ số vào tốc độ Online.
+- Giới hạn tích lũy Online: 600 linh lực/ngày.
+- Tự động tiếp tục tích lũy dựa trên thời gian kể từ lần cập nhật Online trước, kể cả khi người dùng rời trang.
+
+4. UI:
+- Hiển thị trạng thái Online, tốc độ linh lực/phút, ước tính/giờ và lý do khóa nếu chưa đủ lượt hoặc đang bật Động Phủ.
+
+Kiểm tra cú pháp:
+- server.js: OK
+- script.js: OK
+
+Không thay đổi dữ liệu người dùng hiện có.
