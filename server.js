@@ -5,42 +5,24 @@ const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATABASE_URL = process.env.DATABASE_URL || '';
+const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
-  console.error('CẢNH BÁO: Thiếu DATABASE_URL. HTTP server vẫn được mở để Render nhận diện port; database sẽ tự retry cho đến khi DATABASE_URL được cung cấp.');
+  console.error('Thiếu DATABASE_URL. Hãy tạo PostgreSQL và thêm biến môi trường DATABASE_URL trên Render.');
+  process.exit(1);
 }
 
 const pool = new Pool({
-  connectionString: DATABASE_URL || undefined,
+  connectionString: DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   max: 5
 });
 
 async function query(text, params = []) { return pool.query(text, params); }
 
-// v3.6.53: serialize ALL schema guards across Render instances.
-// A per-process Promise cache is not enough because Render may have two
-// Node processes during deploy. Every DDL guard must share the same
-// PostgreSQL advisory lock used by initDb().
-const SCHEMA_LOCK_KEY = 'han-thien-mon-schema-v3.6.53';
-let schemaLockHeld = false;
-async function withSchemaAdvisoryLock(work) {
-  if (schemaLockHeld) return work();
-  const client = await pool.connect();
-  try {
-    await client.query('SELECT pg_advisory_lock(hashtext($1))', [SCHEMA_LOCK_KEY]);
-    return await work();
-  } finally {
-    try { await client.query('SELECT pg_advisory_unlock(hashtext($1))', [SCHEMA_LOCK_KEY]); } catch {}
-    client.release();
-  }
-}
-
-
 // Runtime schema guard: Render/PostgreSQL deployments can keep an older schema
 // even after a newer app is deployed. Repair the columns used by profile,
 // cultivation and equipment before serving those endpoints.
-async function _ensureRuntimeSchema() {
+async function ensureRuntimeSchema() {
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
@@ -79,14 +61,6 @@ async function _ensureRuntimeSchema() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS item_avatar_unlocked BOOLEAN NOT NULL DEFAULT FALSE;
-  `);
-  // Unlock the item-avatar customization feature for the designated account.
-  // This is idempotent and also repairs existing Render databases automatically.
-  await query(`
-    UPDATE profiles p SET item_avatar_unlocked=TRUE, updated_at=NOW()
-    FROM users u
-    WHERE u.id=p.user_id AND LOWER(u.username)=LOWER('thienha_666')
   `);
   await query(`
     CREATE TABLE IF NOT EXISTS daily_activity (
@@ -144,7 +118,6 @@ async function _ensureRuntimeSchema() {
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     -- v3.6.23: migrate old PostgreSQL schemas used before Tàng Thư Các / Động Phủ.
     -- CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
-    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_name TEXT NOT NULL DEFAULT 'Luyện Khí';
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Hạ Phẩm';
@@ -197,7 +170,6 @@ async function _ensureRuntimeSchema() {
     -- without the columns used when a member enters/receives Bí Cảnh loot.
     ALTER TABLE secret_realms ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE secret_realm_contributions ADD COLUMN IF NOT EXISTS id BIGSERIAL;
-    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Vật phẩm';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS price INTEGER NOT NULL DEFAULT 0;
@@ -208,7 +180,6 @@ async function _ensureRuntimeSchema() {
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS support TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
@@ -223,23 +194,11 @@ async function _ensureRuntimeSchema() {
   `);
 }
 
-
-let runtimeSchemaPromise=null;
-async function ensureRuntimeSchema(){
-  if(!runtimeSchemaPromise){
-    runtimeSchemaPromise=withSchemaAdvisoryLock(()=>_ensureRuntimeSchema()).catch(err=>{
-      runtimeSchemaPromise=null;
-      throw err;
-    });
-  }
-  return runtimeSchemaPromise;
-}
-
 // v3.6.27: Bí Cảnh schema self-healing guard.
 // Một số Render databases được tạo từ các phiên bản rất cũ và có thể thiếu
 // cột dù migration lúc khởi động đã chạy trước đó. Các endpoint Bí Cảnh gọi
 // guard này để tự phục hồi ngay trước khi truy vấn dữ liệu.
-async function _ensureBicanhSchema() {
+async function ensureBicanhSchema() {
   await query(`
     CREATE TABLE IF NOT EXISTS secret_realms (
       id SERIAL PRIMARY KEY,
@@ -515,20 +474,7 @@ function progressFor(spirit) {
   return {rank:r.name,tier:s.tier,stage:s.stage,tierName:s.tierName,maxTier:9,percent,next:nextRealm?.name||null,remaining:nextRealm?Math.max(0,nextRealm.min-spirit):0};
 }
 
-
-
-let bicanhSchemaPromise=null;
-async function ensureBicanhSchema(){
-  if(!bicanhSchemaPromise){
-    bicanhSchemaPromise=withSchemaAdvisoryLock(()=>_ensureBicanhSchema()).catch(err=>{
-      bicanhSchemaPromise=null;
-      throw err;
-    });
-  }
-  return bicanhSchemaPromise;
-}
-
-async function _ensureTienPhapSchema(){
+async function ensureTienPhapSchema(){
   await query(`
     CREATE TABLE IF NOT EXISTS immortal_techniques (
       id SERIAL PRIMARY KEY,
@@ -554,16 +500,6 @@ async function _ensureTienPhapSchema(){
     CREATE INDEX IF NOT EXISTS idx_immortal_techniques_realm ON immortal_techniques(realm_index,id);
   `);
 }
-let tienPhapSchemaPromise=null;
-async function ensureTienPhapSchema(){
-  if(!tienPhapSchemaPromise){
-    tienPhapSchemaPromise=withSchemaAdvisoryLock(()=>_ensureTienPhapSchema()).catch(err=>{
-      tienPhapSchemaPromise=null;
-      throw err;
-    });
-  }
-  return tienPhapSchemaPromise;
-}
 async function seedTienPhap(){
   const grades=['Hạ Tiên Pháp','Trung Tiên Pháp','Thượng Tiên Pháp'];
   for(let ri=IMMORTAL_REALM_START;ri<RANKS.length;ri++){
@@ -579,7 +515,7 @@ async function seedTienPhap(){
   }
 }
 
-async function _initDbOnce() {
+async function initDb() {
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -1329,39 +1265,6 @@ async function _initDbOnce() {
   }
 }
 
-
-// v3.6.52: PostgreSQL migration/seed lock + deadlock retry.
-// Render can briefly run overlapping instances during deploy. Without a
-// database advisory lock, two initDb() calls can concurrently ALTER/UPSERT
-// the same catalog tables and PostgreSQL may abort one with 40P01.
-async function initDb(){
-  const lockClient=await pool.connect();
-  try{
-    await lockClient.query('SELECT pg_advisory_lock(hashtext($1))',[SCHEMA_LOCK_KEY]);
-    schemaLockHeld = true;
-    let lastErr;
-    for(let attempt=1;attempt<=4;attempt++){
-      try{
-        await _initDbOnce();
-        return;
-      }catch(e){
-        lastErr=e;
-        const isDeadlock=String(e?.code||'')==='40P01' || /deadlock detected/i.test(String(e?.message||''));
-        if(!isDeadlock || attempt===4) throw e;
-        const waitMs=250*attempt;
-        console.warn(`Database deadlock khi khởi tạo DB, retry ${attempt}/3 sau ${waitMs}ms.`);
-        await new Promise(r=>setTimeout(r,waitMs));
-      }
-    }
-    throw lastErr;
-  }finally{
-    schemaLockHeld = false;
-    try{await lockClient.query('SELECT pg_advisory_unlock(hashtext($1))',[SCHEMA_LOCK_KEY]);}catch{}
-    lockClient.release();
-  }
-}
-
-
 async function ensureQuestCycle() {
   const cycle=Math.floor(Date.now()/300000); // 5 phút / chu kỳ
   const cycleKey=String(cycle);
@@ -1529,18 +1432,7 @@ async function auth(req,res,next) {
   } catch(e) { res.status(500).json({error:'Lỗi máy chủ.'}); }
 }
 
-let dbReady = false;
-let dbInitError = null;
-app.get('/api/health',(req,res)=>res.status(dbReady?200:503).json({ok:dbReady,service:'Hàn Thiên Môn',database:dbReady?'ready':'initializing',error:dbReady?null:(dbInitError?.message||null)}));
-
-// Keep Render's web port available immediately. Database migrations can take
-// longer than Render's startup-port detection window, especially on a cold
-// free PostgreSQL instance. API requests wait until initialization completes.
-app.use((req,res,next)=>{
-  if(req.path==='/api/health' || !req.path.startsWith('/api/')) return next();
-  if(dbReady) return next();
-  return res.status(503).json({error:'Hàn Thiên Môn đang khởi tạo cơ sở dữ liệu. Vui lòng thử lại sau ít giây.'});
-});
+app.get('/api/health',(req,res)=>res.json({ok:true,service:'Hàn Thiên Môn'}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TRUYỀN KỲ · mỗi môn nhân có một mục truyền kỳ công khai toàn tông môn
@@ -1759,8 +1651,6 @@ app.get('/api/profile',auth,async(req,res)=>{
       COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count
       FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[req.session.user_id]);
     const p=r.rows[0];
-    // The feature flag is account-scoped; thienha_666 is force-unlocked by migration above.
-    p.item_avatar_unlocked=Boolean(p.item_avatar_unlocked) || String(p.username||'').toLowerCase()==='thienha_666';
     await ensureAchievements(p.id,p.spirit_power);
     const stage=stageFor(p.spirit_power);
     const eq=(await query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,
@@ -1869,7 +1759,7 @@ app.get('/api/codex',auth,async(req,res)=>{
     if(!p)return res.status(404).json({error:'Không tìm thấy hồ sơ.'});
     const st=stageFor(Number(p.spirit_power)||0);
     const rows=(await query(`SELECT ct.id,ct.name,ct.realm_index,ct.realm_name,ct.grade,ct.description,ct.price_stones,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.ability,
-      COALESCE((SELECT ut.avatar FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id LIMIT 1),ct.avatar) AS avatar,
+      (SELECT ut.avatar FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id LIMIT 1) AS avatar,
       EXISTS(SELECT 1 FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id) AS learned
       FROM cultivation_techniques ct
       WHERE ct.realm_index <= $2
@@ -2093,7 +1983,7 @@ app.get('/api/treasury',auth,async(req,res)=>{
     await ensureProfile(req.session.user_id);
     const p=(await query(`SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
     const stage=stageFor(Number(p?.spirit_power)||0);
-    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.power_bonus,ti.ability,ti.avatar,
+    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.power_bonus,ti.ability,
       COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti
       LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
@@ -2523,7 +2413,7 @@ app.get('/api/beast-house',auth,async(req,res)=>{
     const cycle=Math.floor(Date.now()/300000);
     const nextRefreshMs=300000-(Date.now()%300000);
     const [catalog,profile]=await Promise.all([
-      query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill,power_bonus,ability,avatar
+      query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill,power_bonus,ability
         FROM spirit_beasts_catalog ORDER BY md5(id::text || $1::text) LIMIT 16`,[String(cycle)]),
       query('SELECT spirit_stones,spirit_power,rank,realm_tier,spirit_beast,spirit_beast_rarity,beast_realm,beast_realm_tier,equipped_beast_id FROM profiles WHERE user_id=$1',[uid])
     ]);
@@ -2576,7 +2466,7 @@ app.post('/api/linh-phap/buy',auth,async(req,res)=>{
 });
 
 // v3.6.34: self-healing schema for Trang Bị / Công Pháp.
-async function _ensureEquipmentSchema(){
+async function ensureEquipmentSchema(){
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
@@ -2623,18 +2513,6 @@ async function _ensureEquipmentSchema(){
   `);
 }
 
-
-let equipmentSchemaPromise=null;
-async function ensureEquipmentSchema(){
-  if(!equipmentSchemaPromise){
-    equipmentSchemaPromise=withSchemaAdvisoryLock(()=>_ensureEquipmentSchema()).catch(err=>{
-      equipmentSchemaPromise=null;
-      throw err;
-    });
-  }
-  return equipmentSchemaPromise;
-}
-
 // CÔNG PHÁP TRANG BỊ · đổi công pháp đang sử dụng
 app.post('/api/techniques/equip',auth,async(req,res)=>{
   await ensureEquipmentSchema();
@@ -2678,45 +2556,27 @@ app.get('/api/equipment',auth,async(req,res)=>{
         COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0) +
         COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) AS equipment_power
         FROM profiles p WHERE p.user_id=$1`,[userId]),
-      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,COALESCE(o.avatar,c.avatar) AS avatar
+      query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,o.avatar
         FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.power_bonus DESC,c.id`,[userId]),
       query(`SELECT o.id,o.root_id,o.quantity,c.name,c.rarity,c.description,c.support,c.power_bonus,c.ability,c.min_realm
         FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.power_bonus DESC,c.id`,[userId]),
-      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability,COALESCE(i.avatar,ti.avatar) AS avatar
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability,i.avatar
         FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
         WHERE i.user_id=$1 AND i.quantity>0
           AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
         ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
-      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,COALESCE(ut.avatar,ct.avatar) AS avatar,(p.equipped_technique_id=ct.id) AS equipped
+      query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,ut.avatar,(p.equipped_technique_id=ct.id) AS equipped
         FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id
         WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[userId])
     ]);
     res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipped_technique_id:null,equipment_power:0},beasts:b.rows,roots:r.rows,artifacts:a.rows,techniques:techniques.rows});
   }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
-app.get('/api/equipment/avatar-catalog',auth,async(req,res)=>{
-  try{
-    await ensureEquipmentSchema();
-    const gate=(await query(`SELECT u.username,COALESCE(p.item_avatar_unlocked,FALSE) AS unlocked FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[req.session.user_id])).rows[0];
-    const allowed=Boolean(gate?.unlocked) || String(gate?.username||'').toLowerCase()==='thienha_666';
-    if(!allowed)return res.status(403).json({error:'Chức năng này chỉ dành cho tài khoản được mở khóa.'});
-    const [beasts,artifacts,techniques]=await Promise.all([
-      query(`SELECT id,name,rarity,beast_realm,beast_realm_tier,avatar FROM spirit_beasts_catalog ORDER BY min_realm,beast_realm_tier,id`),
-      query(`SELECT id,name,category,avatar FROM treasure_items WHERE LOWER(TRIM(category)) IN ('pháp bảo','pháp khí') ORDER BY min_realm,price,id`),
-      query(`SELECT id,name,realm_name,grade,avatar FROM cultivation_techniques ORDER BY realm_index,CASE grade WHEN 'Hạ Phẩm' THEN 1 WHEN 'Trung Phẩm' THEN 2 WHEN 'Thượng Phẩm' THEN 3 ELSE 9 END,id`)
-    ]);
-    res.json({ok:true,username:gate?.username,beasts:beasts.rows,artifacts:artifacts.rows,techniques:techniques.rows});
-  }catch(e){console.error('avatar catalog:',e);res.status(500).json({error:'Không thể mở kho ảnh đại diện vật phẩm.'});}
-});
-
 app.patch('/api/equipment/avatar',auth,async(req,res)=>{
   try{
     await ensureEquipmentSchema();
-    const gate=(await query(`SELECT u.username,COALESCE(p.item_avatar_unlocked,FALSE) AS unlocked FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[req.session.user_id])).rows[0];
-    const allowed=Boolean(gate?.unlocked) || String(gate?.username||'').toLowerCase()==='thienha_666';
-    if(!allowed)return res.status(403).json({error:'Chức năng đổi ảnh đại diện Linh Thú, Công Pháp và Pháp Khí chưa được mở cho tài khoản này.'});
     const type=String(req.body?.type||'');
     const id=Number(req.body?.id);
     let avatar=req.body?.avatar===undefined?null:String(req.body.avatar||'').trim();
@@ -2726,12 +2586,12 @@ app.patch('/api/equipment/avatar',auth,async(req,res)=>{
       if(avatar.length>900000)return res.status(400).json({error:'Ảnh quá lớn. Hãy chọn ảnh nhẹ hơn.'});
       if(!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(avatar))return res.status(400).json({error:'Ảnh đại diện không hợp lệ.'});
     }
+    const uid=req.session.user_id;
     let r;
-    // thienha_666 can customize any catalog entry that exists in the web.
-    if(type==='beast') r=await query('UPDATE spirit_beasts_catalog SET avatar=$2 WHERE id=$1 RETURNING avatar,name',[id,avatar]);
-    else if(type==='artifact') r=await query(`UPDATE treasure_items SET avatar=$2 WHERE id=$1 AND LOWER(TRIM(category)) IN ('pháp bảo','pháp khí') RETURNING avatar,name`,[id,avatar]);
-    else r=await query('UPDATE cultivation_techniques SET avatar=$2 WHERE id=$1 RETURNING avatar,name',[id,avatar]);
-    if(!r.rowCount)return res.status(404).json({error:'Không tìm thấy vật phẩm/công pháp trong danh mục của Hàn Thiên Môn.'});
+    if(type==='beast') r=await query('UPDATE owned_spirit_beasts SET avatar=$3 WHERE user_id=$1 AND beast_id=$2 AND quantity>0 RETURNING avatar',[uid,id,avatar]);
+    else if(type==='artifact') r=await query(`UPDATE inventory i SET avatar=$3 FROM treasure_items ti WHERE i.user_id=$1 AND i.item_id=$2 AND i.item_id=ti.id AND i.quantity>0 AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí') RETURNING i.avatar`,[uid,id,avatar]);
+    else r=await query('UPDATE user_techniques SET avatar=$3 WHERE user_id=$1 AND technique_id=$2 RETURNING avatar',[uid,id,avatar]);
+    if(!r.rowCount)return res.status(404).json({error:'Không tìm thấy vật phẩm/công pháp thuộc về bạn.'});
     res.json({ok:true,avatar:r.rows[0].avatar,message:'Đã đổi ảnh đại diện.'});
   }catch(e){console.error('equipment avatar:',e);res.status(500).json({error:'Không thể đổi ảnh đại diện.'});}
 });
@@ -3696,7 +3556,6 @@ app.post('/api/disciples/gift',auth,async(req,res)=>{
 
 // ─────────────────────────────────────────────────────────────────────────────
 async function ensureMailboxSchema(){
-  return withSchemaAdvisoryLock(async()=>{
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS mailbox_enabled BOOLEAN NOT NULL DEFAULT TRUE;
     CREATE TABLE IF NOT EXISTS mailbox_notifications (
@@ -3717,7 +3576,6 @@ async function ensureMailboxSchema(){
     ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     CREATE INDEX IF NOT EXISTS idx_mailbox_user_unread ON mailbox_notifications(user_id,read_at,id DESC);
   `);
-  });
 }
 
 app.get('/api/mailbox',auth,async(req,res)=>{
@@ -3738,7 +3596,6 @@ app.post('/api/mailbox/read',auth,async(req,res)=>{try{const id=Number(req.body?
 // Khiêu chiến cần schema đầy đủ ngay cả khi Render đang dùng DB cũ.
 // Guard này chạy trước các API lôi đài để tránh SELECT vào cột chưa tồn tại.
 async function ensureChallengeSchema(){
-  return withSchemaAdvisoryLock(async()=>{
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
@@ -3792,7 +3649,6 @@ async function ensureChallengeSchema(){
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action TEXT NOT NULL DEFAULT '';
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
   `);
-  });
 }
 
 app.get('/api/challenges',auth,async(req,res)=>{
@@ -4138,39 +3994,4 @@ app.post('/api/members',auth,async(req,res)=>{
   try{const {name,nick,emoji='🧑‍🎨',role='Đệ tử',bio='',birthday='',hobby='',tags=[]}=req.body||{};if(!name||!nick)return res.status(400).json({error:'Thiếu tên hoặc biệt danh.'});const r=await query('INSERT INTO members(name,nick,emoji,role,bio,birthday,hobby,tags) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[name,nick,emoji,role,bio,birthday,hobby,Array.isArray(tags)?tags.join(','):String(tags)]);res.status(201).json({id:r.rows[0].id});}catch(e){res.status(500).json({error:'Không thể thêm môn nhân.'});}
 });
 
-// v3.6.54: bind the HTTP port BEFORE database initialization so Render can
-// detect an open port even when PostgreSQL cold-start/migrations take time.
-console.log(`[BOOT] PORT=${PORT} | host=0.0.0.0 | pid=${process.pid}`);
-const server = app.listen(PORT, '0.0.0.0', ()=>console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`));
-server.on('error',(err)=>{ console.error('[HTTP SERVER ERROR]',err); });
-
-async function bootDatabase(){
-  let attempt=0;
-  if(!DATABASE_URL){
-    dbInitError=new Error('Thiếu DATABASE_URL trên Render.');
-  }
-
-  while(!dbReady){
-    attempt++;
-    try{
-      console.log(`Khởi tạo cơ sở dữ liệu Hàn Thiên Môn (lần ${attempt})...`);
-      await initDb();
-      dbReady=true;
-      dbInitError=null;
-      console.log('Cơ sở dữ liệu Hàn Thiên Môn đã sẵn sàng.');
-    }catch(err){
-      dbInitError=err;
-      console.error(`Không khởi tạo được database (lần ${attempt}):`,err);
-      const waitMs=Math.min(15000,Math.max(3000,attempt*2000));
-      console.log(`Sẽ thử lại database sau ${waitMs}ms...`);
-      await new Promise(r=>setTimeout(r,waitMs));
-    }
-  }
-}
-bootDatabase();
-
-process.on('uncaughtException',(err)=>console.error('[UNCAUGHT EXCEPTION]',err));
-process.on('unhandledRejection',(err)=>console.error('[UNHANDLED REJECTION]',err));
-
-process.on('SIGTERM',()=>server.close(()=>pool.end().finally(()=>process.exit(0))));
-process.on('SIGINT',()=>server.close(()=>pool.end().finally(()=>process.exit(0))));
+initDb().then(()=>app.listen(PORT,()=>console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`))).catch(err=>{console.error('Không khởi tạo được database:',err);process.exit(1);});
