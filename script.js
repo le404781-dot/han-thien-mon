@@ -582,18 +582,56 @@ async function loadLeaderboard(){
  catch(e){$('#leaderboardArea').innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
+function preparePostImage(file){
+ return new Promise((resolve,reject)=>{
+  if(!file)return resolve(null);
+  if(!file.type.startsWith('image/'))return reject(new Error('Vui lòng chọn một tệp hình ảnh.'));
+  const reader=new FileReader();
+  reader.onerror=()=>reject(new Error('Không thể đọc hình ảnh.'));
+  reader.onload=()=>{
+   const img=new Image();
+   img.onload=()=>{
+    const max=1280;
+    const scale=Math.min(1,max/Math.max(img.width,img.height));
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(img.width*scale));
+    canvas.height=Math.max(1,Math.round(img.height*scale));
+    const ctx=canvas.getContext('2d');
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    const mime=file.type==='image/png'?'image/png':'image/jpeg';
+    const data=canvas.toDataURL(mime,mime==='image/png'?undefined:0.78);
+    if(data.length>1500000)return reject(new Error('Ảnh sau khi tối ưu vẫn quá lớn. Hãy chọn ảnh nhẹ hơn.'));
+    resolve({data,mime});
+   };
+   img.onerror=()=>reject(new Error('Hình ảnh không hợp lệ.'));
+   img.src=reader.result;
+  };
+  reader.readAsDataURL(file);
+ });
+}
+
 async function loadSectPosts(){
  const area=$('#sectPostsArea'); if(!area)return;
  if(!getToken()){area.innerHTML=`<div class="empty-state compact"><h3>📜 Bài Đăng đang phong ấn</h3><p>Đăng nhập để xem bài đăng và tương tác cùng môn nhân.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;return;}
  try{
   const d=await api('/api/sect-posts',{headers:authHeaders()});
   const elderHtml=(d.elders||[]).map((x,i)=>`<span class="elder-chip">#${i+1} ⛩️ ${esc(x.display_name)} · ${esc(x.rank)}</span>`).join('');
-  const composer=d.canPost?`<form id="sectPostForm" class="sect-post-composer"><div class="composer-head"><div><span class="eyebrow">✒️ ĐĂNG BÀI</span><b>${esc(d.stage)} · được phép đăng</b></div><span class="tag">Hóa Thần+</span></div><input id="sectPostTitle" maxlength="100" placeholder="Tiêu đề bài đăng" required><textarea id="sectPostContent" maxlength="3000" rows="5" placeholder="Viết bài cho toàn Môn Phái..." required></textarea><div class="sect-post-foot"><small>Đăng bài với tư cách ${esc(currentUser?.displayName||'Môn nhân')}</small><button class="btn primary">📜 Đăng bài</button></div><p id="sectPostMsg" class="train-msg"></p></form>`:`<div class="sect-post-locked"><b>🔒 Chế độ đăng bài</b><span>${esc(d.stage)} chưa đủ cảnh giới. Chỉ môn nhân từ <b>Hóa Thần</b> trở lên mới được đăng bài.</span></div>`;
+  const composer=d.canPost?`<form id="sectPostForm" class="sect-post-composer"><div class="composer-head"><div><span class="eyebrow">✒️ ĐĂNG BÀI</span><b>${esc(d.stage)} · được phép đăng</b></div><span class="tag">Hóa Thần+</span></div><input id="sectPostTitle" maxlength="100" placeholder="Tiêu đề bài đăng"><textarea id="sectPostContent" maxlength="3000" rows="5" placeholder="Viết bài cho toàn Môn Phái..."></textarea><label class="post-image-picker">🖼️ <span>Thêm ảnh</span><input id="sectPostImage" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><div id="sectPostImagePreview" class="sect-post-image-preview hidden"></div><div class="sect-post-foot"><small>Đăng bài với tư cách ${esc(currentUser?.displayName||'Môn nhân')}</small><button class="btn primary">📜 Đăng bài</button></div><p id="sectPostMsg" class="train-msg"></p></form>`:`<div class="sect-post-locked"><b>🔒 Chế độ đăng bài</b><span>${esc(d.stage)} chưa đủ cảnh giới. Chỉ môn nhân từ <b>Hóa Thần</b> trở lên mới được đăng bài.</span></div>`;
   const eldersBox=`<div class="elder-panel"><div><span class="eyebrow">👑 TAM ĐẠI LÃO</span><h3>Ba môn nhân có thành tích cao nhất Môn Phái</h3></div><div class="elder-list">${elderHtml||'<span class="muted">Chưa có Đại Lão.</span>'}</div></div>`;
-  const posts=(d.rows||[]).map(x=>`<article class="sect-post ${x.isElder?'elder-post':''}" data-post-id="${x.id}"><div class="sect-post-head"><span class="post-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><div class="post-author"><b>${esc(x.display_name)}</b>${x.isElder?'<span class="elder-badge">👑 ĐẠI LÃO</span>':''}</div><small>${esc(x.rank)} · ${esc(x.author_title||'Môn nhân')} · ${new Date(x.created_at).toLocaleString('vi-VN')}</small></div></div><h3>${esc(x.title)}</h3><p class="sect-post-content">${esc(x.content)}</p><div class="post-reactions"><button class="post-react ${x.my_reaction==='like'?'active':''}" data-reaction="like">👍 Ưa thích <b>${Number(x.likes||0)}</b></button><button class="post-react ${x.my_reaction==='dislike'?'active':''}" data-reaction="dislike">👎 Khinh Thường <b>${Number(x.dislikes||0)}</b></button><button class="post-react ${x.my_reaction==='voice'?'active':''}" data-reaction="voice">📣 Truyền Âm <b>${Number(x.voices||0)}</b></button></div></article>`).join('');
+  const posts=(d.rows||[]).map(x=>{
+   const comments=(x.comments||[]).map(c=>`<article class="post-comment"><span class="comment-avatar">${esc(c.avatar||'🧑🏻‍🎓')}</span><div><div class="comment-meta"><b>${esc(c.display_name)}</b><span>${esc(c.rank||'Môn nhân')}</span><time>${new Date(c.created_at).toLocaleString('vi-VN')}</time></div><p>${esc(c.content)}</p></div></article>`).join('');
+   const image=x.image_data?`<img class="sect-post-image" src="${esc(x.image_data)}" alt="Ảnh trong bài đăng" loading="lazy">`:'';
+   return `<article class="sect-post ${x.isElder?'elder-post':''}" data-post-id="${x.id}"><div class="sect-post-head"><span class="post-avatar">${esc(x.avatar||'🧑🏻‍🎓')}</span><div><div class="post-author"><b>${esc(x.display_name)}</b>${x.isElder?'<span class="elder-badge">👑 ĐẠI LÃO</span>':''}</div><small>${esc(x.rank)} · ${esc(x.author_title||'Môn nhân')} · ${new Date(x.created_at).toLocaleString('vi-VN')}</small></div></div>${x.title?`<h3>${esc(x.title)}</h3>`:''}${x.content?`<p class="sect-post-content">${esc(x.content)}</p>`:''}${image}<div class="post-reactions"><button class="post-react ${x.my_reaction==='like'?'active':''}" data-reaction="like">👍 Ưa thích <b>${Number(x.likes||0)}</b></button><button class="post-react ${x.my_reaction==='dislike'?'active':''}" data-reaction="dislike">👎 Khinh Thường <b>${Number(x.dislikes||0)}</b></button><button class="post-react ${x.my_reaction==='voice'?'active':''}" data-reaction="voice">📣 Truyền Âm <b>${Number(x.voices||0)}</b></button></div><div class="post-comments"><div class="comments-head"><b>📣 Truyền Âm · Bình luận</b><span>${Number(x.comment_count||0)} ý kiến</span></div><div class="post-comment-list">${comments||'<small class="muted">Chưa có môn nhân nào truyền âm dưới bài viết.</small>'}</div><form class="post-comment-form"><input class="post-comment-input" maxlength="1000" placeholder="Viết suy nghĩ của bạn..."><button class="btn ghost" type="submit">Truyền Âm</button></form><p class="comment-msg train-msg"></p></div></article>`;
+  }).join('');
   area.innerHTML=eldersBox+composer+`<div class="sect-post-list">${posts||'<div class="empty-state compact"><h3>Chưa có bài đăng</h3><p>Hãy chờ các môn nhân Hóa Thần trở lên khai bút.</p></div>'}</div>`;
-  const form=$('#sectPostForm'); if(form)form.onsubmit=async e=>{e.preventDefault();const msg=$('#sectPostMsg');const btn=form.querySelector('button');btn.disabled=true;try{const x=await api('/api/sect-posts',{method:'POST',headers:authHeaders(),body:JSON.stringify({title:$('#sectPostTitle').value,content:$('#sectPostContent').value})});msg.textContent='✅ '+x.message;form.reset();await loadSectPosts();}catch(err){msg.textContent='❌ '+err.message;}finally{btn.disabled=false;}};
-  area.querySelectorAll('.post-react').forEach(btn=>btn.onclick=async()=>{const card=btn.closest('.sect-post');try{const x=await api('/api/sect-posts/'+card.dataset.postId+'/react',{method:'POST',headers:authHeaders(),body:JSON.stringify({reaction:btn.dataset.reaction})});card.querySelector('[data-reaction="like"] b').textContent=Number(x.likes||0);card.querySelector('[data-reaction="dislike"] b').textContent=Number(x.dislikes||0);card.querySelector('[data-reaction="voice"] b').textContent=Number(x.voices||0);card.querySelectorAll('.post-react').forEach(b=>b.classList.toggle('active',b.dataset.reaction===x.my_reaction));}catch(err){const m=$('#sectPostMsg');if(m)m.textContent='❌ '+err.message;}});
+  const form=$('#sectPostForm');
+  if(form){
+   const imageInput=$('#sectPostImage'), preview=$('#sectPostImagePreview');
+   imageInput?.addEventListener('change',async()=>{try{const f=imageInput.files?.[0];if(!f){preview.classList.add('hidden');preview.innerHTML='';return;}const x=await preparePostImage(f);preview.innerHTML=`<img src="${esc(x.data)}" alt="Xem trước">`;preview.classList.remove('hidden');}catch(err){imageInput.value='';preview.classList.add('hidden');preview.innerHTML='';const m=$('#sectPostMsg');if(m)m.textContent='❌ '+err.message;}});
+   form.onsubmit=async e=>{e.preventDefault();const msg=$('#sectPostMsg'),btn=form.querySelector('button');btn.disabled=true;try{let imageData='',imageMime='';const f=imageInput?.files?.[0];if(f){const x=await preparePostImage(f);imageData=x.data;imageMime=x.mime;}const title=$('#sectPostTitle').value.trim(),content=$('#sectPostContent').value.trim();if(!title&&!content&&!imageData)throw new Error('Hãy nhập nội dung hoặc chọn ảnh.');const x=await api('/api/sect-posts',{method:'POST',headers:authHeaders(),body:JSON.stringify({title,content,imageData,imageMime})});msg.textContent='✅ '+x.message;form.reset();preview.classList.add('hidden');preview.innerHTML='';await loadSectPosts();}catch(err){msg.textContent='❌ '+err.message;}finally{btn.disabled=false;}};
+  }
+  area.querySelectorAll('.post-react').forEach(btn=>btn.onclick=async()=>{const card=btn.closest('.sect-post');try{const x=await api('/api/sect-posts/'+card.dataset.postId+'/react',{method:'POST',headers:authHeaders(),body:JSON.stringify({reaction:btn.dataset.reaction})});card.querySelector('[data-reaction="like"] b').textContent=Number(x.likes||0);card.querySelector('[data-reaction="dislike"] b').textContent=Number(x.dislikes||0);card.querySelector('[data-reaction="voice"] b').textContent=Number(x.voices||0);card.querySelectorAll('.post-react').forEach(b=>b.classList.toggle('active',b.dataset.reaction===x.my_reaction));if(btn.dataset.reaction==='voice')card.querySelector('.post-comment-input')?.focus();}catch(err){const m=$('#sectPostMsg');if(m)m.textContent='❌ '+err.message;}});
+  area.querySelectorAll('.post-comment-form').forEach(form=>form.onsubmit=async e=>{e.preventDefault();const card=form.closest('.sect-post'),input=form.querySelector('.post-comment-input'),msg=form.querySelector('.comment-msg'),btn=form.querySelector('button');const content=input.value.trim();if(!content)return;btn.disabled=true;try{const x=await api('/api/sect-posts/'+card.dataset.postId+'/comments',{method:'POST',headers:authHeaders(),body:JSON.stringify({content})});const c=x.row;const list=card.querySelector('.post-comment-list');if(list.querySelector('.muted'))list.innerHTML='';list.insertAdjacentHTML('beforeend',`<article class="post-comment"><span class="comment-avatar">${esc(c.avatar||'🧑🏻‍🎓')}</span><div><div class="comment-meta"><b>${esc(c.display_name)}</b><span>${esc(c.rank||'Môn nhân')}</span><time>${new Date(c.created_at).toLocaleString('vi-VN')}</time></div><p>${esc(c.content)}</p></div></article>`);const count=card.querySelector('.comments-head span');count.textContent=`${list.querySelectorAll('.post-comment').length} ý kiến`;input.value='';msg.textContent='✓ Đã truyền âm.';}catch(err){msg.textContent='❌ '+err.message;}finally{btn.disabled=false;}});
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 

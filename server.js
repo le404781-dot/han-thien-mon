@@ -97,6 +97,16 @@ async function ensureRuntimeSchema() {
     );
   `);
   await query(`
+    ALTER TABLE sect_posts ADD COLUMN IF NOT EXISTS image_data TEXT;
+    ALTER TABLE sect_posts ADD COLUMN IF NOT EXISTS image_mime TEXT;
+    CREATE TABLE IF NOT EXISTS sect_post_comments (
+      id BIGSERIAL PRIMARY KEY,
+      post_id BIGINT NOT NULL REFERENCES sect_posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_sect_post_comments_post ON sect_post_comments(post_id,id);
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
@@ -720,6 +730,14 @@ async function initDb() {
       UNIQUE(post_id,user_id)
     );
     CREATE INDEX IF NOT EXISTS idx_sect_post_reactions_post ON sect_post_reactions(post_id,reaction);
+    CREATE TABLE IF NOT EXISTS sect_post_comments (
+      id BIGSERIAL PRIMARY KEY,
+      post_id BIGINT NOT NULL REFERENCES sect_posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_sect_post_comments_post ON sect_post_comments(post_id,id);
     CREATE TABLE IF NOT EXISTS friend_requests (
       id BIGSERIAL PRIMARY KEY,
       requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1182,7 +1200,7 @@ async function addDailyActivity(userId, field, amount=1) {
   await query(`UPDATE daily_activity SET ${field}=${field}+$2 WHERE user_id=$1`,[userId,amount]);
 }
 
-app.use(express.json({ limit: '200kb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(express.static(__dirname));
 function hashPassword(password, salt) { return crypto.scryptSync(password, salt, 64).toString('hex'); }
 function safeUser(user) { return { id:user.id, username:user.username, displayName:user.display_name, createdAt:user.created_at }; }
@@ -2686,18 +2704,28 @@ app.get('/api/sect-posts',auth,async(req,res)=>{
     await ensureRuntimeSchema();
     const me=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
     const meStage=stageFor(Number(me?.spirit_power)||0);
-    const rows=(await query(`SELECT sp.id,sp.user_id,sp.title,sp.content,sp.created_at,sp.updated_at,
+    const rows=(await query(`SELECT sp.id,sp.user_id,sp.title,sp.content,sp.image_data,sp.image_mime,sp.created_at,sp.updated_at,
       u.display_name,p.avatar,p.title AS author_title,p.rank,p.spirit_power,
       COALESCE((SELECT COUNT(*) FROM sect_post_reactions r WHERE r.post_id=sp.id AND r.reaction='like'),0)::int AS likes,
       COALESCE((SELECT COUNT(*) FROM sect_post_reactions r WHERE r.post_id=sp.id AND r.reaction='dislike'),0)::int AS dislikes,
       COALESCE((SELECT COUNT(*) FROM sect_post_reactions r WHERE r.post_id=sp.id AND r.reaction='voice'),0)::int AS voices,
+      COALESCE((SELECT COUNT(*) FROM sect_post_comments c WHERE c.post_id=sp.id),0)::int AS comment_count,
       (SELECT r.reaction FROM sect_post_reactions r WHERE r.post_id=sp.id AND r.user_id=$1) AS my_reaction
       FROM sect_posts sp JOIN users u ON u.id=sp.user_id JOIN profiles p ON p.user_id=u.id
       ORDER BY sp.id DESC LIMIT 80`,[req.session.user_id])).rows;
+    let comments=[];
+    if(rows.length){
+      const ids=rows.map(x=>x.id);
+      comments=(await query(`SELECT c.id,c.post_id,c.user_id,c.content,c.created_at,u.display_name,p.avatar,p.rank
+        FROM sect_post_comments c JOIN users u ON u.id=c.user_id JOIN profiles p ON p.user_id=u.id
+        WHERE c.post_id=ANY($1::bigint[]) ORDER BY c.id ASC`,[ids])).rows;
+    }
+    const commentsByPost=new Map();
+    for(const c of comments){const a=commentsByPost.get(String(c.post_id))||[];a.push(c);commentsByPost.set(String(c.post_id),a);}
     const elders=await topElders(3);
     const elderIds=new Set(elders.map(x=>Number(x.id)));
-    res.json({rows:rows.map(x=>({...x,isElder:elderIds.has(Number(x.user_id))})),canPost:isElderStage(meStage.realmIndex),stage:meStage.stage,elders});
-  }catch(e){console.error('sect posts load:',e);res.status(500).json({error:'Không thể mở chế độ đăng bài.'});}
+    res.json({rows:rows.map(x=>({...x,isElder:elderIds.has(Number(x.user_id)),comments:commentsByPost.get(String(x.id))||[]})),canPost:isElderStage(meStage.realmIndex),stage:meStage.stage,elders});
+  }catch(e){console.error('sect posts load:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,table:e?.table,column:e?.column});res.status(500).json({error:'Không thể mở chế độ đăng bài.'});}
 });
 
 app.post('/api/sect-posts',auth,async(req,res)=>{
@@ -2708,10 +2736,18 @@ app.post('/api/sect-posts',auth,async(req,res)=>{
     if(!isElderStage(st.realmIndex)) return res.status(403).json({error:'Chỉ môn nhân từ Hóa Thần trở lên mới được phép đăng bài.'});
     const title=String(req.body?.title||'').trim().slice(0,100);
     const content=String(req.body?.content||'').trim().slice(0,3000);
-    if(!title||!content)return res.status(400).json({error:'Tiêu đề và nội dung không được để trống.'});
-    const r=await query('INSERT INTO sect_posts(user_id,title,content) VALUES($1,$2,$3) RETURNING id',[req.session.user_id,title,content]);
+    const imageData=String(req.body?.imageData||'').trim();
+    const imageMime=String(req.body?.imageMime||'').trim().toLowerCase();
+    if(!title&&!content&&!imageData)return res.status(400).json({error:'Bài đăng cần có tiêu đề, nội dung hoặc hình ảnh.'});
+    let safeImage=null,safeMime=null;
+    if(imageData){
+      if(!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(imageData)) return res.status(400).json({error:'Ảnh không hợp lệ. Chỉ hỗ trợ PNG, JPG, WEBP hoặc GIF.'});
+      if(imageData.length>1500000)return res.status(400).json({error:'Ảnh quá lớn. Hãy chọn ảnh nhỏ hơn khoảng 1 MB.'});
+      safeImage=imageData;safeMime=imageMime||((imageData.match(/^data:(image\/[^;]+);/)||[])[1]||'image/jpeg');
+    }
+    const r=await query('INSERT INTO sect_posts(user_id,title,content,image_data,image_mime) VALUES($1,$2,$3,$4,$5) RETURNING id',[req.session.user_id,title,content,safeImage,safeMime]);
     res.status(201).json({ok:true,id:r.rows[0].id,message:'Bài viết đã được đăng lên Môn Phái.'});
-  }catch(e){console.error('sect post create:',e);res.status(500).json({error:'Không thể đăng bài.'});}
+  }catch(e){console.error('sect post create:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,table:e?.table,column:e?.column});res.status(500).json({error:'Không thể đăng bài.'});}
 });
 
 app.post('/api/sect-posts/:id/react',auth,async(req,res)=>{
@@ -2729,6 +2765,34 @@ app.post('/api/sect-posts/:id/react',auth,async(req,res)=>{
     const c=(await query(`SELECT COUNT(*) FILTER(WHERE reaction='like')::int AS likes,COUNT(*) FILTER(WHERE reaction='dislike')::int AS dislikes,COUNT(*) FILTER(WHERE reaction='voice')::int AS voices,(SELECT reaction FROM sect_post_reactions WHERE post_id=$1 AND user_id=$2) AS my_reaction FROM sect_post_reactions WHERE post_id=$1`,[postId,req.session.user_id])).rows[0];
     res.json({ok:true,...c});
   }catch(e){console.error('sect post react:',e);res.status(500).json({error:'Không thể cập nhật phản ứng.'});}
+});
+
+app.get('/api/sect-posts/:id/comments',auth,async(req,res)=>{
+  try{
+    await ensureRuntimeSchema();
+    const postId=Number(req.params.id);
+    if(!Number.isInteger(postId))return res.status(400).json({error:'Bài viết không hợp lệ.'});
+    const r=await query(`SELECT c.id,c.post_id,c.user_id,c.content,c.created_at,u.display_name,p.avatar,p.rank
+      FROM sect_post_comments c JOIN users u ON u.id=c.user_id JOIN profiles p ON p.user_id=u.id
+      WHERE c.post_id=$1 ORDER BY c.id ASC`,[postId]);
+    res.json({rows:r.rows});
+  }catch(e){res.status(500).json({error:'Không thể tải Truyền Âm.'});}
+});
+
+app.post('/api/sect-posts/:id/comments',auth,async(req,res)=>{
+  try{
+    await ensureRuntimeSchema();
+    const postId=Number(req.params.id);
+    const content=String(req.body?.content||'').trim().slice(0,1000);
+    if(!Number.isInteger(postId)||!content)return res.status(400).json({error:'Nội dung Truyền Âm không được để trống.'});
+    const exists=await query('SELECT id FROM sect_posts WHERE id=$1',[postId]);
+    if(!exists.rows[0])return res.status(404).json({error:'Bài viết không tồn tại.'});
+    const r=await query(`INSERT INTO sect_post_comments(post_id,user_id,content) VALUES($1,$2,$3)
+      RETURNING id,post_id,user_id,content,created_at`,[postId,req.session.user_id,content]);
+    const row=(await query(`SELECT c.id,c.post_id,c.user_id,c.content,c.created_at,u.display_name,p.avatar,p.rank
+      FROM sect_post_comments c JOIN users u ON u.id=c.user_id JOIN profiles p ON p.user_id=u.id WHERE c.id=$1`,[r.rows[0].id])).rows[0];
+    res.status(201).json({ok:true,row});
+  }catch(e){console.error('sect post comment:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint});res.status(500).json({error:'Không thể gửi Truyền Âm.'});}
 });
 
 app.get('/api/leaderboard',async(req,res)=>{

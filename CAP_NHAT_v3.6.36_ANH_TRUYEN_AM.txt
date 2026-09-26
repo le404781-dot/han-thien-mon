@@ -1,0 +1,24 @@
+HÀN THIÊN MÔN v3.6.36 – ẢNH BÀI ĐĂNG + TRUYỀN ÂM
+
+1. ĐĂNG BÀI
+- Hóa Thần trở lên mới được đăng bài (giữ nguyên kiểm tra server).
+- Cho phép bài đăng có tiêu đề, nội dung, ảnh hoặc kết hợp.
+- Ảnh được tối ưu phía trình duyệt về tối đa 1280px và JPEG/PNG trước khi gửi.
+- Server giới hạn dữ liệu ảnh khoảng 1 MB và chỉ nhận PNG/JPG/WEBP/GIF hợp lệ.
+- Ảnh được lưu trong sect_posts để triển khai Render không cần thêm dịch vụ lưu trữ ngoài.
+
+2. TRUYỀN ÂM
+- Dưới mỗi bài có khu vực "📣 Truyền Âm · Bình luận".
+- Mọi môn nhân đã đăng nhập đều có thể viết suy nghĩ/bình luận.
+- Có số lượng ý kiến, avatar, đạo hiệu, cảnh giới và thời gian.
+- Nút Truyền Âm trong 3 phản ứng vẫn giữ nguyên, đồng thời tự đưa con trỏ vào ô bình luận.
+
+3. DATABASE
+- Thêm sect_posts.image_data, sect_posts.image_mime.
+- Thêm sect_post_comments và index theo post_id.
+- Runtime migration dùng IF NOT EXISTS để tương thích PostgreSQL cũ trên Render.
+
+4. KIỂM TRA
+- node --check server.js: OK
+- node --check script.js: OK
+- Chưa kết nối trực tiếp PostgreSQL Render trong môi trường phát triển này.
