@@ -28,7 +28,7 @@ function startPresenceHeartbeat(){
  if(presenceTimer)clearInterval(presenceTimer);
  if(!getToken())return;
  sendPresenceHeartbeat();
- presenceTimer=setInterval(()=>{if(getToken())sendPresenceHeartbeat();else{clearInterval(presenceTimer);presenceTimer=null;}},30000);
+ presenceTimer=setInterval(()=>{if(getToken())sendPresenceHeartbeat();else{clearInterval(presenceTimer);presenceTimer=null;}},20000);
 }
 startPresenceHeartbeat();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')sendPresenceHeartbeat();});
@@ -387,8 +387,18 @@ async function onlineCultivationTick(){
     if(gainEl)gainEl.textContent=`+${Number(d.onlineEarned||0).toLocaleString('vi-VN')} linh lực đã tụ · +${Number(d.rate||0).toLocaleString('vi-VN')}/phút`;
     const live=$('#onlineLiveCounter');if(live)live.textContent=d.active?'Đang tích lũy từng nhịp thời gian':'Tạm dừng';
     if(d.gain>0){
-      const msg=$('#trainMsg'); if(msg)msg.textContent=d.message||`☁ Online: +${d.gain} linh lực. Tốc độ ${d.rate} linh lực/phút.`;
+      const gain=Number(d.gain)||0;
+      if(currentProfile){
+        currentProfile.spirit_power=Number(currentProfile.spirit_power||0)+gain;
+        currentProfile.onlineEarned=Number(d.onlineEarned||0);
+        currentProfile.realm=d.realm||currentProfile.realm;
+        currentProfile.stage=d.stage||currentProfile.stage;
+      }
+      const msg=$('#trainMsg'); if(msg)msg.textContent=d.message||`☁ Online: +${gain.toLocaleString('vi-VN')} linh lực · ${Number(d.rate||0).toLocaleString('vi-VN')}/phút.`;
+      renderProfile(currentProfile);
+      renderCultivation(currentProfile);
       await loadProfile();
+      await loadLeaderboard();
     }
   }catch(e){
     const status=$('#onlineStatus');
@@ -398,7 +408,7 @@ async function onlineCultivationTick(){
 function startOnlineCultivation(){
   if(onlineTimer)clearInterval(onlineTimer);
   if(window.__onlineRealtimeTimer)clearInterval(window.__onlineRealtimeTimer);
-  onlineTimer=setInterval(onlineCultivationTick,15000);
+  onlineTimer=setInterval(onlineCultivationTick,5000);
   window.__onlineRealtimeTimer=setInterval(()=>{
     const status=$('#onlineStatus'),gainEl=$('#onlineGain');
     if(!status||!gainEl||!currentProfile||Boolean(currentProfile?.mansion?.active))return;
@@ -967,50 +977,63 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  const initial=location.hash.slice(1);if(initial&&labels[initial])setTimeout(()=>enterFocus(initial,false),0);
 })();
 
-/* v3.6.55 · Nhạc nền tương thích đa thiết bị + khôi phục sau tương tác */
+/* v3.6.57 · Trình phát nhạc nền kiểu streaming · MP4/AAC + MP3 fallback + Media Session */
 (function setupBackgroundMusic(){
  const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
  if(!audio||!playBtn||!stopBtn)return;
  const musicKey='htm_background_music',volumeKey='htm_background_volume';
  let savedVolume=parseFloat(localStorage.getItem(volumeKey));
- if(!Number.isFinite(savedVolume))savedVolume=.35;
+ if(!Number.isFinite(savedVolume))savedVolume=.5;
  savedVolume=Math.max(0,Math.min(1,savedVolume));
- audio.volume=savedVolume; volume.value=String(savedVolume);
+ audio.volume=savedVolume; if(volume)volume.value=String(savedVolume);
  if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
+ let desiredPlay=localStorage.getItem(musicKey)==='on';
+ let loadingPromise=null;
  function setStatus(playing,text){
    if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
    if(msg)msg.textContent=text;
    playBtn.disabled=playing;stopBtn.disabled=!playing;
  }
- async function start(fromGesture=true){
+ function mediaMeta(){
+   if(!('mediaSession' in navigator))return;
+   try{navigator.mediaSession.metadata=new MediaMetadata({title:'Tinh Vệ · Hàn Thiên Môn',artist:'Hàn Thiên Môn',album:'Nhạc nền tiên hiệp'});}catch{}
+ }
+ async function waitForReady(){
+   if(audio.readyState>=2)return;
+   if(loadingPromise)return loadingPromise;
+   loadingPromise=new Promise((resolve,reject)=>{
+     const ok=()=>{cleanup();resolve();}, bad=()=>{cleanup();reject(new Error('audio-load'))};
+     const cleanup=()=>{audio.removeEventListener('canplay',ok);audio.removeEventListener('error',bad);};
+     audio.addEventListener('canplay',ok,{once:true});audio.addEventListener('error',bad,{once:true});
+     audio.load();
+   }).finally(()=>{loadingPromise=null;});
+   return loadingPromise;
+ }
+ async function start(fromGesture=false){
+   desiredPlay=true; localStorage.setItem(musicKey,'on');
    try{
-     audio.loop=true;
-     audio.muted=false;
-     audio.setAttribute('playsinline','');
-     if(audio.readyState===0) audio.load();
+     audio.loop=true; audio.muted=false; audio.volume=savedVolume;
+     await waitForReady();
      await audio.play();
-     localStorage.setItem(musicKey,'on');
-     setStatus(true,'Nhạc nền đang phát và sẽ tự động lặp lại.');
+     mediaMeta(); setStatus(true,'Nhạc nền đang phát liên tục.');
    }catch(e){
-     setStatus(false,fromGesture?'Thiết bị/trình duyệt đang chặn âm thanh. Hãy chạm Khởi Nhạc lại.':'Đã lưu lựa chọn nhạc. Chạm Khởi Nhạc để bắt đầu.');
+     setStatus(false,fromGesture?'Không phát được âm thanh. Hãy chạm Khởi Nhạc thêm một lần.':'Đã ghi nhớ phát nhạc. Chạm vào trang để trình duyệt cho phép âm thanh.');
    }
  }
- function stop(){audio.pause();try{audio.currentTime=0;}catch{}localStorage.setItem(musicKey,'off');setStatus(false,'Đã ngưng nhạc nền.');}
+ function stop(){desiredPlay=false;localStorage.setItem(musicKey,'off');audio.pause();try{audio.currentTime=0;}catch{}setStatus(false,'Đã ngưng nhạc nền.');}
  playBtn.addEventListener('click',()=>start(true));
  stopBtn.addEventListener('click',stop);
- volume.addEventListener('input',()=>{const v=Math.max(0,Math.min(1,Number(volume.value)));audio.volume=v;localStorage.setItem(volumeKey,String(v));if(volumeValue)volumeValue.textContent=Math.round(v*100)+'%';});
- audio.addEventListener('play',()=>setStatus(true,'Nhạc nền đang phát và sẽ tự động lặp lại.'));
- audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false,'Đã ngưng nhạc nền.');});
- audio.addEventListener('ended',()=>{audio.currentTime=0;start(false);});
- audio.addEventListener('canplay',()=>{if(localStorage.getItem(musicKey)==='on' && audio.paused) start(false);});
- audio.addEventListener('error',()=>setStatus(false,'Không thể đọc file nhạc. Hãy kiểm tra kết nối hoặc bấm Khởi Nhạc lại.'));
- audio.addEventListener('stalled',()=>{if(localStorage.getItem(musicKey)==='on' && audio.paused) setTimeout(()=>start(false),500);});
- document.addEventListener('visibilitychange',()=>{
-   if(document.visibilityState==='visible' && localStorage.getItem(musicKey)==='on' && audio.paused) start(false);
- });
- // Autoplay vẫn phụ thuộc chính sách của từng trình duyệt; một lần chạm bất kỳ trên trang sẽ mở khóa audio khi được phép.
- const unlock=()=>{if(localStorage.getItem(musicKey)==='on'&&audio.paused)start(false);};
- ['pointerdown','touchstart','keydown'].forEach(ev=>document.addEventListener(ev,unlock,{once:true,passive:true}));
- if(localStorage.getItem(musicKey)==='on')setStatus(false,'Đã lưu lựa chọn Khởi Nhạc. Chạm vào trang nếu trình duyệt chưa cho phép phát.');
- else setStatus(false,'Đang ngưng nhạc.');
+ if(volume)volume.addEventListener('input',()=>{savedVolume=Math.max(0,Math.min(1,Number(volume.value)));audio.volume=savedVolume;localStorage.setItem(volumeKey,String(savedVolume));if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';});
+ audio.addEventListener('play',()=>{mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');});
+ audio.addEventListener('pause',()=>{if(!audio.ended&&desiredPlay)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');else if(!audio.ended)setStatus(false,'Đã ngưng nhạc nền.');});
+ audio.addEventListener('ended',()=>{if(desiredPlay){audio.currentTime=0;start(false);}});
+ audio.addEventListener('error',()=>setStatus(false,'Không đọc được luồng nhạc. Đang thử định dạng dự phòng…'));
+ audio.addEventListener('stalled',()=>{if(desiredPlay)setTimeout(()=>{if(audio.paused)start(false);},800);});
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&desiredPlay&&audio.paused)start(false);});
+ ['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev,()=>{if(desiredPlay&&audio.paused)start(false);},{passive:true}));
+ if('mediaSession' in navigator){
+   try{navigator.mediaSession.setActionHandler('play',()=>start(true));navigator.mediaSession.setActionHandler('pause',stop);navigator.mediaSession.setActionHandler('stop',stop);}catch{}
+ }
+ setStatus(false,desiredPlay?'Đã ghi nhớ phát nhạc · chạm màn hình để mở khóa âm thanh.':'Đang ngưng nhạc.');
 })();
+

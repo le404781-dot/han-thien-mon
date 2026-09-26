@@ -1,0 +1,15 @@
+HÀN THIÊN MÔN v3.6.57
+
+1. TU LUYỆN ONLINE
+- Heartbeat Xuất Quan mỗi 20 giây để trạng thái online không bị hết hạn trong chu kỳ 90 giây.
+- Tụ linh Online chạy mỗi 5 giây thay vì 15 giây, giúp linh lực được ghi vào profiles.spirit_power gần thời gian thực.
+- Mỗi lần server trả gain > 0, giao diện cộng ngay gain vào hồ sơ, tính lại cảnh giới và tải lại dữ liệu máy chủ để đồng bộ.
+- Backend vẫn là nguồn dữ liệu chính: gain Online được cộng trực tiếp vào spirit_power; rank và realm_tier được cập nhật khi đột phá.
+
+2. ÂM THANH
+- Bổ sung luồng AAC/M4A 192 kbps làm định dạng ưu tiên, MP3 192 kbps làm fallback.
+- Trình phát chờ canplay rồi mới gọi play(), phù hợp hơn với Safari/iOS.
+- Giữ trạng thái phát, âm lượng và tiếp tục sau khi quay lại tab.
+- Thêm Media Session để nút phát/tạm dừng trên màn hình khóa/tai nghe/điều khiển hệ thống hoạt động khi trình duyệt hỗ trợ.
+- Tự thử lại khi luồng bị stalled hoặc bị pause ngoài ý muốn.
+- Chính sách autoplay của từng trình duyệt vẫn được tôn trọng: nếu máy chặn autoplay, người dùng cần chạm Khởi Nhạc một lần.
