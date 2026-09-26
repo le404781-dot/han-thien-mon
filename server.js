@@ -342,28 +342,17 @@ async function ensureBicanhSchema() {
 
 // Cửu Đại Cảnh Giới — mỗi cảnh giới có 9 tầng.
 const SPIRIT_TO_STONE_RATE = 100; // 100 linh lực = 1 linh thạch
-const RANKS = [
-  { name: 'Luyện Khí', min: 0, max: 999 },
-  { name: 'Trúc Cơ', min: 1000, max: 2999 },
-  { name: 'Kim Đan', min: 3000, max: 6999 },
-  { name: 'Nguyên Anh', min: 7000, max: 14999 },
-  { name: 'Hóa Thần', min: 15000, max: 29999 },
-  { name: 'Luyện Hư', min: 30000, max: 59999 },
-  { name: 'Hợp Thể', min: 60000, max: 119999 },
-  { name: 'Đại Thừa', min: 120000, max: 239999 },
-  { name: 'Độ Kiếp', min: 240000, max: 509999 },
-  // Tiên giới: mỗi cảnh giới tiếp tục có 9 tầng, 30.000 linh lực/tầng.
-  { name: 'Nhân Tiên', min: 510000, max: 779999, description: 'Cánh cửa đầu tiên bước vào thế giới tiên nhân, bắt đầu thích ứng với tiên khí.' },
-  { name: 'Chân Tiên', min: 780000, max: 1049999, description: 'Ổn định tiên thể, củng cố căn cơ tiên đạo.' },
-  { name: 'Địa Tiên', min: 1050000, max: 1319999, description: 'Tiên nhân có địa vị cơ bản, làm chủ một vùng nhỏ hoặc động phủ riêng.' },
-  { name: 'Thiên Tiên', min: 1320000, max: 1589999, description: 'Tiên lực hòa nhập thiên địa, bước vào tầng trời cao.' },
-  { name: 'Huyền Tiên', min: 1590000, max: 1859999, description: 'Lĩnh ngộ pháp tắc sâu hơn, pháp lực ngày càng thâm hậu.' },
-  { name: 'Kim Tiên', min: 1860000, max: 2129999, description: 'Thân thể và nguyên thần bất hủ, dung hợp với quy luật thiên địa.' },
-  { name: 'Tiên Quân', min: 2130000, max: 2399999, description: 'Bậc thống trị một phương, nắm giữ quyền lực tiên giới.' },
-  { name: 'Tiên Tôn', min: 2400000, max: 2669999, description: 'Chạm tới đại đạo chí cao, uy áp một phương tiên vực.' },
-  { name: 'Tiên Đế', min: 2670000, max: Infinity, description: 'Cảnh giới tối cao của hệ thống hiện tại, nắm giữ đại đạo chí cao vô thượng.' }
+const REALM_DIFFICULTY_MULTIPLIER = 28;
+const BASE_REALM_NAMES = [
+  ['Luyện Khí','Cảnh giới nhập môn.'],['Trúc Cơ','Trúc lập đạo cơ, linh lực bắt đầu tăng mạnh.'],['Kim Đan','Ngưng tụ kim đan, cần linh lực vượt xa phàm tu.'],['Nguyên Anh','Nguyên anh xuất thế, con đường tu luyện ngày càng khó.'],['Hóa Thần','Thần niệm hóa hình, linh lực yêu cầu tăng vọt.'],['Luyện Hư','Luyện hóa hư không, mỗi bước tiến đều cần lượng linh lực khổng lồ.'],['Hợp Thể','Thân-hồn hợp nhất, đột phá cực kỳ gian nan.'],['Đại Thừa','Đạo vận đại thành, khoảng cách giữa các cảnh giới tăng mạnh.'],['Độ Kiếp','Đón thiên kiếp, chuẩn bị bước vào tiên giới.'],['Nhân Tiên','Bước vào tiên đạo, tiên pháp bắt đầu được mở khóa.'],['Chân Tiên','Tiên thể ổn định, tiên lực tinh thuần hơn.'],['Địa Tiên','Làm chủ địa mạch tiên vực, căn cơ ngày càng sâu.'],['Thiên Tiên','Tiên lực hòa nhập thiên địa.'],['Huyền Tiên','Lĩnh ngộ pháp tắc sâu hơn.'],['Kim Tiên','Thân thể và nguyên thần tiến vào bất hủ.'],['Tiên Quân','Bậc thống trị một phương tiên vực.'],['Tiên Tôn','Chạm tới đại đạo chí cao.'],['Tiên Đế','Cảnh giới tối cao, phân thành Nhất Tinh đến Cửu Cửu Tinh.']
 ];
+// Mỗi lần bước sang đại cảnh giới, ngưỡng linh lực cơ bản tăng 28 lần so với cảnh giới trước.
+const BASE_RANK_MINS = [0,1000,3000,7000,15000,30000,60000,120000,240000,510000,780000,1050000,1320000,1590000,1860000,2130000,2400000,2670000];
+const RANK_MINS = BASE_RANK_MINS.map((v,i)=>i===0?0:v*REALM_DIFFICULTY_MULTIPLIER);
+const RANKS = BASE_REALM_NAMES.map((x,i)=>({name:x[0],min:RANK_MINS[i],max:i===BASE_REALM_NAMES.length-1?Infinity:RANK_MINS[i+1]-1,description:x[1]}));
 const IMMORTAL_REALM_START = 9;
+const TIEN_DE_STARS = 99;
+
 const TRIBULATION_COUNT = 9;
 const LEGEND_CHAR_LIMITS = [300,500,800,1200,1600,2200,3000,4000,5000,5500,6000,6500,7000,7500,8000,8500,9000,10000];
 const PROFESSION_DEFINITIONS = [
@@ -382,13 +371,14 @@ function realmIndexFor(spirit) {
 function stageFor(spirit) {
   const ri=realmIndexFor(spirit);
   const r=RANKS[ri];
-  if (!Number.isFinite(r.max)) {
-    const tier=Math.min(9, Math.floor((spirit-r.min)/30000)+1);
-    return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1]};
+  if (ri===RANKS.length-1) {
+    const star=Math.min(TIEN_DE_STARS, Math.floor((Math.max(0,spirit-r.min)/Math.max(1,Math.ceil(r.min/9))))+1);
+    const starName=`${star===99?'Cửu Cửu':star} Tinh`;
+    return {realm:r.name,tier:star,stage:`${r.name} ${starName}`,realmIndex:ri,tierName:starName,maxTier:TIEN_DE_STARS};
   }
   const span=r.max-r.min+1;
   const tier=Math.min(9, Math.floor(((spirit-r.min)*9)/span)+1);
-  return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1]};
+  return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1],maxTier:9};
 }
 function rankFor(spirit) { return RANKS[realmIndexFor(spirit)]; }
 
@@ -458,17 +448,59 @@ function defaultPositionFor(realmIndex){ const opts=positionOptionsFor(realmInde
 function progressFor(spirit) {
   const r=rankFor(spirit), s=stageFor(spirit);
   const nextRealm=RANKS[RANKS.findIndex(x=>x.name===r.name)+1];
-  let tierStart=r.min, tierEnd=Number.isFinite(r.max)?r.max:Infinity;
-  if (Number.isFinite(r.max)) {
-    const span=r.max-r.min+1;
-    tierStart=r.min+Math.floor(((s.tier-1)*span)/9);
-    tierEnd=r.min+Math.floor((s.tier*span)/9)-1;
-  } else {
-    tierStart=r.min+(s.tier-1)*30000;
-    tierEnd=s.tier<9?r.min+s.tier*30000-1:Infinity;
+  if (r.name==='Tiên Đế') {
+    const starSize=Math.max(1,Math.ceil(r.min/9));
+    const tierStart=r.min+(s.tier-1)*starSize;
+    const tierEnd=s.tier<TIEN_DE_STARS?r.min+s.tier*starSize-1:Infinity;
+    const percent=Number.isFinite(tierEnd)?Math.max(0,Math.min(100,Math.round(((spirit-tierStart+1)/(tierEnd-tierStart+1))*100))):100;
+    return {rank:r.name,tier:s.tier,stage:s.stage,tierName:s.tierName,maxTier:TIEN_DE_STARS,percent,next:null,remaining:0};
   }
-  const percent=Number.isFinite(tierEnd)?Math.max(0,Math.min(100,Math.round(((spirit-tierStart+1)/(tierEnd-tierStart+1))*100))):Math.min(100,Math.round(((spirit-tierStart+1)/30000)*100));
-  return {rank:r.name,tier:s.tier,stage:s.stage,tierName:s.tierName,percent,next:nextRealm?.name||null,remaining:nextRealm?Math.max(0,nextRealm.min-spirit):0};
+  let tierStart=r.min, tierEnd=r.max;
+  const span=r.max-r.min+1;
+  tierStart=r.min+Math.floor(((s.tier-1)*span)/9);
+  tierEnd=r.min+Math.floor((s.tier*span)/9)-1;
+  const percent=Math.max(0,Math.min(100,Math.round(((spirit-tierStart+1)/(tierEnd-tierStart+1))*100)));
+  return {rank:r.name,tier:s.tier,stage:s.stage,tierName:s.tierName,maxTier:9,percent,next:nextRealm?.name||null,remaining:nextRealm?Math.max(0,nextRealm.min-spirit):0};
+}
+
+async function ensureTienPhapSchema(){
+  await query(`
+    CREATE TABLE IF NOT EXISTS immortal_techniques (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      realm_index INTEGER NOT NULL,
+      realm_name TEXT NOT NULL,
+      grade TEXT NOT NULL DEFAULT 'Tiên Phẩm',
+      description TEXT NOT NULL DEFAULT '',
+      price_stones BIGINT NOT NULL DEFAULT 0,
+      power_bonus BIGINT NOT NULL DEFAULT 0,
+      training_bonus_percent INTEGER NOT NULL DEFAULT 0,
+      ability TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS user_immortal_techniques (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      technique_id INTEGER NOT NULL REFERENCES immortal_techniques(id) ON DELETE CASCADE,
+      learned_realm_index INTEGER NOT NULL DEFAULT 9,
+      learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id,technique_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_immortal_techniques_realm ON immortal_techniques(realm_index,id);
+  `);
+}
+async function seedTienPhap(){
+  const grades=['Hạ Tiên Pháp','Trung Tiên Pháp','Thượng Tiên Pháp'];
+  for(let ri=IMMORTAL_REALM_START;ri<RANKS.length;ri++){
+    for(let gi=0;gi<grades.length;gi++){
+      const grade=grades[gi], name=`${RANKS[ri].name} · ${grade}`;
+      const base=Math.round((ri-IMMORTAL_REALM_START+1)*10000);
+      const power=base*(ri+1)*(gi+1), training=10+(ri-IMMORTAL_REALM_START)*3+gi*5;
+      const price=Math.max(1000,Math.round(base*(ri+1)*(gi+1)*28));
+      await query(`INSERT INTO immortal_techniques(name,realm_index,realm_name,grade,description,price_stones,power_bonus,training_bonus_percent,ability)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(name) DO UPDATE SET realm_index=EXCLUDED.realm_index,realm_name=EXCLUDED.realm_name,grade=EXCLUDED.grade,description=EXCLUDED.description,price_stones=EXCLUDED.price_stones,power_bonus=EXCLUDED.power_bonus,training_bonus_percent=EXCLUDED.training_bonus_percent,ability=EXCLUDED.ability`,
+        [name,ri,RANKS[ri].name,grade,`Tiên pháp đối ứng ${RANKS[ri].name}, chỉ mở khi đạt đủ cảnh giới.`,price,power,training,`+${training}% hiệu quả tu luyện tiên pháp · +${power.toLocaleString('vi-VN')} chiến lực.`]);
+    }
+  }
 }
 
 async function initDb() {
@@ -710,7 +742,14 @@ async function initDb() {
       id BIGSERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       message TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'chat',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'chat';
+    CREATE TABLE IF NOT EXISTS elder_notifications (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS sect_posts (
       id BIGSERIAL PRIMARY KEY,
@@ -986,6 +1025,8 @@ async function initDb() {
 
   // Chạy migration trước seed để DB cũ có đủ cột cho Tàng Thư Các/Động Phủ.
   await ensureRuntimeSchema();
+  await ensureTienPhapSchema();
+  await seedTienPhap();
 
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL`);
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS cycle_key TEXT`);
@@ -1570,15 +1611,57 @@ app.patch('/api/profile',auth,async(req,res)=>{
     const {displayName,title,sect,position,birthday,hobby,bio,avatar}=req.body||{};
     if(displayName!==undefined){const dn=String(displayName).trim().slice(0,40);if(!dn)return res.status(400).json({error:'Danh xưng không được để trống.'});await query('UPDATE users SET display_name=$2 WHERE id=$1',[req.session.user_id,dn]);}
     await ensureProfile(req.session.user_id);
+    let safeAvatar=avatar===undefined?undefined:String(avatar).trim();
+    if(safeAvatar!==undefined){
+      if(safeAvatar.length>1600000)return res.status(400).json({error:'Ảnh đại diện quá lớn. Hãy chọn ảnh nhẹ hơn.'});
+      if(safeAvatar.startsWith('data:image/')){
+        if(!/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(safeAvatar))return res.status(400).json({error:'Ảnh đại diện không hợp lệ.'});
+      }else{ safeAvatar=safeAvatar.slice(0,20); }
+    }
     const pr=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
     const ps=stageFor(Number(pr?.spirit_power)||0);
     let chosenPosition=position?.toString().trim();
     if(chosenPosition){ const allowed=positionOptionsFor(ps.realmIndex); if(!allowed.includes(chosenPosition)) return res.status(400).json({error:`Chức vị ${chosenPosition} không phù hợp với ${ps.stage}.`}); }
-    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),avatar?.toString().slice(0,10)]);
+    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),safeAvatar]);
     res.json({ok:true});
   } catch(e){res.status(500).json({error:'Không thể cập nhật hồ sơ.'});}
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TIÊN PHÁP · Công pháp đối ứng từng cảnh giới Tiên
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/tien-phap',auth,async(req,res)=>{
+  try{
+    await ensureTienPhapSchema();
+    const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const st=stageFor(Number(p?.spirit_power)||0);
+    const learned=(await query('SELECT technique_id FROM user_immortal_techniques WHERE user_id=$1',[req.session.user_id])).rows;
+    const learnedSet=new Set(learned.map(x=>Number(x.technique_id)));
+    const rows=(await query(`SELECT id,name,realm_index,realm_name,grade,description,price_stones,power_bonus,training_bonus_percent,ability FROM immortal_techniques ORDER BY realm_index, CASE grade WHEN 'Hạ Tiên Pháp' THEN 1 WHEN 'Trung Tiên Pháp' THEN 2 ELSE 3 END,id`)).rows;
+    res.json({rows:rows.map(x=>({...x,learned:learnedSet.has(Number(x.id)),unlocked:st.realmIndex>=Number(x.realm_index)})),stage:st.stage,realmIndex:st.realmIndex,spiritStones:Number(p?.spirit_stones)||0,star:Number(st.tier)||1,maxStar:st.realmIndex===RANKS.length-1?TIEN_DE_STARS:0});
+  }catch(e){console.error('tien phap load:',e);res.status(500).json({error:'Không thể mở Tiên Pháp.'});}
+});
+app.post('/api/tien-phap/learn',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await ensureTienPhapSchema(); await client.query('BEGIN');
+    const p=(await client.query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    const st=stageFor(Number(p?.spirit_power)||0);
+    const id=Number(req.body?.id);
+    const tech=(await client.query('SELECT * FROM immortal_techniques WHERE id=$1',[id])).rows[0];
+    if(!tech){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Tiên Pháp.'});}
+    if(st.realmIndex<Number(tech.realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần đạt ${tech.realm_name} mới được mở khóa Tiên Pháp này.`});}
+    const exists=(await client.query('SELECT 1 FROM user_immortal_techniques WHERE user_id=$1 AND technique_id=$2',[req.session.user_id,id])).rows[0];
+    if(exists){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn đã học Tiên Pháp này.'});}
+    const price=Number(tech.price_stones)||0;
+    if(Number(p.spirit_stones)<price){await client.query('ROLLBACK');return res.status(400).json({error:`Không đủ linh thạch. Cần ${price.toLocaleString('vi-VN')}.`});}
+    await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,price]);
+    await client.query('INSERT INTO user_immortal_techniques(user_id,technique_id,learned_realm_index) VALUES($1,$2,$3)',[req.session.user_id,id,st.realmIndex]);
+    await client.query('COMMIT');
+    res.json({ok:true,message:`Đã lĩnh ngộ ${tech.name}.`,powerBonus:Number(tech.power_bonus)||0,trainingBonus:Number(tech.training_bonus_percent)||0});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien phap learn:',e);res.status(500).json({error:'Lĩnh ngộ Tiên Pháp thất bại.'});}finally{client.release();}
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TÀNG THƯ CÁC · Công pháp theo cảnh giới
@@ -2688,9 +2771,15 @@ app.get('/api/bicanh/history',auth,async(req,res)=>{
 });
 
 function isElderStage(realmIndex){ return Number(realmIndex||0) >= 4; }
+const ELDER_DEFAULT_NOTIFICATIONS=[
+  '⚜️✨Chí Cao Vô Thượng ✨⚜️',
+  '🌊Thượng Cổ Đại Năng 🌊',
+  'Đại Lão Đã Đến ⛩️'
+];
+function defaultElderNotification(position){ return ELDER_DEFAULT_NOTIFICATIONS[Math.max(0,Math.min(2,Number(position||1)-1))]; }
 
 async function topElders(limit=3){
-  const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,
+  const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
       COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
       COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count,
       (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
@@ -2723,8 +2812,8 @@ app.get('/api/sect-posts',auth,async(req,res)=>{
     const commentsByPost=new Map();
     for(const c of comments){const a=commentsByPost.get(String(c.post_id))||[];a.push(c);commentsByPost.set(String(c.post_id),a);}
     const elders=await topElders(3);
-    const elderIds=new Set(elders.map(x=>Number(x.id)));
-    res.json({rows:rows.map(x=>({...x,isElder:elderIds.has(Number(x.user_id)),comments:commentsByPost.get(String(x.id))||[]})),canPost:isElderStage(meStage.realmIndex),stage:meStage.stage,elders});
+    const elderMap=new Map(elders.map((x,i)=>[Number(x.id),i+1]));
+    res.json({rows:rows.map(x=>({...x,isElder:elderMap.has(Number(x.user_id)),elderRank:elderMap.get(Number(x.user_id))||0,comments:commentsByPost.get(String(x.id))||[]})),canPost:isElderStage(meStage.realmIndex),stage:meStage.stage,elders});
   }catch(e){console.error('sect posts load:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,table:e?.table,column:e?.column});res.status(500).json({error:'Không thể mở chế độ đăng bài.'});}
 });
 
@@ -2820,25 +2909,46 @@ app.get('/api/sect',async(req,res)=>{
 
 app.get('/api/chat',auth,async(req,res)=>{
   try {
-    const elders=await topElders(3); const elderIds=new Set(elders.map(x=>Number(x.id)));
-    const r=await query(`SELECT c.id,c.message,c.created_at,u.id AS user_id,u.display_name,p.title,p.rank,p.avatar FROM chat_messages c JOIN users u ON u.id=c.user_id JOIN profiles p ON p.user_id=u.id ORDER BY c.id DESC LIMIT 80`);
-    res.json({rows:r.rows.reverse().map(x=>({...x,isElder:elderIds.has(Number(x.user_id))}))});
-  } catch(e){res.status(500).json({error:'Không thể tải chat tổng.'});}
+    const elders=await topElders(3);
+    const elderMap=new Map(elders.map((x,i)=>[Number(x.id),i+1]));
+    const r=await query(`SELECT c.id,c.message,c.kind,c.created_at,u.id AS user_id,u.display_name,p.title,p.rank,p.avatar FROM chat_messages c JOIN users u ON u.id=c.user_id JOIN profiles p ON p.user_id=u.id ORDER BY c.id DESC LIMIT 100`);
+    const settings=(await query(`SELECT en.user_id,en.message FROM elder_notifications en WHERE en.user_id=ANY($1::int[])`,[elders.map(x=>Number(x.id))])).rows;
+    const custom=new Map(settings.map(x=>[Number(x.user_id),x.message]));
+    const rows=r.rows.reverse().map(x=>({...x,isElder:elderMap.has(Number(x.user_id)),elderRank:elderMap.get(Number(x.user_id))||0,isArrival:x.kind==='arrival'}));
+    const meRank=elderMap.get(Number(req.session.user_id))||0;
+    res.json({rows,elderSettings:meRank?{rank:meRank,defaultMessage:defaultElderNotification(meRank),message:custom.get(Number(req.session.user_id))||defaultElderNotification(meRank),canEdit:true}:null});
+  } catch(e){console.error('chat load:',e);res.status(500).json({error:'Không thể tải chat tổng.'});}
 });
 app.post('/api/chat',auth,async(req,res)=>{
   try {
     const message=String(req.body?.message||'').trim().slice(0,500);
     if(!message)return res.status(400).json({error:'Tin nhắn không được để trống.'});
-    const elders=await topElders(3); const isElder=elders.some(x=>Number(x.id)===Number(req.session.user_id));
+    const elders=await topElders(3); const elderMap=new Map(elders.map((x,i)=>[Number(x.id),i+1]));
+    const myRank=elderMap.get(Number(req.session.user_id))||0;
     const client=await pool.connect();
     try{
       await client.query('BEGIN');
-      if(isElder) await client.query('INSERT INTO chat_messages(user_id,message) VALUES($1,$2)',[req.session.user_id,'Đại Lão Đã Đến ⛩️']);
-      const r=await client.query('INSERT INTO chat_messages(user_id,message) VALUES($1,$2) RETURNING id,created_at',[req.session.user_id,message]);
+      if(myRank){
+        const nr=(await client.query('SELECT message FROM elder_notifications WHERE user_id=$1',[req.session.user_id])).rows[0];
+        const notice=(nr?.message||defaultElderNotification(myRank)).trim().slice(0,120);
+        await client.query('INSERT INTO chat_messages(user_id,message,kind) VALUES($1,$2,\'arrival\')',[req.session.user_id,notice]);
+      }
+      const r=await client.query('INSERT INTO chat_messages(user_id,message,kind) VALUES($1,$2,\'chat\') RETURNING id,created_at',[req.session.user_id,message]);
       await client.query('COMMIT');
-      res.status(201).json({ok:true,...r.rows[0],isElder});
+      res.status(201).json({ok:true,...r.rows[0],isElder:Boolean(myRank),elderRank:myRank});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
   } catch(e){console.error('chat send:',e);res.status(500).json({error:'Không thể gửi tin nhắn.'});}
+});
+
+app.patch('/api/elder-notification',auth,async(req,res)=>{
+  try{
+    const elders=await topElders(3); const me=elders.findIndex(x=>Number(x.id)===Number(req.session.user_id));
+    if(me<0)return res.status(403).json({error:'Chỉ 3 môn nhân đứng đầu thành tích mới có thể đổi thông báo.'});
+    const message=String(req.body?.message||'').trim().slice(0,120);
+    if(!message)return res.status(400).json({error:'Thông báo không được để trống.'});
+    await query(`INSERT INTO elder_notifications(user_id,message) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET message=EXCLUDED.message,updated_at=NOW()`,[req.session.user_id,message]);
+    res.json({ok:true,message,rank:me+1});
+  }catch(e){console.error('elder notification update:',e);res.status(500).json({error:'Không thể đổi thông báo.'});}
 });
 
 

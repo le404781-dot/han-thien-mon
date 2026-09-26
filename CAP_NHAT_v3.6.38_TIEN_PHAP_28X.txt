@@ -1,0 +1,46 @@
+HÀN THIÊN MÔN v3.6.38
+
+1. TIÊN PHÁP
+- Thêm mục 🌌 Tiên Pháp.
+- Có 9 cấp Tiên tương ứng: Nhân Tiên, Chân Tiên, Địa Tiên, Thiên Tiên, Huyền Tiên, Kim Tiên, Tiên Quân, Tiên Tôn, Tiên Đế.
+- Mỗi cảnh giới có 3 bậc: Hạ Tiên Pháp, Trung Tiên Pháp, Thượng Tiên Pháp.
+- Chỉ mở khóa khi người chơi đạt đủ cảnh giới yêu cầu.
+- Dùng linh thạch để lĩnh ngộ.
+- Dữ liệu lưu riêng trong immortal_techniques và user_immortal_techniques.
+
+2. ĐỘ KHÓ TU LUYỆN
+- Ngưỡng linh lực của toàn bộ đại cảnh giới được tăng 28 lần so với hệ cũ.
+- Cảnh giới càng cao cần lượng linh lực lớn hơn để đột phá.
+- Các cơ chế vận công, online và động phủ tiếp tục sử dụng linh lực hiện tại, vì vậy tốc độ thăng cảnh giới tự nhiên khó hơn đáng kể.
+
+Ngưỡng đại cảnh giới mới:
+Luyện Khí 0
+Trúc Cơ 28.000
+Kim Đan 84.000
+Nguyên Anh 196.000
+Hóa Thần 420.000
+Luyện Hư 840.000
+Hợp Thể 1.680.000
+Đại Thừa 3.360.000
+Độ Kiếp 6.720.000
+Nhân Tiên 14.280.000
+Chân Tiên 21.840.000
+Địa Tiên 29.400.000
+Thiên Tiên 36.960.000
+Huyền Tiên 44.520.000
+Kim Tiên 52.080.000
+Tiên Quân 59.640.000
+Tiên Tôn 67.200.000
+Tiên Đế 74.760.000
+
+3. TIÊN ĐẾ
+- Riêng Tiên Đế chia thành 99 tinh.
+- Hiển thị từ Tiên Đế Nhất Tinh đến Tiên Đế Cửu Cửu Tinh.
+- 99 tinh được tính theo tiến độ linh lực sau khi đạt ngưỡng Tiên Đế.
+
+4. DATABASE
+- Runtime tự tạo/migrate immortal_techniques và user_immortal_techniques.
+- Seed Tiên Pháp tự động khi server khởi động.
+- Không xóa dữ liệu người chơi cũ.
+
+Đã kiểm tra cú pháp server.js và script.js bằng node --check: OK.
