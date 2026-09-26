@@ -1,0 +1,18 @@
+HÀN THIÊN MÔN v3.6.64 — GIAO DIỆN LINH THÚ
+
+1. Tử Điện Điêu
+- Dùng ảnh tham chiếu do người dùng cung cấp làm hình đại diện/giao diện linh thú.
+- Hiển thị trong Hồ sơ, Dưỡng Thú, Thú Đường và Thú Trường khi đúng tên linh thú.
+
+2. Cửu Vĩ Thiên Hồ
+- Dùng ảnh tham chiếu do người dùng cung cấp.
+- Là Tiên Thú đặc biệt nên có viền hoàng kim, hào quang tím và hiệu ứng phát sáng nhẹ.
+- Hiển thị trong Hồ sơ, Dưỡng Thú, Thú Đường và thẻ Thần Thú của Thú Trường.
+
+3. Thú Trường
+- Khung chọn linh thú hiển thị ảnh thật của linh thú đã chọn.
+- Khi đổi linh thú, ảnh preview cập nhật theo lựa chọn.
+
+Assets:
+assets/beasts/tu-dien-dieu.jpg
+assets/beasts/cuu-vi-thien-ho.jpg
