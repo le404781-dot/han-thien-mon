@@ -1,0 +1,25 @@
+HÀN THIÊN MÔN v3.6.45
+
+1. TÀNG THƯ CÁC – CÔNG PHÁP KHÔNG GIỚI HẠN
+- Bỏ giới hạn số lượng công pháp được học.
+- Vẫn không thể học trùng một công pháp.
+- Mỗi lần lĩnh ngộ có tỷ lệ thành công/thất bại.
+- Tỷ lệ dựa trên Ngộ Tính hiện tại, cảnh giới của môn nhân và cảnh giới yêu cầu của công pháp.
+- Công pháp có yêu cầu Ngộ Tính tăng theo cảnh giới và phẩm cấp.
+- Thất bại không ghi nhận công pháp; lần thử vẫn tiêu hao linh thạch theo giá công pháp.
+- Giao diện hiển thị Ngộ Tính yêu cầu và % thành công.
+
+2. ĐAN CÁC
+- Thêm Đan Các vào menu.
+- Đan Các thu mua vật phẩm đang có trong Tu Di Giới.
+- Mỗi vật phẩm có giá thu mua linh thạch riêng; mặc định được tính khoảng 45% giá Tàng Bảo Các.
+- Cho phép chọn số lượng để bán.
+- Không thể bán pháp khí đang trang bị.
+- Giao dịch bán dùng transaction PostgreSQL, tránh mất vật phẩm/mất linh thạch khi lỗi.
+
+3. THÚ ĐƯỜNG – LINH THÚ LUÂN PHIÊN
+- Mở rộng kho linh thú lên nhiều chủng loài và nhiều cảnh giới hơn.
+- Thú Đường chỉ hiển thị một phiên 16 linh thú tại một thời điểm.
+- Phiên hàng được thay mới tự động mỗi 5 phút.
+- Có đồng hồ đếm ngược đến lần làm mới.
+- Danh sách phiên được chọn ổn định trong cùng một chu kỳ 5 phút để mọi môn nhân cùng nhìn thấy cùng một kho.

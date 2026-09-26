@@ -55,6 +55,7 @@ async function ensureRuntimeSchema() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS comprehension INTEGER NOT NULL DEFAULT 8;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_percent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_text TEXT NOT NULL DEFAULT '';
@@ -109,6 +110,7 @@ async function ensureRuntimeSchema() {
     CREATE INDEX IF NOT EXISTS idx_sect_post_comments_post ON sect_post_comments(post_id,id);
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
@@ -122,10 +124,12 @@ async function ensureRuntimeSchema() {
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS training_bonus_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS required_comprehension INTEGER NOT NULL DEFAULT 10;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS comprehension INTEGER NOT NULL DEFAULT 8;
     ALTER TABLE mansions ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Phàm';
     ALTER TABLE mansions ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE mansions ADD COLUMN IF NOT EXISTS price_stones INTEGER NOT NULL DEFAULT 0;
@@ -479,6 +483,7 @@ async function ensureTienPhapSchema(){
       price_stones BIGINT NOT NULL DEFAULT 0,
       power_bonus BIGINT NOT NULL DEFAULT 0,
       training_bonus_percent INTEGER NOT NULL DEFAULT 0,
+      required_comprehension INTEGER NOT NULL DEFAULT 10,
       ability TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS user_immortal_techniques (
@@ -1093,6 +1098,7 @@ async function initDb() {
     ['Thiên Đạo Cường Hóa Thạch','Vật phẩm tăng cường','Cường hóa thạch cực hiếm, tăng 30% hiệu quả cường hóa.',0,0,7]
   ];
   for (const item of enhanceItems) await query('INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO NOTHING',item);
+  await query(`UPDATE treasure_items SET buyback_price=CASE WHEN buyback_price>0 THEN buyback_price ELSE GREATEST(1,ROUND(price*0.45)) END WHERE price>0`);
   await query('ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0');
   await query("ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT ''");
   const artifactData = {
@@ -1120,10 +1126,11 @@ async function initDb() {
       const name=`${RANKS[ri].name} · ${suffix}`;
       const desc=`Công pháp ${grade.toLowerCase()} dành cho ${RANKS[ri].name}. Học thành giúp tăng chiến lực và hiệu quả tu luyện.`;
       const ability=`+${training}% hiệu quả vận công; +${base*mult} chiến lực.`;
-      await query(`INSERT INTO cultivation_techniques(name,realm_index,realm_name,grade,description,price_stones,power_bonus,training_bonus_percent,ability)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        ON CONFLICT(name) DO UPDATE SET realm_index=EXCLUDED.realm_index,realm_name=EXCLUDED.realm_name,grade=EXCLUDED.grade,description=EXCLUDED.description,price_stones=EXCLUDED.price_stones,power_bonus=EXCLUDED.power_bonus,training_bonus_percent=EXCLUDED.training_bonus_percent,ability=EXCLUDED.ability`,
-        [name,ri,RANKS[ri].name,grade,desc,price,base*mult,training,ability]);
+      const requiredComprehension=12 + ri*4 + gi*8;
+      await query(`INSERT INTO cultivation_techniques(name,realm_index,realm_name,grade,description,price_stones,power_bonus,training_bonus_percent,required_comprehension,ability)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT(name) DO UPDATE SET realm_index=EXCLUDED.realm_index,realm_name=EXCLUDED.realm_name,grade=EXCLUDED.grade,description=EXCLUDED.description,price_stones=EXCLUDED.price_stones,power_bonus=EXCLUDED.power_bonus,training_bonus_percent=EXCLUDED.training_bonus_percent,required_comprehension=EXCLUDED.required_comprehension,ability=EXCLUDED.ability`,
+        [name,ri,RANKS[ri].name,grade,desc,price,base*mult,training,requiredComprehension,ability]);
     }
   }
   for (const m of MANSION_SEEDS) await query(`INSERT INTO mansions(name,grade,description,price_stones,spirit_per_hour,min_realm) VALUES($1,$2,$3,$4,$5,$6)
@@ -1176,6 +1183,42 @@ async function initDb() {
     ['Tử Điện Điêu','Thần Thoại','Điện thú cực hiếm, tốc độ và linh lực đều vượt trội.','Thất Giai',7,18000,6,180,120,210,190,'Thần Thông · Tử Điện']
   ];
   for (const x of beastCatalog) await query('INSERT INTO spirit_beasts_catalog(name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(name) DO NOTHING',x);
+  const beastCatalogExtra = [
+    ['Bạch Vũ Ưng','Hạ Phẩm','Linh ưng trắng, mắt sáng và chuyên trinh sát sơn môn.','Nhị Giai',2,1050,1,58,38,95,52,'Thiên Phú · Bạch Vũ'],
+    ['Kim Giáp Tê','Hạ Phẩm','Tê thú kim giáp, thân hình nặng nhưng phòng ngự vững chắc.','Nhị Giai',2,1150,1,50,105,28,48,'Kim Giáp · Hộ Thể'],
+    ['Thanh Mộc Linh Lộc','Trung Phẩm','Lộc linh mộc hệ, sinh cơ dồi dào và hỗ trợ hồi phục.','Tam Giai',3,2300,2,72,60,78,92,'Mộc Linh · Sinh Cơ'],
+    ['Phong Linh Hồ','Thượng Phẩm','Hồ ly phong hệ, di chuyển nhanh và khó bị bắt kịp.','Tứ Giai',4,4300,3,88,62,125,90,'Phong Ảnh · Phiêu Miểu'],
+    ['Huyền Băng Ly','Thượng Phẩm','Ly thú băng hệ, ngưng tụ hàn vực quanh chủ nhân.','Ngũ Giai',5,6800,4,105,92,82,120,'Hàn Vực · Băng Phong'],
+    ['Xích Kim Viên','Hiếm','Viên thú kim hỏa, cận chiến bộc phát dữ dội.','Lục Giai',6,9800,5,150,110,76,105,'Kim Viêm · Liệt Kích'],
+    ['U Minh Lang','Sử Thi','Lang thú u minh, săn đuổi mục tiêu bằng khí tức âm hàn.','Thất Giai',7,15500,6,205,120,165,150,'U Minh · Truy Hồn'],
+    ['Vân Hải Kình','Thần Thoại','Cự thú biển mây, linh áp khổng lồ và huyết mạch cổ xưa.','Bát Giai',8,28000,7,320,260,105,280,'Thiên Phú · Vân Hải'],
+    ['Hỏa Vân Tước','Hạ Phẩm','Hỏa điểu nhẹ nhàng, thích hợp tu sĩ Hỏa hệ.','Nhị Giai',2,1250,1,75,34,92,70,'Hỏa Vân · Phần Tức'],
+    ['Thạch Linh Tượng','Trung Phẩm','Tượng linh đất đá, phòng ngự cao và bền bỉ.','Tam Giai',3,2500,2,80,125,24,78,'Địa Linh · Trấn Sơn'],
+    ['Linh Sa Xà','Trung Phẩm','Xà linh cát vàng, giỏi ẩn nấp và tập kích.','Tứ Giai',4,3900,3,105,52,110,82,'Linh Sa · Ẩn Tức'],
+    ['Tử Vân Điệp','Thượng Phẩm','Điệp linh tím, tạo ảo ảnh và tăng thân pháp.','Tứ Giai',4,4700,3,92,70,138,118,'Tử Vân · Huyễn Điệp'],
+    ['Ngân Nguyệt Thỏ','Hiếm','Thỏ linh ánh trăng, khí tức hiền hòa nhưng linh lực tinh thuần.','Ngũ Giai',5,7200,4,88,78,145,165,'Ngân Nguyệt · Tịnh Tâm'],
+    ['Cổ Mộc Long Xà','Hiếm','Long xà cổ mộc, dung hợp mộc linh và long huyết.','Lục Giai',6,12500,5,175,145,118,175,'Cổ Mộc · Long Huyết'],
+    ['Thiên Lôi Điểu','Sử Thi','Lôi điểu giáng sấm, chuyên bộc phát sát thương.','Thất Giai',7,17500,6,250,105,205,195,'Thiên Lôi · Lôi Minh'],
+    ['Hàn Thiên Phượng','Sử Thi','Phượng linh hàn thiên, khí tức lạnh đến đóng băng linh khí.','Bát Giai',8,32000,7,285,210,190,310,'Phượng Tủy · Hàn Thiên'],
+    ['Thái Cổ Kim Long','Thần Thoại','Kim long thái cổ, long uy áp chế vạn thú.','Cửu Giai',9,60000,8,520,430,250,500,'Long Uy · Thái Cổ'],
+    ['Cửu Sắc Linh Điểu','Thần Thoại','Linh điểu chín sắc, dung hợp nhiều hệ linh lực.','Cửu Giai',9,68000,8,470,300,330,560,'Cửu Sắc · Hợp Đạo'],
+    ['Tịnh Thế Bạch Liên Thú','Thần Thoại','Linh thú hiếm mang khí tức tịnh hóa, thiên về linh lực.','Thập Giai',10,90000,9,410,380,260,650,'Tịnh Thế · Liên Tâm'],
+    ['Hư Không Miêu','Sử Thi','Miêu thú xuyên hư không, thân pháp cực kỳ khó đoán.','Thập Giai',10,76000,9,360,220,520,420,'Hư Không · Vô Ảnh'],
+    ['Tinh Hà Kỳ Lân','Thần Thoại','Kỳ lân tinh hà, hấp thu tinh lực để cường hóa chủ nhân.','Thập Nhất Giai',11,120000,10,620,520,360,720,'Tinh Hà · Kỳ Lân'],
+    ['Cửu U Minh Phượng','Thần Thoại','Minh phượng cửu u, hỏa diễm và âm khí cùng tồn tại.','Thập Nhị Giai',12,160000,11,700,450,430,800,'Cửu U · Minh Hỏa'],
+    ['Đại Hoang Cổ Viên','Sử Thi','Cự viên đại hoang, lực chiến cận thân kinh người.','Thập Tam Giai',13,145000,12,760,620,290,510,'Đại Hoang · Cự Lực'],
+    ['Thiên Đạo Huyền Quy','Thần Thoại','Huyền quy mang đạo văn, phòng ngự như một tiểu thế giới.','Thập Tứ Giai',14,220000,13,520,980,210,900,'Thiên Đạo · Huyền Giáp'],
+    ['Vạn Kiếm Linh Hạc','Thần Thoại','Hạc linh điều khiển kiếm khí, công kích từ xa cực mạnh.','Thập Ngũ Giai',15,260000,14,920,420,560,780,'Vạn Kiếm · Hạc Vũ'],
+    ['Hỗn Độn Ma Ngưu','Thần Thoại','Ma ngưu hỗn độn, khí huyết và phòng ngự vượt chuẩn.','Thập Lục Giai',16,320000,15,1100,1050,350,820,'Hỗn Độn · Ma Ngưu'],
+    ['Thái Sơ Đạo Hồ','Thần Thoại','Đạo hồ thái sơ, linh lực tinh khiết như thuở khai thiên.','Thập Thất Giai',17,420000,16,1050,820,700,1100,'Thái Sơ · Đạo Hồ'],
+    ['Vạn Cổ Thần Long','Thần Thoại','Thần long vạn cổ, huyết mạch đứng trên nhiều linh thú.','Thập Bát Giai',18,600000,17,1500,1300,720,1450,'Vạn Cổ · Thần Long']
+  ];
+  for (const x of beastCatalogExtra) await query('INSERT INTO spirit_beasts_catalog(name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(name) DO NOTHING',x);
+  const extraBeastPowers = {
+    'Bạch Vũ Ưng':[240,'Bạch Vũ: +8% né tránh.'],'Kim Giáp Tê':[250,'Kim Giáp: +9% phòng thủ.'],'Thanh Mộc Linh Lộc':[330,'Sinh Cơ: +8% hồi phục.'],'Phong Linh Hồ':[390,'Phong Ảnh: +12% thân pháp.'],'Huyền Băng Ly':[540,'Hàn Vực: +10% khống chế.'],'Xích Kim Viên':[650,'Liệt Kích: +12% sát thương.'],'U Minh Lang':[780,'Truy Hồn: +14% sát thương.'],'Vân Hải Kình':[1100,'Vân Hải: +18% công lực.'],'Hỏa Vân Tước':[280,'Phần Tức: +8% công lực.'],'Thạch Linh Tượng':[320,'Trấn Sơn: +12% phòng thủ.'],'Linh Sa Xà':[370,'Ẩn Tức: +10% né tránh.'],'Tử Vân Điệp':[430,'Huyễn Điệp: +12% thân pháp.'],'Ngân Nguyệt Thỏ':[580,'Tịnh Tâm: +10% hồi phục.'],'Cổ Mộc Long Xà':[720,'Long Huyết: +14% công lực.'],'Thiên Lôi Điểu':[920,'Lôi Minh: +18% sát thương.'],'Hàn Thiên Phượng':[1250,'Hàn Thiên: +18% công lực.'],'Thái Cổ Kim Long':[1900,'Long Uy: +25% công lực.'],'Cửu Sắc Linh Điểu':[2000,'Cửu Sắc: +22% toàn thuộc tính.'],'Tịnh Thế Bạch Liên Thú':[2300,'Tịnh Thế: +25% hiệu quả tu luyện.'],'Hư Không Miêu':[2100,'Vô Ảnh: +25% thân pháp.'],'Tinh Hà Kỳ Lân':[3000,'Tinh Hà: +30% công lực.'],'Cửu U Minh Phượng':[3300,'Minh Hỏa: +32% sát thương.'],'Đại Hoang Cổ Viên':[3100,'Cự Lực: +28% công lực.'],'Thiên Đạo Huyền Quy':[3600,'Huyền Giáp: +30% phòng thủ.'],'Vạn Kiếm Linh Hạc':[3800,'Hạc Vũ: +30% sát thương.'],'Hỗn Độn Ma Ngưu':[4300,'Ma Ngưu: +35% công lực.'],'Thái Sơ Đạo Hồ':[4700,'Đạo Hồ: +35% hiệu quả tu luyện.'],'Vạn Cổ Thần Long':[6000,'Thần Long: +45% công lực.']
+  };
+  for (const [name,[power,ability]] of Object.entries(extraBeastPowers)) await query('UPDATE spirit_beasts_catalog SET power_bonus=$2,ability=$3 WHERE name=$1',[name,power,ability]);
+
   const beastPowers = {
     'Hàn Ngọc Hồ':[160,'Cảm Hàn: +5% hồi phục linh lực khi tu luyện.'],
     'Thanh Vân Hạc':[220,'Thanh Vân: +8% thân pháp khi giao chiến.'],
@@ -1573,9 +1616,23 @@ app.post('/api/spirit-stones/claim',auth,async(req,res)=>{
   }finally{client.release();}
 });
 
-function attributesFor(spirit){
+function attributesFor(spirit, storedComprehension){
   const st=stageFor(Number(spirit)||0); const s=Number(spirit)||0;
-  return {congLuc:10+st.realmIndex*35+st.tier*8+Math.floor(s/250),phongThu:10+st.realmIndex*28+st.tier*7+Math.floor(s/300),thanPhap:10+st.realmIndex*22+st.tier*6+Math.floor(s/400),ngoTinh:8+st.realmIndex*5+st.tier*2+Math.floor(s/700),khiVan:5+st.realmIndex*2+Math.floor(st.tier/3)};
+  const derived=8+st.realmIndex*5+st.tier*2+Math.floor(s/700);
+  const ngoTinh=Math.max(derived, Number(storedComprehension)||0);
+  return {congLuc:10+st.realmIndex*35+st.tier*8+Math.floor(s/250),phongThu:10+st.realmIndex*28+st.tier*7+Math.floor(s/300),thanPhap:10+st.realmIndex*22+st.tier*6+Math.floor(s/400),ngoTinh,khiVan:5+st.realmIndex*2+Math.floor(st.tier/3)};
+}
+function techniqueGradeIndex(grade){ return ({'Hạ Phẩm':0,'Trung Phẩm':1,'Thượng Phẩm':2}[grade]??0); }
+function techniqueRequiredComprehension(tech){
+  const ri=Math.max(0,Number(tech?.realm_index)||0), gi=techniqueGradeIndex(tech?.grade);
+  return Math.max(10, Number(tech?.required_comprehension)|| (12 + ri*4 + gi*8));
+}
+function techniqueLearnChance(realmIndex, ngoTinh, tech){
+  const ri=Math.max(0,Number(realmIndex)||0), requiredRealm=Math.max(0,Number(tech?.realm_index)||0);
+  const gap=Math.max(0,ri-requiredRealm);
+  const required=techniqueRequiredComprehension(tech);
+  const chance=35 + ((Number(ngoTinh)||0)-required)*2 + gap*10;
+  return Math.max(5,Math.min(95,Math.round(chance)));
 }
 
 app.get('/api/profile',auth,async(req,res)=>{
@@ -1600,10 +1657,10 @@ app.get('/api/profile',auth,async(req,res)=>{
       LEFT JOIN spirit_roots_catalog r ON r.id=p.equipped_root_id
       LEFT JOIN treasure_items a ON a.id=p.equipped_artifact_id
       WHERE p.user_id=$1`,[p.id])).rows[0]||{};
-    const techniqueRows=(await query(`SELECT ct.id,ct.power_bonus,ct.training_bonus_percent,ct.name,ct.grade,ct.ability, (p.equipped_technique_id=ct.id) AS equipped
+    const techniqueRows=(await query(`SELECT ct.id,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.name,ct.grade,ct.ability, (p.equipped_technique_id=ct.id) AS equipped
       FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[p.id])).rows;
     const mansion=(await query(`SELECT um.active,m.id,m.name,m.grade,m.spirit_per_hour,um.last_tick_at FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1`,[p.id])).rows[0]||null;
-    const baseAttr=attributesFor(p.spirit_power);
+    const baseAttr=attributesFor(p.spirit_power,p.comprehension);
     const equipmentPower=(Number(eq.beast_power)||0)+(Number(eq.root_power)||0)+(Number(eq.artifact_power)||0);
     const techniquePower=techniquePowerFor(techniqueRows);
     const secretDebuffActive=p.secret_realm_debuff_until && new Date(p.secret_realm_debuff_until)>new Date();
@@ -1623,7 +1680,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const healthCurrent=activeBattle ? (Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_hp):Number(activeBattle.opponent_hp)) : healthMax;
 
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,techniqueSlots:techniqueSlots(stage.realmIndex),mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:600}});
+    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:600}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -1694,13 +1751,13 @@ app.get('/api/codex',auth,async(req,res)=>{
     const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
     if(!p)return res.status(404).json({error:'Không tìm thấy hồ sơ.'});
     const st=stageFor(Number(p.spirit_power)||0);
-    const rows=(await query(`SELECT ct.id,ct.name,ct.realm_index,ct.realm_name,ct.grade,ct.description,ct.price_stones,ct.power_bonus,ct.training_bonus_percent,ct.ability,
+    const rows=(await query(`SELECT ct.id,ct.name,ct.realm_index,ct.realm_name,ct.grade,ct.description,ct.price_stones,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.ability,
       EXISTS(SELECT 1 FROM user_techniques ut WHERE ut.user_id=$1 AND ut.technique_id=ct.id) AS learned
       FROM cultivation_techniques ct
       WHERE ct.realm_index <= $2
       ORDER BY ct.realm_index ASC, CASE ct.grade WHEN 'Hạ Phẩm' THEN 1 WHEN 'Trung Phẩm' THEN 2 WHEN 'Thượng Phẩm' THEN 3 ELSE 9 END, ct.price_stones ASC, ct.id ASC`,[req.session.user_id,st.realmIndex])).rows;
     const used=rows.filter(x=>x.learned).length;
-    res.json({rows,stage:st.stage,realmIndex:st.realmIndex,slots:techniqueSlots(st.realmIndex),used,spiritStones:Number(p.spirit_stones)||0});
+    res.json({rows,stage:st.stage,realmIndex:st.realmIndex,slots:null,unlimited:true,used,spiritStones:Number(p.spirit_stones)||0});
   }catch(e){console.error('codex load:',e);res.status(500).json({error:'Không thể mở Tàng Thư Các: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
 
@@ -1716,14 +1773,21 @@ app.post('/api/codex/learn',auth,async(req,res)=>{
     if(!tech){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy công pháp.'});}
     if(st.realmIndex<Number(tech.realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Công pháp yêu cầu ${tech.realm_name}. Bạn hiện ở ${st.stage}.`});}
     const learned=(await client.query('SELECT COUNT(*)::int AS c FROM user_techniques WHERE user_id=$1',[req.session.user_id])).rows[0].c;
-    if(learned>=techniqueSlots(st.realmIndex)){await client.query('ROLLBACK');return res.status(400).json({error:`${st.stage} chỉ được học tối đa ${techniqueSlots(st.realmIndex)} công pháp.`});}
     if((await client.query('SELECT 1 FROM user_techniques WHERE user_id=$1 AND technique_id=$2',[req.session.user_id,id])).rowCount){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã học công pháp này.'});}
     const price=Number(tech.price_stones)||0, stones=Number(p.spirit_stones)||0;
     if(stones<price){await client.query('ROLLBACK');return res.status(400).json({error:`Linh thạch không đủ. Cần ${price.toLocaleString('vi-VN')} linh thạch.`});}
+    const attrs=attributesFor(Number(p.spirit_power)||0,p.comprehension);
+    const requiredComprehension=techniqueRequiredComprehension(tech);
+    const chance=techniqueLearnChance(st.realmIndex,attrs.ngoTinh,tech);
+    const roll=crypto.randomInt(1,101);
     await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,price]);
+    if(roll>chance){
+      await client.query('COMMIT');
+      return res.json({ok:true,success:false,name:tech.name,price,chance,roll,comprehension:attrs.ngoTinh,requiredComprehension,message:`Lĩnh ngộ thất bại ${tech.name}. Xác suất thành công ${chance}%. Mất ${price.toLocaleString('vi-VN')} linh thạch thử học; hãy tiếp tục lĩnh ngộ.`});
+    }
     await client.query('INSERT INTO user_techniques(user_id,technique_id,learned_realm_index) VALUES($1,$2,$3)',[req.session.user_id,id,st.realmIndex]);
     await client.query('COMMIT');
-    res.json({ok:true,name:tech.name,price,powerBonus:Number(tech.power_bonus)||0,trainingBonus:Number(tech.training_bonus_percent)||0,ability:tech.ability,slots:techniqueSlots(st.realmIndex),used:learned+1,message:`Đã mua và học ${tech.name}. Chiến lực +${Number(tech.power_bonus||0).toLocaleString('vi-VN')}.`});
+    res.json({ok:true,success:true,name:tech.name,price,chance,roll,comprehension:attrs.ngoTinh,requiredComprehension,powerBonus:Number(tech.power_bonus)||0,trainingBonus:Number(tech.training_bonus_percent)||0,ability:tech.ability,slots:null,unlimited:true,used:learned+1,message:`Lĩnh ngộ thành công ${tech.name}! Xác suất ${chance}%, Ngộ tính ${attrs.ngoTinh}/${requiredComprehension}. Chiến lực +${Number(tech.power_bonus||0).toLocaleString('vi-VN')}.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('codex learn:',e);res.status(500).json({error:'Không thể mua và học công pháp.'});}finally{client.release();}
 });
 
@@ -2073,6 +2137,45 @@ app.post('/api/storage/upgrade',auth,async(req,res)=>{
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ĐAN CÁC · NPC thu mua vật phẩm từ môn nhân
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/dan-cac',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id;
+    const [profile,items]=await Promise.all([
+      query('SELECT spirit_stones,storage_capacity FROM profiles WHERE user_id=$1',[uid]),
+      query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.buyback_price,COALESCE(i.quantity,0)::int AS quantity,
+        (ti.id=(SELECT equipped_artifact_id FROM profiles WHERE user_id=$1)) AS equipped
+        FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
+        WHERE COALESCE(i.quantity,0)>0 ORDER BY ti.category,ti.name`,[uid])
+    ]);
+    const buyback=items.rows.map(x=>({...x,buyback_price:Number(x.buyback_price)||Math.max(1,Math.round((Number(x.price)||0)*0.45))}));
+    res.json({spiritStones:Number(profile.rows[0]?.spirit_stones||0),items:buyback});
+  }catch(e){console.error('dan cac:',e);res.status(500).json({error:'Không thể mở Đan Các.'});}
+});
+app.post('/api/dan-cac/sell',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const itemId=Number(req.body?.itemId), quantity=Math.max(1,Math.floor(Number(req.body?.quantity)||0));
+    if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
+    await client.query('BEGIN');
+    const row=(await client.query(`SELECT ti.id,ti.name,ti.category,ti.price,ti.buyback_price,COALESCE(i.quantity,0)::int AS quantity,
+      p.equipped_artifact_id FROM treasure_items ti JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1 JOIN profiles p ON p.user_id=$1 WHERE ti.id=$2 FOR UPDATE`,[req.session.user_id,itemId])).rows[0];
+    if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không có vật phẩm này trong Tu Di Giới.'});}
+    if(quantity>Number(row.quantity)) {await client.query('ROLLBACK');return res.status(400).json({error:`Chỉ có ${Number(row.quantity)} ${row.name}.`});}
+    if(Number(row.equipped_artifact_id)===itemId){await client.query('ROLLBACK');return res.status(400).json({error:'Pháp khí đang trang bị. Hãy tháo trang bị trước khi bán.'});}
+    const unit=Math.max(1,Number(row.buyback_price)||Math.round((Number(row.price)||0)*0.45));
+    const total=unit*quantity;
+    await client.query('UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[req.session.user_id,itemId,quantity]);
+    const stoneUpdate=await client.query('UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones',[req.session.user_id,total]);
+    const spiritStones=Number(stoneUpdate.rows[0]?.spirit_stones||0);
+    await client.query('COMMIT');
+    res.json({ok:true,item:row.name,quantity,unitPrice:unit,total,spiritStones,message:`Đan Các đã thu mua ${row.name} ×${quantity}, nhận ${total.toLocaleString('vi-VN')} linh thạch.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('dan cac sell:',e);res.status(500).json({error:'Không thể bán vật phẩm. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PHƯỜNG THỊ 1.0 · mua bán và trao đổi vật phẩm giữa các môn nhân
 // ─────────────────────────────────────────────────────────────────────────────
 app.get('/api/market',auth,async(req,res)=>{
@@ -2299,11 +2402,14 @@ app.post('/api/quests/:id/claim',auth,async(req,res)=>{
 app.get('/api/beast-house',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id;
+    const cycle=Math.floor(Date.now()/300000);
+    const nextRefreshMs=300000-(Date.now()%300000);
     const [catalog,profile]=await Promise.all([
-      query('SELECT id,name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill,power_bonus,ability FROM spirit_beasts_catalog ORDER BY beast_realm_tier,price_stones,id'),
+      query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill,power_bonus,ability
+        FROM spirit_beasts_catalog ORDER BY md5(id::text || $1::text) LIMIT 16`,[String(cycle)]),
       query('SELECT spirit_stones,spirit_power,rank,realm_tier,spirit_beast,spirit_beast_rarity,beast_realm,beast_realm_tier,equipped_beast_id FROM profiles WHERE user_id=$1',[uid])
     ]);
-    res.json({catalog:catalog.rows,profile:profile.rows[0]||{}});
+    res.json({catalog:catalog.rows,profile:profile.rows[0]||{},rotationKey:String(cycle),nextRefreshMs,refreshMinutes:5,totalBeasts:(await query('SELECT COUNT(*)::int AS c FROM spirit_beasts_catalog')).rows[0]?.c||catalog.rows.length});
   }catch(e){console.error('beast house load:',e);res.status(500).json({error:'Không thể mở Thú Đường.'});}
 });
 app.post('/api/beast-house/buy',auth,async(req,res)=>{
@@ -2358,11 +2464,13 @@ async function ensureEquipmentSchema(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS comprehension INTEGER NOT NULL DEFAULT 8;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'Vật phẩm';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
@@ -2387,6 +2495,7 @@ async function ensureEquipmentSchema(){
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Hạ Phẩm';
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS required_comprehension INTEGER NOT NULL DEFAULT 10;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -3469,6 +3578,7 @@ async function ensureChallengeSchema(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_artifact_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_technique_id INTEGER;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS comprehension INTEGER NOT NULL DEFAULT 8;
   `);
   await query(`
     CREATE TABLE IF NOT EXISTS challenge_bets (
