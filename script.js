@@ -912,8 +912,10 @@ $('#memberModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.clos
 $('#searchInput').oninput=e=>{const q=e.target.value.toLowerCase().trim();renderMembers(members.filter(m=>[m.name,m.nick,m.role,...m.tags].join(' ').toLowerCase().includes(q)));};
 $('#accountBtn').onclick=openAccount;$('#joinBtn').onclick=()=>getToken()?accountSummary():renderAuth('register');
 $('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');const dark=document.body.classList.contains('dark');$('#themeBtn').textContent=dark?'☀':'☾';localStorage.setItem('theme',dark?'dark':'light');};
+$('#colorModeBtn').onclick=()=>{document.body.classList.toggle('color-flow');const enabled=document.body.classList.contains('color-flow');localStorage.setItem('colorMode',enabled?'flow':'normal');$('#colorModeBtn').textContent=enabled?'✨':'🌈';};
 $('#menuBtn').onclick=()=>$('#nav').classList.toggle('open');document.querySelectorAll('#nav a').forEach(a=>a.onclick=()=>$('#nav').classList.remove('open'));$('#topBtn').onclick=()=>scrollTo({top:0,behavior:'smooth'});
 if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$('#themeBtn').textContent='☀';}
+if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('color-flow');$('#colorModeBtn').textContent='✨';}
 setupTutorial();
 
 loadData();loadSect();checkSession();
@@ -956,29 +958,47 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  const initial=location.hash.slice(1);if(initial&&labels[initial])setTimeout(()=>enterFocus(initial,false),0);
 })();
 
-/* v3.6.53 · Nhạc nền lặp + điều khiển môn nhân */
+/* v3.6.55 · Nhạc nền tương thích đa thiết bị + khôi phục sau tương tác */
 (function setupBackgroundMusic(){
  const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
  if(!audio||!playBtn||!stopBtn)return;
- const musicKey='htm_background_music';
- const volumeKey='htm_background_volume';
+ const musicKey='htm_background_music',volumeKey='htm_background_volume';
  let savedVolume=parseFloat(localStorage.getItem(volumeKey));
  if(!Number.isFinite(savedVolume))savedVolume=.35;
- savedVolume=Math.max(0,Math.min(1,savedVolume));audio.volume=savedVolume;volume.value=String(savedVolume);if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
+ savedVolume=Math.max(0,Math.min(1,savedVolume));
+ audio.volume=savedVolume; volume.value=String(savedVolume);
+ if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
  function setStatus(playing,text){
    if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
    if(msg)msg.textContent=text;
    playBtn.disabled=playing;stopBtn.disabled=!playing;
  }
- async function start(){
-   try{audio.loop=true;await audio.play();localStorage.setItem(musicKey,'on');setStatus(true,'Nhạc nền đang phát và sẽ tự động lặp lại.');}
-   catch(e){setStatus(false,'Hãy chạm “Khởi Nhạc” để trình duyệt cho phép phát âm thanh.');}
+ async function start(fromGesture=true){
+   try{
+     audio.loop=true;
+     audio.muted=false;
+     if(audio.readyState===0) audio.load();
+     await audio.play();
+     localStorage.setItem(musicKey,'on');
+     setStatus(true,'Nhạc nền đang phát và sẽ tự động lặp lại.');
+   }catch(e){
+     setStatus(false,fromGesture?'Thiết bị/trình duyệt đang chặn âm thanh. Hãy chạm Khởi Nhạc lại.':'Đã lưu lựa chọn nhạc. Chạm Khởi Nhạc để bắt đầu.');
+   }
  }
- function stop(){audio.pause();audio.currentTime=0;localStorage.setItem(musicKey,'off');setStatus(false,'Đã ngưng nhạc nền.');}
- playBtn.addEventListener('click',start);stopBtn.addEventListener('click',stop);
+ function stop(){audio.pause();try{audio.currentTime=0;}catch{}localStorage.setItem(musicKey,'off');setStatus(false,'Đã ngưng nhạc nền.');}
+ playBtn.addEventListener('click',()=>start(true));
+ stopBtn.addEventListener('click',stop);
  volume.addEventListener('input',()=>{const v=Math.max(0,Math.min(1,Number(volume.value)));audio.volume=v;localStorage.setItem(volumeKey,String(v));if(volumeValue)volumeValue.textContent=Math.round(v*100)+'%';});
  audio.addEventListener('play',()=>setStatus(true,'Nhạc nền đang phát và sẽ tự động lặp lại.'));
  audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false,'Đã ngưng nhạc nền.');});
- if(localStorage.getItem(musicKey)==='on')setStatus(false,'Đã lưu lựa chọn Khởi Nhạc. Chạm “Khởi Nhạc” để bắt đầu phát.');
+ audio.addEventListener('ended',()=>{audio.currentTime=0;start(false);});
+ audio.addEventListener('error',()=>setStatus(false,'Không thể đọc file nhạc trên thiết bị này. Vui lòng kiểm tra lại file MP3.'));
+ document.addEventListener('visibilitychange',()=>{
+   if(document.visibilityState==='visible' && localStorage.getItem(musicKey)==='on' && audio.paused) start(false);
+ });
+ // Autoplay vẫn phụ thuộc chính sách của từng trình duyệt; một lần chạm bất kỳ trên trang sẽ mở khóa audio khi được phép.
+ const unlock=()=>{if(localStorage.getItem(musicKey)==='on'&&audio.paused)start(false);};
+ ['pointerdown','touchstart','keydown'].forEach(ev=>document.addEventListener(ev,unlock,{once:true,passive:true}));
+ if(localStorage.getItem(musicKey)==='on')setStatus(false,'Đã lưu lựa chọn Khởi Nhạc. Chạm vào trang nếu trình duyệt chưa cho phép phát.');
  else setStatus(false,'Đang ngưng nhạc.');
 })();
