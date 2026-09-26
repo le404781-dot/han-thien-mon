@@ -191,6 +191,15 @@
  <div id="timelineList" class="timeline"></div>
 </section>
 
+<section id="audio" class="section alt audio-section">
+ <div class="section-head"><div><span class="eyebrow">🔊 ÂM THANH · 聲樂</span><h2>Nhạc nền Hàn Thiên Môn</h2><p class="section-lead">Nhạc nền tiên hiệp được phát lặp liên tục khi môn nhân lựa chọn Khởi Nhạc. Trình duyệt iPhone yêu cầu thao tác chạm để bắt đầu phát.</p></div><span class="live-pill" id="audioStatus">🔇 ĐANG NGƯNG</span></div>
+ <div class="audio-panel">
+  <div class="audio-art"><span>寒</span><small>HÀN THIÊN MÔN</small></div>
+  <div class="audio-copy"><h3>Tinh Vệ · Bản vang vọng, không lời, có trống</h3><p>Nhạc nền sẽ tự động lặp lại từ đầu khi bản nhạc kết thúc.</p><div class="audio-controls"><button class="btn primary" id="audioPlayBtn" type="button">🔊 Khởi Nhạc</button><button class="btn ghost" id="audioStopBtn" type="button">🔇 Ngưng Nhạc</button></div><div class="audio-volume"><label for="audioVolume">Âm lượng</label><input id="audioVolume" type="range" min="0" max="1" step="0.01" value="0.35"><span id="audioVolumeValue">35%</span></div><p class="audio-note" id="audioMsg">Đang ngưng nhạc.</p></div>
+ </div>
+ <audio id="backgroundMusic" preload="metadata" loop playsinline src="assets/audio/tinh-ve-background.mp3"></audio>
+</section>
+
 <section class="join-section"><div><span class="eyebrow">✦ NHẬP MÔN</span><h2>Ghi danh vào Hàn Thiên Môn</h2><p>Tạo tài khoản để có hồ sơ đệ tử riêng, tu luyện linh lực, trò chuyện cùng đạo hữu và lưu thành tích trong PostgreSQL.</p></div><button class="btn primary" id="joinBtn">Đăng ký môn nhân</button></section>
 </main>
 <footer><p>寒天門 · Hàn Thiên Môn · Giữ đạo tâm, giữ tình bằng hữu.</p><button id="topBtn" class="btn small">↑ Về sơn môn</button></footer>

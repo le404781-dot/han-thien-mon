@@ -1,0 +1,9 @@
+HÀN THIÊN MÔN v3.6.53 · ÂM THANH
+
+- Thêm mục 🔊 Âm Thanh riêng trong điều hướng.
+- Tích hợp file nhạc nền Tinh Vệ do người dùng cung cấp tại assets/audio/tinh-ve-background.mp3.
+- Nhạc nền dùng HTMLAudioElement với loop=true, tự lặp liên tục.
+- Có hai lựa chọn: Khởi Nhạc / Ngưng Nhạc.
+- Ghi nhớ lựa chọn bật/tắt bằng localStorage.
+- Ghi nhớ âm lượng; mặc định 35%.
+- Tương thích iPhone: không cố autoplay trái quy định trình duyệt; người dùng chạm Khởi Nhạc để bắt đầu.

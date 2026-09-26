@@ -365,26 +365,51 @@ function openProfileEditor(){
 
 let onlineTimer=null;
 async function onlineCultivationTick(){
-  if(!getToken()||!currentProfile)return;
+  if(!getToken()||Boolean(currentProfile?.mansion?.active))return;
   try{
     const d=await api('/api/cultivation/online',{method:'POST',headers:authHeaders(),body:'{}'});
-    const panel=$('#onlineCultivationPanel'), status=$('#onlineStatus'), gainEl=$('#onlineGain');
-    if(d.mode==='online'){
-      if(status)status.textContent=`🟢 ${d.onlineLabel||'Đang xuất quan · tự động tụ linh'} · +${Number(d.rate||0).toLocaleString('vi-VN')} linh lực/phút · khoảng ${Number(d.ratePerHour||0).toLocaleString('vi-VN')}/giờ`;
-      if(gainEl)gainEl.textContent=`Hôm nay đã tích lũy ${Number(d.onlineEarned||0).toLocaleString('vi-VN')}/${Number(d.dailyCap||600).toLocaleString('vi-VN')} linh lực`;
-      if(d.gain>0){
-        const msg=$('#trainMsg'); if(msg)msg.textContent=d.message||`☁ Online: +${d.gain} linh lực. Tốc độ ${d.rate} linh lực/phút.`;
-        await loadProfile();
-      }
+    window.__onlineRate=Number(d.rate||0);
+    window.__onlineActive=Boolean(d.active);
+    window.__onlineEarned=Number(d.onlineEarned||0);
+    window.__onlineRemainder=Number(d.remainderSeconds||0);
+    window.__onlineSyncedAt=Number(d.serverTime||Date.now());
+    const status=$('#onlineStatus'),gainEl=$('#onlineGain');
+    if(status)status.textContent=d.active?`🟢 Xuất Quan · đang tụ linh theo thời gian thực · +${Number(d.rate||0).toLocaleString('vi-VN')}/phút · ${Number(d.ratePerHour||0).toLocaleString('vi-VN')}/giờ · ${esc(d.realm||currentProfile?.realm||'cảnh giới hiện tại')}`:'🌙 Đã Bế Quan · tạm dừng tụ linh, chờ Xuất Quan';
+    if(gainEl)gainEl.textContent=`+${Number(d.onlineEarned||0).toLocaleString('vi-VN')} linh lực đã tụ · +${Number(d.rate||0).toLocaleString('vi-VN')}/phút`;
+    const live=$('#onlineLiveCounter');if(live)live.textContent=d.active?'Đang tích lũy từng nhịp thời gian':'Tạm dừng';
+    if(d.gain>0){
+      const msg=$('#trainMsg'); if(msg)msg.textContent=d.message||`☁ Online: +${d.gain} linh lực. Tốc độ ${d.rate} linh lực/phút.`;
+      await loadProfile();
     }
   }catch(e){
     const status=$('#onlineStatus');
-    if(status && !Boolean(currentProfile?.mansion?.active)) status.textContent='☁ Đang chờ nhịp Xuất Quan · linh lực sẽ tự động tích lũy theo cảnh giới';
+    if(status && !Boolean(currentProfile?.mansion?.active)) status.textContent='☁ Chờ Xuất Quan · hệ thống sẽ tự động tiếp tục tụ linh khi trạng thái hoạt động được xác nhận';
   }
 }
 function startOnlineCultivation(){
   if(onlineTimer)clearInterval(onlineTimer);
-  onlineTimer=setInterval(onlineCultivationTick,30000);
+  if(window.__onlineRealtimeTimer)clearInterval(window.__onlineRealtimeTimer);
+  onlineTimer=setInterval(onlineCultivationTick,15000);
+  window.__onlineRealtimeTimer=setInterval(()=>{
+    const status=$('#onlineStatus'),gainEl=$('#onlineGain');
+    if(!status||!gainEl||!currentProfile||Boolean(currentProfile?.mansion?.active))return;
+    const rate=Number(window.__onlineRate||currentProfile.onlineRate||0);
+    const active=Boolean(window.__onlineActive);
+    const syncedAt=Number(window.__onlineSyncedAt||0);
+    const base=Number(window.__onlineEarned||0);
+    const remainder=Number(window.__onlineRemainder||0);
+    if(!rate||!active||!syncedAt)return;
+    const elapsed=Math.max(0,Math.floor((Date.now()-syncedAt)/1000));
+    const projected=Math.floor((remainder+elapsed)*rate/60);
+    const next=Math.max(1,Math.ceil(60/rate));
+    gainEl.textContent=`+${(base+projected).toLocaleString('vi-VN')} linh lực đã tụ · +${rate.toLocaleString('vi-VN')}/phút`;
+    status.textContent=`🟢 Xuất Quan · đang tụ linh theo thời gian thực · khoảng ${(rate*60).toLocaleString('vi-VN')} linh lực/giờ · cảnh giới ${currentProfile.realm||currentProfile.stage}`;
+    const panel=$('#onlineCultivationPanel'); if(panel)panel.classList.add('online-ready');
+    const live=$('#onlineLiveCounter'); if(live)live.textContent=`+${projected.toLocaleString('vi-VN')} linh lực đang tích lũy`;
+    if(projected>0 && projected%1===0){
+      const progress=$('#onlineRealtimeBar'); if(progress)progress.style.width=`${Math.min(100,(elapsed%next)/next*100)}%`;
+    }
+  },1000);
   onlineCultivationTick();
 }
 function renderCultivation(p){
@@ -401,7 +426,7 @@ function renderCultivation(p){
  </div>
  ${atTribulation?`<div class="daily-stone-card" id="ascensionPanel"><div><span class="eyebrow">🌌 PHI THĂNG · ĐỘ KIẾP</span><h3>Cửu Trọng Thiên Kiếp</h3><p>Đạt <b>Độ Kiếp Cửu Tầng</b> để vượt qua 9 lần thiên kiếp. Mỗi lần thành công <b>không xóa chiến lực, trang bị hay vật phẩm</b>. Hoàn tất lần thứ 9 sẽ lập tức phi thăng lên <b>Nhân Tiên Nhất Tầng</b>.</p></div><div><button class="btn primary" id="ascensionBtn">⚡ Độ kiếp lần 1/9</button><p id="ascensionMsg" class="train-msg">Đang kiểm tra Cửu Trọng Thiên Kiếp...</p></div></div>`:''}
  <div class="daily-stone-card"><div><span class="eyebrow">💎 LINH THẠCH HẰNG NGÀY</span><h3>Kho linh thạch: <b id="stoneCount">${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</b></h3><p>Mỗi ngày nhận <b>100 linh thạch</b> để sử dụng tại Tàng Bảo Các.</p></div><button class="btn primary" id="claimStoneBtn" ${p.canClaimStones?'':'disabled'}>${p.canClaimStones?'💎 Nhận 100 linh thạch':'✓ Đã nhận hôm nay'}</button></div>
- <div class="online-cultivation-card ${onlineUnlocked?'online-ready':'online-locked'}" id="onlineCultivationPanel"><div><span class="eyebrow">☁ TU LUYỆN ONLINE</span><h3>${onlineUnlocked?'Tự động tích lũy linh lực':'Chưa mở Online'}</h3><p id="onlineStatus">${mansionActive?`🏯 ${esc(p.mansion.name)} đang khởi động · tạm khóa tự động tụ linh.`:`🟢 +${onlineRate.toLocaleString('vi-VN')} linh lực/phút · khoảng ${(onlineRate*60).toLocaleString('vi-VN')} linh lực/giờ · tốc độ riêng theo ${esc(p.realm)}.`}</p></div><div class="online-numbers"><b id="onlineGain">${onlineUnlocked?'Tự động tích lũy khi Xuất Quan':'Đang khóa do Động Phủ'}</b><small>Không cần bấm Vận Công · chỉ tính thời gian đang Xuất Quan</small></div></div><p id="trainMsg" class="train-msg">${mansionActive?`🏯 ${esc(p.mansion.name)} đang khởi động: tự động +${Number(p.mansion.spiritPerHour||0).toLocaleString('vi-VN')} linh lực/giờ. Vận công bị khóa hoàn toàn.`:`☁ Tu luyện Online đã mở: linh lực tự động cộng theo thời gian <b>Xuất Quan</b>, tốc độ thay đổi theo từng cảnh giới. Vận công thủ công vẫn có lượt riêng mỗi ngày.`}</p>`;
+ <div class="online-cultivation-card ${onlineUnlocked?'online-ready':'online-locked'}" id="onlineCultivationPanel"><div class="online-cultivation-copy"><span class="eyebrow">☁ TU LUYỆN ONLINE · THỜI GIAN THỰC</span><h3>${onlineUnlocked?'Tự động tụ linh khi Xuất Quan':'Chưa mở Online'}</h3><p id="onlineStatus">${mansionActive?`🏯 ${esc(p.mansion.name)} đang khởi động · tạm khóa tự động tụ linh.`:`🟢 +${onlineRate.toLocaleString('vi-VN')} linh lực/phút · khoảng ${(onlineRate*60).toLocaleString('vi-VN')} linh lực/giờ · tốc độ tăng theo ${esc(p.realm)}.`}</p><div class="online-progress"><i id="onlineRealtimeBar" style="width:0%"></i></div><small id="onlineLiveCounter" class="online-live-counter">${onlineUnlocked?'Đang chờ nhịp Xuất Quan…':'Đang khóa do Động Phủ'}</small></div><div class="online-numbers"><b id="onlineGain">${onlineUnlocked?`+${Number(p.onlineEarned||0).toLocaleString('vi-VN')} linh lực đã tụ · +${onlineRate.toLocaleString('vi-VN')}/phút`:'Đang khóa do Động Phủ'}</b><small>Tự động theo từng giây · không cần bấm Vận Công</small></div></div><p id="trainMsg" class="train-msg">${mansionActive?`🏯 ${esc(p.mansion.name)} đang khởi động: tự động +${Number(p.mansion.spiritPerHour||0).toLocaleString('vi-VN')} linh lực/giờ. Vận công bị khóa hoàn toàn.`:`☁ Tu luyện Online đã mở: linh lực tự động cộng theo thời gian <b>Xuất Quan</b>, tốc độ thay đổi theo từng cảnh giới. Vận công thủ công vẫn có lượt riêng mỗi ngày.`}</p>`;
  $('#trainBtn').onclick=async()=>{const b=$('#trainBtn');b.disabled=true;b.textContent='☁ Đang vận công...';try{const d=await api('/api/cultivation/train',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=d.message||`+${d.gain} linh lực → ${d.stage} · Lượt vận công/tu luyện hôm nay ${d.trainCount}/${d.maxDaily}. ${d.progress.next?`Còn ${d.progress.remaining} linh lực để tiến vào ${d.progress.next}.`:'Đã đạt cảnh giới tối cao.'}`;await loadProfile();await loadLeaderboard();}catch(e){$('#trainMsg').textContent=e.message;}finally{const latest=Number(currentProfile?.trainCount||0)>=Number(currentProfile?.maxDaily||10);const locked=Boolean(currentProfile?.mansion?.active);b.disabled=latest||locked;b.textContent=locked?'🏯 Động phủ đang khóa vận công':latest?'☁ Đã đủ lượt':'⚔ Vận công';}};
  $('#claimStoneBtn').onclick=async()=>{const b=$('#claimStoneBtn');b.disabled=true;try{const d=await api('/api/spirit-stones/claim',{method:'POST',headers:authHeaders(),body:'{}'});$('#trainMsg').textContent=`💎 ${d.amount} linh thạch đã nhập kho. Có thể dùng tại Tàng Bảo Các.`;await loadProfile();await loadTreasure();}catch(e){$('#trainMsg').textContent=e.message;b.disabled=false;}};
  if(atTribulation){
@@ -900,7 +925,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','dan-cac':'⚗️ Đan Các','beast-house':'🐉 Thú Đường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','dan-cac':'⚗️ Đan Các','beast-house':'🐉 Thú Đường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
@@ -929,4 +954,31 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('focus-mode'))exitFocus(true);});
  window.addEventListener('popstate',()=>{const id=location.hash.slice(1);if(id&&labels[id])enterFocus(id,false);else exitFocus(false);});
  const initial=location.hash.slice(1);if(initial&&labels[initial])setTimeout(()=>enterFocus(initial,false),0);
+})();
+
+/* v3.6.53 · Nhạc nền lặp + điều khiển môn nhân */
+(function setupBackgroundMusic(){
+ const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
+ if(!audio||!playBtn||!stopBtn)return;
+ const musicKey='htm_background_music';
+ const volumeKey='htm_background_volume';
+ let savedVolume=parseFloat(localStorage.getItem(volumeKey));
+ if(!Number.isFinite(savedVolume))savedVolume=.35;
+ savedVolume=Math.max(0,Math.min(1,savedVolume));audio.volume=savedVolume;volume.value=String(savedVolume);if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
+ function setStatus(playing,text){
+   if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
+   if(msg)msg.textContent=text;
+   playBtn.disabled=playing;stopBtn.disabled=!playing;
+ }
+ async function start(){
+   try{audio.loop=true;await audio.play();localStorage.setItem(musicKey,'on');setStatus(true,'Nhạc nền đang phát và sẽ tự động lặp lại.');}
+   catch(e){setStatus(false,'Hãy chạm “Khởi Nhạc” để trình duyệt cho phép phát âm thanh.');}
+ }
+ function stop(){audio.pause();audio.currentTime=0;localStorage.setItem(musicKey,'off');setStatus(false,'Đã ngưng nhạc nền.');}
+ playBtn.addEventListener('click',start);stopBtn.addEventListener('click',stop);
+ volume.addEventListener('input',()=>{const v=Math.max(0,Math.min(1,Number(volume.value)));audio.volume=v;localStorage.setItem(volumeKey,String(v));if(volumeValue)volumeValue.textContent=Math.round(v*100)+'%';});
+ audio.addEventListener('play',()=>setStatus(true,'Nhạc nền đang phát và sẽ tự động lặp lại.'));
+ audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false,'Đã ngưng nhạc nền.');});
+ if(localStorage.getItem(musicKey)==='on')setStatus(false,'Đã lưu lựa chọn Khởi Nhạc. Chạm “Khởi Nhạc” để bắt đầu phát.');
+ else setStatus(false,'Đang ngưng nhạc.');
 })();

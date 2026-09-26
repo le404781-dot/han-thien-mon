@@ -1,0 +1,15 @@
+HÀN THIÊN MÔN v3.6.52
+
+1. TU LUYỆN ONLINE THỜI GIAN THỰC
+- Tự động tích linh lực trong thời gian nhân vật đang Xuất Quan/online.
+- Tốc độ linh lực tăng dần theo 18 đại cảnh giới, từ Luyện Khí đến Tiên Đế.
+- Server tính theo số giây thực tế và giữ phần thời gian lẻ bằng online_spirit_remainder_seconds.
+- Giao diện cập nhật bộ đếm theo từng giây, đồng bộ server mỗi 15 giây.
+- Khi Bế Quan hoặc heartbeat hết hạn, tích lũy tự động dừng.
+- Giữ tương thích hệ thống Vận Công thủ công và Động Phủ hiện có.
+
+2. GIAO DIỆN TIÊN HIỆP ĐỐI XỨNG SÁNG/TỐI
+- Sáng: giấy ngà, thanh ngọc, chu sa, kim nhạt.
+- Tối: mực xanh sâu, ngọc sáng, chu sa sáng, kim nhạt.
+- Các card, section, nút và hero chuyển màu mượt khi đổi giao diện.
+- Tăng tương phản chữ/nền nhưng vẫn giữ cảm giác thủy mặc, tiên hiệp.

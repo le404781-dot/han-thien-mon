@@ -697,3 +697,46 @@ body.dark .tag,body.dark .tier-badge,body.dark .live-pill{background:rgba(31,56,
 .mailbox-area{background:linear-gradient(145deg,rgba(249,246,235,.88),rgba(216,229,222,.65));}
 body.dark .mailbox-area{background:linear-gradient(145deg,rgba(27,48,42,.94),rgba(30,58,49,.82));}
 .mist-a{background:#f4f0df;opacity:.20}.mist-b{background:#bcd4c9;opacity:.16}
+
+/* v3.6.52 · TIÊN HIỆP ĐỐI XỨNG SÁNG/TỐI + ONLINE THỜI GIAN THỰC */
+:root{
+  --bg:#eee8d8;--paper:#f8f2df;--surface:#fffaf0;--text:#1d2825;--muted:#66736d;--line:#c8bfa9;
+  --jade:#24584c;--jade2:#4e7d6d;--gold:#a8792f;--red:#9a3d35;--ink:#183b35;
+  --shadow:0 18px 55px rgba(46,55,46,.14)
+}
+body.dark{
+  --bg:#0c1718;--paper:#122324;--surface:#172b2a;--text:#edf2e7;--muted:#aebdb5;--line:#3b5751;
+  --jade:#9bd0b8;--jade2:#69a38d;--gold:#d5b56c;--red:#df8070;--ink:#b8e0cf;
+  --shadow:0 22px 65px rgba(0,0,0,.46)
+}
+body{transition:background .35s ease,color .35s ease}
+body,.section,.topbar,.member-card,.profile-card,.power-card,.online-cultivation-card,.daily-stone-card,.challenge-block,.challenge-rules>div,.mailbox-area,.codex-card,.mansion-card,.friend-card,.market-card,.quest-card,.attribute-panel,.hero-card{transition:background-color .35s ease,border-color .35s ease,color .35s ease,box-shadow .35s ease}
+body:not(.dark) .section.alt{background:linear-gradient(180deg,rgba(255,250,239,.78),rgba(221,231,219,.48))}
+body.dark .section.alt{background:linear-gradient(180deg,rgba(19,48,45,.86),rgba(10,29,31,.82))}
+body:not(.dark) .hero{background-image:linear-gradient(90deg,rgba(246,240,222,.95) 0%,rgba(238,235,218,.78) 48%,rgba(226,232,219,.38) 100%),url('tien-hiep-bg.jpg')}
+body.dark .hero{background-image:linear-gradient(90deg,rgba(8,24,25,.96) 0%,rgba(12,36,36,.84) 48%,rgba(14,46,43,.34) 100%),url('tien-hiep-bg.jpg')}
+body:not(.dark) .hero-card{background:linear-gradient(145deg,rgba(255,250,239,.94),rgba(210,224,213,.7))}
+body.dark .hero-card{background:linear-gradient(145deg,rgba(18,42,41,.96),rgba(23,62,56,.86))}
+body:not(.dark) .primary{background:#24584c;color:#fff8e8}
+body.dark .primary{background:#9bd0b8;color:#102522}
+body:not(.dark) .ghost:hover,.body:not(.dark) .small:hover{background:rgba(36,88,76,.08)}
+body.dark .ghost:hover,body.dark .small:hover{background:rgba(155,208,184,.10)}
+body:not(.dark) .online-cultivation-card.online-ready{background:linear-gradient(110deg,rgba(36,88,76,.10),rgba(168,121,47,.13));border-color:rgba(168,121,47,.62)}
+body.dark .online-cultivation-card.online-ready{background:linear-gradient(110deg,rgba(68,142,117,.18),rgba(213,181,108,.10));border-color:rgba(155,208,184,.55)}
+.online-cultivation-card{min-height:132px;position:relative;overflow:hidden}
+.online-cultivation-card:after{content:'☁';position:absolute;right:18px;bottom:-30px;font:900 8rem 'Noto Serif SC';opacity:.035;color:var(--jade);pointer-events:none}
+.online-cultivation-copy{min-width:0;flex:1}
+.online-progress{height:5px;margin-top:11px;border:1px solid var(--line);background:var(--bg);border-radius:999px;overflow:hidden;max-width:520px}
+.online-progress i{display:block;height:100%;background:linear-gradient(90deg,var(--jade),var(--gold));transition:width .5s linear}
+.online-live-counter{display:block;margin-top:6px;color:var(--jade);font-weight:800;font-size:.68rem;letter-spacing:.03em}
+.online-numbers{position:relative;z-index:1;min-width:210px;text-align:right}
+.online-numbers b{font-size:.95rem;line-height:1.45}
+body.dark .online-numbers b{color:var(--gold)}
+@media(max-width:700px){.online-numbers{min-width:0;text-align:left;width:100%}.online-cultivation-card:after{right:-15px}}
+/* v3.6.53 · Âm thanh tiên hiệp */
+.audio-panel{display:grid;grid-template-columns:150px minmax(0,1fr);gap:24px;align-items:center;padding:24px;border:1px solid var(--gold);background:linear-gradient(135deg,color-mix(in srgb,var(--surface) 92%,transparent),color-mix(in srgb,var(--jade) 8%,var(--surface)));box-shadow:var(--shadow)}
+.audio-art{width:150px;height:150px;border:1px solid var(--gold);display:grid;place-items:center;align-content:center;gap:7px;background:radial-gradient(circle at 50% 42%,rgba(169,130,58,.12),transparent 58%),var(--paper);position:relative}
+.audio-art:before,.audio-art:after{content:'';position:absolute;border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);inset:9px}.audio-art:after{inset:15px;border-style:dashed;opacity:.7}
+.audio-art span{font:900 4.6rem/1 'Noto Serif SC';color:var(--red);z-index:1}.audio-art small{font-size:.52rem;letter-spacing:.2em;font-weight:900;color:var(--jade);z-index:1}
+.audio-copy h3{font:700 1.35rem 'Noto Serif SC';color:var(--jade);margin-bottom:5px}.audio-copy>p{color:var(--muted);font-size:.8rem;line-height:1.55}.audio-controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.audio-controls .btn{min-width:135px}.audio-volume{display:flex;align-items:center;gap:12px;margin-top:16px;max-width:480px}.audio-volume label,.audio-volume span{font-size:.72rem;font-weight:800;color:var(--muted);white-space:nowrap}.audio-volume input{flex:1;accent-color:var(--jade)}.audio-note{margin-top:10px!important;min-height:22px;color:var(--red)!important;font-size:.72rem!important}.audio-section audio{display:none}
+@media(max-width:650px){.audio-panel{grid-template-columns:1fr}.audio-art{margin:auto}.audio-controls{display:grid;grid-template-columns:1fr 1fr}.audio-controls .btn{width:100%;min-width:0}.audio-volume{max-width:none}}

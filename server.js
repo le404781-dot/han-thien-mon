@@ -634,6 +634,7 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_online_at TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_date DATE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_earned INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_remainder_seconds INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS presence_status TEXT NOT NULL DEFAULT 'offline';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
@@ -1936,40 +1937,41 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       await client.query('BEGIN');
       const mansionState=await settleMansionIncome(client,req.session.user_id);
       if(mansionState.active){await client.query('COMMIT');return res.status(423).json({mode:'mansion',active:false,locked:true,gain:mansionState.gain,mansion:mansionState.name,message:`Động phủ ${mansionState.name} đang khởi động; tích lũy Online cũng bị khóa cho đến khi ngưng động phủ.`});}
-      const p=(await client.query(`SELECT spirit_power,last_online_at,last_seen_at,presence_status,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
+      const p=(await client.query(`SELECT spirit_power,last_online_at,last_seen_at,presence_status,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned,COALESCE(online_spirit_remainder_seconds,0)::int AS online_spirit_remainder_seconds FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
       const st=stageFor(Number(p.spirit_power)||0);
-      const maxDaily=Math.max(2,10-st.realmIndex);
-      const a=(await client.query(`SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id])).rows[0];
-      const trainCount= a && String(a.activity_date).slice(0,10)===today ? Number(a.train_count)||0 : 0;
-      const baseOnlineRate=onlineSpiritRate(st.realmIndex);
-      // Online được mở mặc định. Linh lực chỉ tích lũy khi môn nhân thực sự đang Xuất Quan
-      // (heartbeat còn mới); tránh cộng thời gian khi đã đóng trình duyệt/bế quan.
       const presenceFresh=String(p.presence_status||'')==='online' && p.last_seen_at && (Date.now()-new Date(p.last_seen_at).getTime())<90000;
       let earned=String(p.online_spirit_date||'').slice(0,10)===today ? Number(p.online_spirit_earned)||0 : 0;
-      let last=p.last_online_at?new Date(p.last_online_at).getTime():Date.now();
-      if(!p.last_online_at || String(p.online_spirit_date||'').slice(0,10)!==today || !presenceFresh) last=Date.now();
-      const elapsed=presenceFresh?Math.max(0,Date.now()-last):0;
-      const minutes=Math.floor(elapsed/60000);
+      let remainder=String(p.online_spirit_date||'').slice(0,10)===today ? Number(p.online_spirit_remainder_seconds)||0 : 0;
+      const now=Date.now();
+      const sameDay=String(p.online_spirit_date||'').slice(0,10)===today;
+      const last=(sameDay && p.last_online_at)?new Date(p.last_online_at).getTime():now;
+      const elapsedSeconds=(presenceFresh && sameDay)?Math.max(0,Math.floor((now-last)/1000)):0;
+      if(!sameDay) remainder=0;
       const dailyCap=999999999;
       const techRows=(await client.query(`SELECT ct.training_bonus_percent FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1`,[req.session.user_id])).rows;
       const techniqueBonus=techniqueTrainingBonusFor(techRows);
       const rate=Math.max(1,Math.round(onlineSpiritRate(st.realmIndex)*(1+techniqueBonus/100)));
-      const gain=Math.max(0,Math.min(minutes*rate,dailyCap-earned));
+      const totalSeconds=remainder+elapsedSeconds;
+      const gain=Math.max(0,Math.min(Math.floor(totalSeconds*rate/60),dailyCap-earned));
+      const secondsPerGain=Math.max(1,Math.ceil(60/rate));
+      const consumedSeconds=gain>0?Math.floor(gain*60/rate):0;
+      remainder=Math.max(0,totalSeconds-consumedSeconds);
+      // Không cộng khi đã Bế Quan; bộ đếm chỉ chạy trong trạng thái Xuất Quan còn heartbeat mới.
       let spirit=Number(p.spirit_power)||0;
       let breakthroughRewards=[];
       if(gain>0){
         spirit+=gain; earned+=gain;
         const ns=stageFor(spirit);
         breakthroughRewards=await grantRealmBreakthroughRewards(client,req.session.user_id,st.realmIndex,ns.realmIndex);
-        await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,last_online_at=NOW(),online_spirit_date=$6,online_spirit_earned=$7,updated_at=NOW() WHERE user_id=$1`,
-          [req.session.user_id,spirit,gain,ns.realm,ns.tier,today,earned]);
+        await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,last_online_at=NOW(),online_spirit_date=$6,online_spirit_earned=$7,online_spirit_remainder_seconds=$8,updated_at=NOW() WHERE user_id=$1`,
+          [req.session.user_id,spirit,gain,ns.realm,ns.tier,today,earned,remainder]);
       } else {
-        await client.query(`UPDATE profiles SET last_online_at=NOW(),online_spirit_date=$2,online_spirit_earned=$3 WHERE user_id=$1`,[req.session.user_id,today,earned]);
+        await client.query(`UPDATE profiles SET last_online_at=NOW(),online_spirit_date=$2,online_spirit_earned=$3,online_spirit_remainder_seconds=$4 WHERE user_id=$1`,[req.session.user_id,today,earned,remainder]);
       }
       await client.query('COMMIT');
       const ns=stageFor(spirit);
       const stoneReward=breakthroughRewards.reduce((sum,x)=>sum+Number(x.amount||0),0);
-      res.json({mode:'online',active:presenceFresh,gain,onlineEarned:earned,dailyCap,rate,ratePerHour:rate*60,realm:ns.realm,realmIndex:ns.realmIndex,stage:ns.stage,nextTickSeconds:60,onlineLabel:presenceFresh?'Đang xuất quan · tự động tụ linh':'Đang bế quan · chờ xuất quan',breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
+      res.json({mode:'online',active:presenceFresh,gain,onlineEarned:earned,dailyCap,rate,ratePerSecond:rate/60,ratePerHour:rate*60,realm:ns.realm,realmIndex:ns.realmIndex,stage:ns.stage,remainderSeconds:remainder,elapsedSeconds,secondsPerGain,nextTickSeconds:15,serverTime:Date.now(),onlineLabel:presenceFresh?'Đang xuất quan · tự động tụ linh theo thời gian thực':'Đang bế quan · chờ xuất quan',breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
   }catch(e){console.error('online cultivation:',e);res.status(500).json({error:'Không thể cập nhật linh lực trực tuyến.'});}
 });
