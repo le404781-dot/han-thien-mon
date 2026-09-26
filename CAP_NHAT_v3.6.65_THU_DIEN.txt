@@ -1,0 +1,12 @@
+HÀN THIÊN MÔN v3.6.65 · THÚ DIỆN 🖲️
+
+1. Thêm avatar_url vào catalog Linh Thú/Tiên Thú, vẫn tương thích avatar riêng cũ.
+2. Thú Diện cho phép tìm kiếm các Linh Thú/Tiên Thú đang tồn tại trong hệ thống.
+3. Có bộ lọc chỉ hiện Linh Thú/Tiên Thú mà môn nhân đang sở hữu.
+4. Có nút mở tìm ảnh trên web theo tên Linh Thú/Tiên Thú.
+5. Có thể tải ảnh từ thiết bị hoặc dán URL ảnh HTTPS/HTTP.
+6. Ảnh được đặt làm ảnh mặc định của chủng loài; các bản thể sở hữu sẽ bỏ override cũ để đồng bộ ảnh mặc định mới.
+7. Ảnh mặc định được đồng bộ vào Hồ Sơ, Dưỡng Thú, Thú Đường, Thú Trường và thông tin môn nhân tại Đệ Tử Bảng.
+8. Cửu Vĩ Thiên Hồ vẫn giữ viền hoàng kim + hào quang tím đặc biệt.
+9. Tử Điện Điêu và Cửu Vĩ Thiên Hồ dùng ảnh tham chiếu đã cung cấp trong assets/beasts.
+10. Kiểm tra cú pháp server.js và script.js bằng node --check.
