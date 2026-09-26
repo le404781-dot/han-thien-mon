@@ -1,0 +1,23 @@
+HÀN THIÊN MÔN v3.6.60 · DƯỢC PHƯỜNG + TIÊN BÀN
+
+1. Dược Phường
+- Giữ nguyên endpoint /api/duoc-duong để tương thích bản cũ.
+- Hiển thị số lượng vật phẩm đang có trong Tu Di Giới.
+- Môn nhân có thể mua vật phẩm và dùng trực tiếp các đan dược có linh lực ngay tại Dược Phường.
+- Thức ăn linh thú có nút chuyển nhanh sang Dưỡng Thú.
+- Sau khi mua tự đồng bộ Hồ Sơ, Dược Phường, Tu Di Giới và Dưỡng Thú.
+
+2. Tiên Bàn
+- Thêm mục 🎴 Tiên Bàn vào thanh menu và chế độ focus.
+- Mọi môn nhân đã đăng nhập đều có thể quay, không yêu cầu cảnh giới.
+- Giá cố định: 3.000 linh thạch/lượt.
+- Mỗi lượt chọn ngẫu nhiên 1 vật phẩm từ kho vật phẩm.
+- Cơ duyên đặc biệt: Cực Phẩm Cửu Vĩ Thiên Hồ, tỷ lệ 0,5%.
+- Tiên Thú: Cực Phẩm Cửu Vĩ Thiên Hồ · Cửu Giai.
+- Thiên phú vô thượng: Huyễn Thuật.
+- Khi trúng Tiên Thú có hiệu ứng chúc mừng đặc biệt và lưu lịch sử 12 lượt gần nhất.
+- Phần thưởng vật phẩm được đưa vào Tu Di Giới; Tiên Thú được lưu vào kho linh thú và khởi tạo dữ liệu Dưỡng Thú.
+
+3. Tương thích
+- Không thay thế hay xóa các hệ thống cũ của v3.6.58.
+- Các route Tàng Bảo Các / Tu Di Giới hiện tại vẫn giữ nguyên.

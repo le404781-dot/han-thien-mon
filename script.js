@@ -332,7 +332,7 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadDuongThu();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadDuongThu();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
  catch{localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}
 }
 function renderGuestAreas(){
@@ -662,11 +662,37 @@ async function loadDanCac(){
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>Không thể mở Đan Các</h3><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadDanCac()">↻ Thử lại</button></div>`;}
 }
 
+
+async function loadTienBan(){
+ const area=$('#tienBanArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/tien-ban',{headers:authHeaders()});
+  const history=d.history||[];
+  area.innerHTML=`<div class="tien-ban-orb"><div class="tien-ban-symbol">🎴</div><div><span class="eyebrow">☯ TIÊN BÀN GIÁNG CƠ DUYÊN</span><h3>Mỗi lần xoay, một mệnh số mới</h3><p>Giá cố định <b>3.000 linh thạch/lượt</b>. Tất cả môn nhân đều được quay.</p><div class="tien-ban-pity">⚜️ Cơ duyên đặc biệt · <b>Cửu Vĩ Thiên Hồ 0,5%</b> · Thiên Phú Vô Thượng: Huyễn Thuật</div></div><div class="tien-ban-wallet">💎 ${Number(d.spiritStones||0).toLocaleString('vi-VN')}</div></div>
+  <div class="tien-ban-action"><button id="tienBanSpinBtn" class="btn primary">🎴 XOAY TIÊN BÀN · 3.000 💎</button><span id="tienBanMsg" class="train-msg"></span></div>
+  <div id="tienBanReward"></div>
+  <div class="tien-ban-history"><span class="eyebrow">📜 12 CƠ DUYÊN GẦN NHẤT</span>${history.length?history.map(x=>`<div class="tien-history-row ${x.is_special?'special':''}"><span>${x.is_special?'⚜️':'🎁'}</span><b>${esc(x.reward_name)}</b><small>${esc(x.reward_rarity)} · ${new Date(x.created_at).toLocaleString('vi-VN')}</small></div>`).join(''):'<p class="muted">Chưa có lần quay nào.</p>'}</div>`;
+  $('#tienBanSpinBtn').onclick=async()=>{
+    const b=$('#tienBanSpinBtn'),msg=$('#tienBanMsg');b.disabled=true;msg.textContent='☯ Tiên Bàn đang vận chuyển cơ duyên...';
+    try{
+      const x=await api('/api/tien-ban/spin',{method:'POST',headers:authHeaders(),body:'{}'});
+      msg.textContent=x.message||'Đã nhận cơ duyên.';
+      const r=x.reward||{};
+      $('#tienBanReward').innerHTML=x.special?`<div class="tien-special-reward"><div class="special-burst">⚜️✨</div><span class="eyebrow">CHÚC MỪNG ĐẠI CƠ DUYÊN</span><h2>🐉 ${esc(r.name)}</h2><p>${esc(r.description)}</p><strong>🌌 ${esc(r.skill)}</strong><b>Thiên Phú Vô Thượng · Huyễn Thuật</b><small>Tiên Thú Cực Phẩm · Cửu Giai</small></div>`:`<div class="tien-reward"><span>🎁 CƠ DUYÊN NHẬN ĐƯỢC</span><h3>${esc(r.name)}</h3><p>${esc(r.description||'Vật phẩm đã chuyển vào Tu Di Giới.')}</p><small>${esc(r.category||'Vật phẩm')} · ${esc(r.rarity||'Hạ Đẳng')}</small></div>`;
+      await Promise.all([loadProfile(),loadTienBan(),loadTuDi()]);
+    }catch(e){msg.textContent='❌ '+e.message;}
+    finally{b.disabled=false;}
+  };
+ }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
+}
+
 async function loadDuocDuong(){
  const area=$('#duocDuongArea'); if(!area||!getToken())return;
  try{const d=await api('/api/duoc-duong',{headers:authHeaders()});const items=d.items||[];const p=d.profile||{};
-  area.innerHTML=`<div class="duoc-npc"><div class="duoc-npc-seal">💊</div><div><span class="eyebrow">NPC · ${esc(d.npc?.title||'Dược Đường')}</span><h3>${esc(d.npc?.name||'Dược Đồng')}</h3><p>${esc(d.npc?.dialogue||'')}</p></div><div class="duoc-wallet">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</div></div><div class="duoc-grid">${items.map(x=>{const locked=Number(d.stage?.realmIndex||0)<Number(x.min_realm||0);const icon=x.category.includes('thức ăn')?'🍖':x.category.includes('Khôi')?'🪆':x.category.includes('trang bị')?'🛡️':'◈';return `<article class="duoc-card ${locked?'locked':''}"><div class="duoc-icon">${icon}</div><span class="eyebrow">${esc(x.category.replace('Dược Đường · ',''))}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p>${x.beast_food_gain?`<small>🐉 +${Number(x.beast_food_gain)} linh lực linh thú · 💗 +${Number(x.beast_joy_gain)} niềm vui</small>`:''}${x.is_khoi_loi?`<small>🪆 +${Number(x.beast_joy_gain)} niềm vui</small>`:''}${x.beast_gear_slot?`<small>⚔ +${Number(x.beast_gear_power)} linh thú · yêu cầu ${esc(REALM_NAMES[Number(x.beast_gear_min_realm)]||'cao hơn')}</small>`:''}<div class="duoc-buy"><b>💎 ${Number(x.price||0).toLocaleString('vi-VN')}</b><input class="duoc-qty" data-id="${x.id}" type="number" min="1" max="99" value="1" ${locked?'disabled':''}><button class="btn small primary duoc-buy-btn" data-id="${x.id}" ${locked?'disabled':''}>${locked?'🔒 Chưa đủ cảnh giới':'Mua'}</button></div></article>`}).join('')}</div><p id="duocMsg" class="train-msg">${esc(d.npc?.name||'Mặc Ly')}: “Dược đúng căn cơ, thú đúng tâm tính.”</p>`;
+  area.innerHTML=`<div class="duoc-npc"><div class="duoc-npc-seal">💊</div><div><span class="eyebrow">NPC · ${esc(d.npc?.title||'Dược Đường')}</span><h3>${esc(d.npc?.name||'Dược Đồng')}</h3><p>${esc(d.npc?.dialogue||'')}</p></div><div class="duoc-wallet">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</div></div><div class="duoc-grid">${items.map(x=>{const locked=Number(d.stage?.realmIndex||0)<Number(x.min_realm||0);const icon=x.category.includes('thức ăn')?'🍖':x.category.includes('Khôi')?'🪆':x.category.includes('trang bị')?'🛡️':'◈';return `<article class="duoc-card ${locked?'locked':''}"><div class="duoc-icon">${icon}</div><span class="eyebrow">${esc(x.category.replace('Dược Đường · ',''))}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p>${x.beast_food_gain?`<small>🐉 +${Number(x.beast_food_gain)} linh lực linh thú · 💗 +${Number(x.beast_joy_gain)} niềm vui</small>`:''}${x.is_khoi_loi?`<small>🪆 +${Number(x.beast_joy_gain)} niềm vui</small>`:''}${x.beast_gear_slot?`<small>⚔ +${Number(x.beast_gear_power)} linh thú · yêu cầu ${esc(REALM_NAMES[Number(x.beast_gear_min_realm)]||'cao hơn')}</small>`:''}<div class="duoc-buy"><b>💎 ${Number(x.price||0).toLocaleString('vi-VN')}</b><span>Kho: ${Number(x.quantity||0)}</span><input class="duoc-qty" data-id="${x.id}" type="number" min="1" max="99" value="1" ${locked?'disabled':''}><button class="btn small primary duoc-buy-btn" data-id="${x.id}" ${locked?'disabled':''}>${locked?'🔒 Chưa đủ cảnh giới':'Mua'}</button>${Number(x.spirit_gain||0)>0&&Number(x.quantity||0)>0?`<button class="btn small duoc-use-btn" data-id="${x.id}">Dùng 1 · +${Number(x.spirit_gain).toLocaleString('vi-VN')} linh lực</button>`:''}${x.category==='Dược Đường · Linh thú thức ăn'&&Number(x.quantity||0)>0?`<button class="btn small duoc-open-beast" type="button">🐉 Dùng tại Dưỡng Thú</button>`:''}</div></article>`}).join('')}</div><p id="duocMsg" class="train-msg">${esc(d.npc?.name||'Mặc Ly')}: “Dược đúng căn cơ, thú đúng tâm tính.”</p>`;
   document.querySelectorAll('.duoc-buy-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;const q=Number(document.querySelector(`.duoc-qty[data-id="${b.dataset.id}"]`)?.value||1);try{const x=await api('/api/duoc-duong/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:q})});$('#duocMsg').textContent='✅ '+x.message;await Promise.all([loadProfile(),loadDuocDuong(),loadTuDi(),loadDuongThu()]);}catch(e){$('#duocMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  document.querySelectorAll('.duoc-use-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/storage/use',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:1})});$('#duocMsg').textContent=`✨ Đã dùng ${x.item}, +${Number(x.gained).toLocaleString('vi-VN')} linh lực.`;await Promise.all([loadProfile(),loadDuocDuong(),loadTuDi()]);}catch(e){$('#duocMsg').textContent='❌ '+e.message;}finally{b.disabled=false;}});
+  document.querySelectorAll('.duoc-open-beast').forEach(b=>b.onclick=()=>{document.getElementById('duong-thu')?.scrollIntoView({behavior:'smooth',block:'start'});});
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 async function loadDuongThu(){
@@ -964,7 +990,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','dan-cac':'⚗️ Đan Các','duoc-duong':'💊 Dược Đường','beast-house':'🐉 Thú Đường','duong-thu':'💗 Dưỡng Thú','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','duoc-duong':'💊 Dược Đường','beast-house':'🐉 Thú Đường','duong-thu':'💗 Dưỡng Thú','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){

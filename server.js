@@ -583,6 +583,35 @@ async function seedDuocDuong(){
   for(const [name,[slot,power,ri]] of Object.entries(gears)) await query(`UPDATE treasure_items SET beast_gear_slot=$2,beast_gear_power=$3,beast_gear_min_realm=$4 WHERE name=$1`,[name,slot,power,ri]);
 }
 
+
+async function ensureTienBanSchema(){
+  await query(`
+    CREATE TABLE IF NOT EXISTS tien_ban_history (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reward_type TEXT NOT NULL,
+      reward_id INTEGER,
+      reward_name TEXT NOT NULL,
+      reward_rarity TEXT NOT NULL DEFAULT 'Hạ Đẳng',
+      is_special BOOLEAN NOT NULL DEFAULT FALSE,
+      cost_stones INTEGER NOT NULL DEFAULT 3000,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_tien_ban_history_user ON tien_ban_history(user_id,created_at DESC);
+  `);
+}
+async function seedTienBan(){
+  const beast = await query(`INSERT INTO spirit_beasts_catalog
+    (name,rarity,description,beast_realm,beast_realm_tier,price_stones,min_realm,attack,defense,speed,spirit,skill,power_bonus,ability)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+    ON CONFLICT(name) DO UPDATE SET rarity=EXCLUDED.rarity,description=EXCLUDED.description,beast_realm=EXCLUDED.beast_realm,
+      beast_realm_tier=EXCLUDED.beast_realm_tier,skill=EXCLUDED.skill,power_bonus=EXCLUDED.power_bonus,ability=EXCLUDED.ability
+    RETURNING id`,
+    ['Cực Phẩm Cửu Vĩ Thiên Hồ','Cực Phẩm','Tiên Thú Cửu Vĩ Thiên Hồ, huyết mạch chí cao của Hồ tộc. Mỗi một đuôi đều ẩn chứa một tầng huyễn cảnh.',
+      'Cửu Giai',9,0,0,9999,8888,9999,9999,'Thiên Phú Vô Thượng · Huyễn Thuật',5000,'Thiên Phú Vô Thượng Huyễn Thuật · Tạo huyễn cảnh, tăng mạnh chiến lực và thân pháp.']);
+  return beast.rows[0]?.id||null;
+}
+
 async function initDb() {
   await query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -1124,8 +1153,10 @@ async function initDb() {
 
   // Chạy migration trước seed để DB cũ có đủ cột cho Tàng Thư Các/Động Phủ.
   await ensureRuntimeSchema();
+  await ensureTienBanSchema();
   await seedDuocDuong();
   await ensureTienPhapSchema();
+  await seedTienBan();
   await seedTienPhap();
 
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL`);
@@ -2502,11 +2533,74 @@ function bondChanceFor(userSpirit){
   return Math.min(95,Math.max(25,35+st.realmIndex*4+(st.tier-1)*2));
 }
 
+
+app.get('/api/tien-ban',auth,async(req,res)=>{
+  try{
+    await ensureTienBanSchema();
+    const p=(await query(`SELECT spirit_stones FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
+    const history=(await query(`SELECT reward_type,reward_name,reward_rarity,is_special,cost_stones,created_at
+      FROM tien_ban_history WHERE user_id=$1 ORDER BY id DESC LIMIT 12`,[req.session.user_id])).rows;
+    res.json({spiritStones:Number(p?.spirit_stones||0),cost:3000,history});
+  }catch(e){console.error('tien ban:',e);res.status(500).json({error:'Không thể mở Tiên Bàn.'});}
+});
+
+app.post('/api/tien-ban/spin',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const uid=req.session.user_id, cost=3000;
+    const p=(await client.query(`SELECT spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});}
+    if(Number(p.spirit_stones)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost.toLocaleString('vi-VN')} linh thạch để quay Tiên Bàn.`});}
+
+    const special=Math.random()<0.005;
+    if(special){
+      const b=(await client.query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,skill,ability,power_bonus
+        FROM spirit_beasts_catalog WHERE name=$1 FOR UPDATE`,['Cực Phẩm Cửu Vĩ Thiên Hồ'])).rows[0];
+      if(!b){await client.query('ROLLBACK');return res.status(500).json({error:'Tiên Thú đặc biệt chưa được khởi tạo.'});}
+      await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,cost]);
+      const cap=Number(p.storage_capacity)||30;
+      const existing=Number((await client.query(`SELECT quantity FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2 FOR UPDATE`,[uid,b.id])).rows[0]?.quantity||0);
+      if(existing<=0){
+        const used=Number((await client.query(`SELECT COUNT(*)::int c FROM inventory WHERE user_id=$1 AND quantity>0`,[uid])).rows[0]?.c||0);
+        if(used>=cap){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}), không thể nhận Tiên Thú.`});}
+      }
+      await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity,unbound_quantity)
+        VALUES($1,$2,1,1) ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1,unbound_quantity=owned_spirit_beasts.unbound_quantity+1`,[uid,b.id]);
+      await client.query(`INSERT INTO spirit_beast_care(user_id,beast_id) VALUES($1,$2) ON CONFLICT(user_id,beast_id) DO NOTHING`,[uid,b.id]);
+      await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'beast',$2,$3,$4,TRUE,$5)`,[uid,b.id,b.name,b.rarity,cost]);
+      await client.query('COMMIT');
+      return res.json({ok:true,special:true,cost,remainingStones:Number(p.spirit_stones)-cost,reward:{type:'beast',name:b.name,rarity:b.rarity,description:b.description,realm:b.beast_realm,skill:b.skill,ability:b.ability,power:Number(b.power_bonus||0)},message:'⚜️✨ CHÚC MỪNG! TIÊN THÚ CỰC PHẨM CỬU VĨ THIÊN HỒ ĐÃ GIÁNG LÂM! ✨⚜️'});
+    }
+
+    const cap=Number(p.storage_capacity)||30;
+    const items=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability
+      FROM treasure_items WHERE category NOT LIKE 'Dược Đường · Linh thú thức ăn'
+      AND category NOT LIKE 'Dược Đường · Linh thú trang bị'
+      ORDER BY RANDOM() LIMIT 1`)).rows;
+    const item=items[0];
+    if(!item){await client.query('ROLLBACK');return res.status(500).json({error:'Tiên Bàn hiện không có vật phẩm để quay.'});}
+    const owned=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,item.id])).rows[0]?.quantity||0);
+    if(owned<=0){
+      const used=Number((await client.query(`SELECT COUNT(*)::int c FROM inventory WHERE user_id=$1 AND quantity>0`,[uid])).rows[0]?.c||0);
+      if(used>=cap){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}). Hãy dùng vật phẩm trước khi quay.`});}
+    }
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,cost]);
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW())
+      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[uid,item.id]);
+    const rarity=item.reward_grade|| (Number(item.power_bonus)>500?'Thượng Đẳng':'Hạ Đẳng');
+    await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'item',$2,$3,$4,FALSE,$5)`,[uid,item.id,item.name,rarity,cost]);
+    await client.query('COMMIT');
+    res.json({ok:true,special:false,cost,remainingStones:Number(p.spirit_stones)-cost,reward:{type:'item',id:item.id,name:item.name,category:item.category,description:item.description,rarity,power:Number(item.power_bonus||0),ability:item.ability||''},message:`🎴 Tiên Bàn ban thưởng: ${item.name} ×1.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien ban spin:',e);res.status(500).json({error:'Tiên Bàn thất bại. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
+});
+
 app.get('/api/duoc-duong',auth,async(req,res)=>{
   try{
     await ensureRuntimeSchema();
     const p=(await query('SELECT spirit_power,spirit_stones,rank,realm_tier FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
-    const items=(await query(`SELECT id,name,category,description,price,spirit_gain,min_realm,beast_food_gain,beast_joy_gain,beast_gear_slot,beast_gear_power,beast_gear_min_realm,is_khoi_loi FROM treasure_items WHERE category LIKE 'Dược Đường%' ORDER BY min_realm,price,id`)).rows;
+    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.beast_food_gain,ti.beast_joy_gain,ti.beast_gear_slot,ti.beast_gear_power,ti.beast_gear_min_realm,ti.is_khoi_loi,COALESCE(i.quantity,0)::int AS quantity FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1 WHERE ti.category LIKE 'Dược Đường%' ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
     const stage=stageFor(Number(p?.spirit_power)||0);
     const npcLines=['“Tiểu hữu, dược lực một phần, căn cơ một phần. Chớ tham đan mà quên luyện hóa.”','“Linh thú có tình, cũng có tâm. Cho chúng ăn đúng dược, vui thì linh lực tự sinh.”','“Trang bị cho linh thú phải thuận theo huyết mạch và cảnh giới, cưỡng ép chỉ tổ phản phệ.”','“Khôi Lỗi tuy vô tình, nhưng có thể làm linh thú vui lòng. Niềm vui cũng là một loại linh lực.”'];
     res.json({items,profile:p||{},stage,npc:{name:'Dược Đồng · Mặc Ly',title:'Chấp sự Dược Đường',dialogue:npcLines[Math.floor(Date.now()/120000)%npcLines.length]}});
