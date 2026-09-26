@@ -5,14 +5,13 @@ const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATABASE_URL = process.env.DATABASE_URL;
+const DATABASE_URL = process.env.DATABASE_URL || '';
 if (!DATABASE_URL) {
-  console.error('Thiếu DATABASE_URL. Hãy tạo PostgreSQL và thêm biến môi trường DATABASE_URL trên Render.');
-  process.exit(1);
+  console.error('CẢNH BÁO: Thiếu DATABASE_URL. HTTP server vẫn được mở để Render nhận diện port; database sẽ tự retry cho đến khi DATABASE_URL được cung cấp.');
 }
 
 const pool = new Pool({
-  connectionString: DATABASE_URL,
+  connectionString: DATABASE_URL || undefined,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   max: 5
 });
@@ -1530,7 +1529,18 @@ async function auth(req,res,next) {
   } catch(e) { res.status(500).json({error:'Lỗi máy chủ.'}); }
 }
 
-app.get('/api/health',(req,res)=>res.json({ok:true,service:'Hàn Thiên Môn'}));
+let dbReady = false;
+let dbInitError = null;
+app.get('/api/health',(req,res)=>res.status(dbReady?200:503).json({ok:dbReady,service:'Hàn Thiên Môn',database:dbReady?'ready':'initializing',error:dbReady?null:(dbInitError?.message||null)}));
+
+// Keep Render's web port available immediately. Database migrations can take
+// longer than Render's startup-port detection window, especially on a cold
+// free PostgreSQL instance. API requests wait until initialization completes.
+app.use((req,res,next)=>{
+  if(req.path==='/api/health' || !req.path.startsWith('/api/')) return next();
+  if(dbReady) return next();
+  return res.status(503).json({error:'Hàn Thiên Môn đang khởi tạo cơ sở dữ liệu. Vui lòng thử lại sau ít giây.'});
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TRUYỀN KỲ · mỗi môn nhân có một mục truyền kỳ công khai toàn tông môn
@@ -4128,4 +4138,39 @@ app.post('/api/members',auth,async(req,res)=>{
   try{const {name,nick,emoji='🧑‍🎨',role='Đệ tử',bio='',birthday='',hobby='',tags=[]}=req.body||{};if(!name||!nick)return res.status(400).json({error:'Thiếu tên hoặc biệt danh.'});const r=await query('INSERT INTO members(name,nick,emoji,role,bio,birthday,hobby,tags) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',[name,nick,emoji,role,bio,birthday,hobby,Array.isArray(tags)?tags.join(','):String(tags)]);res.status(201).json({id:r.rows[0].id});}catch(e){res.status(500).json({error:'Không thể thêm môn nhân.'});}
 });
 
-initDb().then(()=>app.listen(PORT,()=>console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`))).catch(err=>{console.error('Không khởi tạo được database:',err);process.exit(1);});
+// v3.6.54: bind the HTTP port BEFORE database initialization so Render can
+// detect an open port even when PostgreSQL cold-start/migrations take time.
+console.log(`[BOOT] PORT=${PORT} | host=0.0.0.0 | pid=${process.pid}`);
+const server = app.listen(PORT, '0.0.0.0', ()=>console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`));
+server.on('error',(err)=>{ console.error('[HTTP SERVER ERROR]',err); });
+
+async function bootDatabase(){
+  let attempt=0;
+  if(!DATABASE_URL){
+    dbInitError=new Error('Thiếu DATABASE_URL trên Render.');
+  }
+
+  while(!dbReady){
+    attempt++;
+    try{
+      console.log(`Khởi tạo cơ sở dữ liệu Hàn Thiên Môn (lần ${attempt})...`);
+      await initDb();
+      dbReady=true;
+      dbInitError=null;
+      console.log('Cơ sở dữ liệu Hàn Thiên Môn đã sẵn sàng.');
+    }catch(err){
+      dbInitError=err;
+      console.error(`Không khởi tạo được database (lần ${attempt}):`,err);
+      const waitMs=Math.min(15000,Math.max(3000,attempt*2000));
+      console.log(`Sẽ thử lại database sau ${waitMs}ms...`);
+      await new Promise(r=>setTimeout(r,waitMs));
+    }
+  }
+}
+bootDatabase();
+
+process.on('uncaughtException',(err)=>console.error('[UNCAUGHT EXCEPTION]',err));
+process.on('unhandledRejection',(err)=>console.error('[UNHANDLED REJECTION]',err));
+
+process.on('SIGTERM',()=>server.close(()=>pool.end().finally(()=>process.exit(0))));
+process.on('SIGINT',()=>server.close(()=>pool.end().finally(()=>process.exit(0))));

@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.54 – FIX RENDER NO OPEN PORT
+
+- HTTP server bind cổng PORT ngay lập tức, trước khi chạy migration/database init.
+- Render có thể phát hiện open port ngay cả khi PostgreSQL cold-start hoặc migration mất nhiều thời gian.
+- /api/health trả trạng thái database: initializing/ready.
+- Các API khác trả 503 tạm thời trong lúc database chưa sẵn sàng, tránh request chạy vào schema chưa hoàn tất.
+- Database init tự retry thay vì process.exit(1), giúp service không chết chỉ vì PostgreSQL tạm thời bận/deadlock.
+- Giữ nguyên advisory lock + deadlock retry của v3.6.53.

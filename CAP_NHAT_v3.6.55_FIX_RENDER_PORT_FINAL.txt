@@ -1,0 +1,7 @@
+HÀN THIÊN MÔN v3.6.55 – FIX RENDER PORT FINAL
+
+- Bind HTTP server explicitly to 0.0.0.0 before database initialization.
+- Never process.exit(1) at module load only because DATABASE_URL is missing.
+- Render can detect the web port immediately while database initialization retries in background.
+- Added startup/server error logging and uncaught exception/unhandled rejection logging.
+- Kept PostgreSQL advisory schema lock + deadlock retry from v3.6.53.
