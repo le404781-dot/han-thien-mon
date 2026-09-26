@@ -1,0 +1,10 @@
+HÀN THIÊN MÔN v3.6.58
+
+- Làm nổi bật Danh Sách Môn Nhân và Xuất Quan trong điều hướng.
+- Hòm Thư xử lý trực tiếp lời mời Khiêu Chiến Online: Tiếp nhận / Từ chối.
+- Hòm Thư xử lý trực tiếp lời mời Bí Cảnh: Tham gia / Từ chối.
+- Hòm Thư xử lý trực tiếp lời mời Kết Giao: Kết giao / Từ chối.
+- Notification mới lưu request/invitation ID trong link_hash để nút hành động luôn trỏ đúng yêu cầu.
+- Server chỉ hiện nút hành động khi lời mời vẫn còn trạng thái pending.
+- Sau khi xử lý, thông báo được đánh dấu đã đọc và khu vực liên quan tự làm mới.
+- Giữ nguyên toàn bộ hệ thống game và giao diện tiên hiệp của v3.6.57.

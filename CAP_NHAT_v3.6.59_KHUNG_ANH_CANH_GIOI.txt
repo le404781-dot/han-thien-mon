@@ -1,0 +1,11 @@
+HÀN THIÊN MÔN v3.6.59 – KHUNG ẢNH ĐẠI DIỆN THEO CẢNH GIỚI
+
+1. Hồ sơ có thêm tùy chọn “Dùng khung cảnh giới”.
+2. Khung là tùy chọn, mặc định TẮT; người chơi có thể dùng hoặc không dùng.
+3. Khi bật, khung tự xác định theo cảnh giới hiện tại của nhân vật.
+4. Cảnh giới càng cao, khung càng cao quý: viền, ánh sáng, góc khung và hiệu ứng tinh quang tăng dần.
+5. Độ cao khung theo 18 bậc từ Luyện Khí đến Tiên Đế.
+6. Tùy chọn được lưu trong PostgreSQL bằng profiles.avatar_frame_enabled.
+7. Khi người chơi tăng cảnh giới, khung tự nâng cấp theo cảnh giới mới, không cần đổi thủ công.
+8. Hồ sơ và phần xem trước trong Sửa hồ sơ đều hiển thị đúng trạng thái khung.
+9. Giữ nguyên ảnh đại diện, hào quang cảnh giới và toàn bộ tính năng hiện có.

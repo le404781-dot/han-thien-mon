@@ -1,0 +1,36 @@
+HÀN THIÊN MÔN v3.6.56 · TỰ LUYỆN XUẤT QUAN
+
+- Mở khóa tự luyện tự động khi môn nhân đang Xuất Quan.
+- Tự cộng linh lực theo số phút Xuất Quan thực tế.
+- Tốc độ cơ bản theo cảnh giới:
+  Luyện Khí +18/phút
+  Trúc Cơ +17/phút
+  Kim Đan +16/phút
+  Nguyên Anh +15/phút
+  Hóa Thần +14/phút
+  Luyện Hư +13/phút
+  Hợp Thể +12/phút
+  Đại Thừa +11/phút
+  Độ Kiếp +10/phút
+  Nhân Tiên +9/phút
+  Chân Tiên +8/phút
+  Địa Tiên +7/phút
+  Thiên Tiên +6/phút
+  Huyền Tiên +5/phút
+  Kim Tiên +4/phút
+  Tiên Quân +3/phút
+  Tiên Tôn +2/phút
+  Tiên Đế +1/phút
+- Không còn yêu cầu hoàn thành đủ lượt Vận Công trong ngày để mở tự luyện.
+- Không giới hạn 600 linh lực/ngày đối với tự luyện Xuất Quan.
+- Heartbeat tự động quyết toán số phút đã trôi qua mỗi 30 giây.
+- Đăng xuất quyết toán phần thời gian còn lại.
+- Đóng tab/trình duyệt dùng beacon để Bế Quan và quyết toán phần thời gian đã tu luyện.
+- Có mốc presence_started_at và auto_cultivation_last_at để tránh cộng trùng thời gian.
+- Nếu Động Phủ đang hoạt động, tự luyện Xuất Quan bị khóa và không tích thời gian trong lúc khóa.
+- Giữ thưởng đột phá cảnh giới hiện có.
+- Giữ hệ thống công pháp; training_bonus_percent vẫn được giữ nguyên trong hệ thống cũ.
+
+KIỂM TRA:
+- node --check server.js: PASS
+- node --check script.js: PASS

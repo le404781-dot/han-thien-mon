@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.57 · GIAO DIỆN TU LUYỆN HUYỀN BÍ
+
+- Đổi toàn bộ nhãn hiển thị “Tự Luyện” thành “Tu Luyện”.
+- Giữ nguyên cơ chế tự động tích linh lực theo thời gian Xuất Quan của v3.6.56.
+- Làm mới giao diện theo phong cách tiên hiệp huyền bí: xanh đêm, lam ngọc, tím huyền, vàng linh quang.
+- Tăng chiều sâu nền bằng sương linh khí, quầng sáng, họa tiết tinh tú và hiệu ứng kính mờ.
+- Tăng độ nổi bật cho tiêu đề, nút hành động, thẻ chức năng và trạng thái trực tuyến.
+- Tối ưu hiển thị mobile/iPhone, không thay đổi API/gameplay.
