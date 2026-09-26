@@ -2087,7 +2087,7 @@ app.get('/api/treasury',auth,async(req,res)=>{
     await ensureProfile(req.session.user_id);
     const p=(await query(`SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
     const stage=stageFor(Number(p?.spirit_power)||0);
-    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.power_bonus,ti.ability,
+    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.spirit_gain,ti.min_realm,ti.power_bonus,ti.ability,ti.beast_food_gain,ti.beast_joy_gain,ti.beast_gear_slot,ti.beast_gear_power,ti.beast_gear_min_realm,ti.is_khoi_loi,
       COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti
       LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
@@ -2101,6 +2101,7 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
     const itemId=Number(req.body?.itemId);
+    const quantity=Math.max(1,Math.min(99,Math.floor(Number(req.body?.quantity)||1)));
     if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
     await client.query('BEGIN');
     const itemR=await client.query(`SELECT id,name,category,description,price,spirit_gain,min_realm
@@ -2114,7 +2115,8 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
       await client.query('ROLLBACK');
       return res.status(403).json({error:`Vật phẩm yêu cầu ${RANKS[Number(item.min_realm)]?.name||'cảnh giới cao hơn'}. Bạn hiện ở ${stage.stage}.`});
     }
-    const price=Math.max(0,Number(item.price)||0);
+    const unitPrice=Math.max(0,Number(item.price)||0);
+    const price=unitPrice*quantity;
     const stones=Number(p.spirit_stones)||0;
     if(stones<price){
       await client.query('ROLLBACK');
@@ -2142,9 +2144,9 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
       return res.status(409).json({error:'Vật phẩm trong Tàng Bảo Các đã thay đổi. Hãy tải lại trang rồi mua lại.'});
     }
     const invWrite=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at)
-      VALUES($1,$2,1,NOW())
-      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,
-      [req.session.user_id,catalogId]);
+      VALUES($1,$2,$3,NOW())
+      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,
+      [req.session.user_id,catalogId,quantity]);
     if(invWrite.rowCount!==1){
       await client.query('ROLLBACK');
       return res.status(500).json({error:'Không thể ghi vật phẩm vào kho. Linh thạch chưa bị trừ.'});
@@ -2160,7 +2162,7 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
     await logActivityEvent(client,req.session.user_id,'buy');
     const remaining=stones-price;
     await client.query('COMMIT');
-    res.json({ok:true,item:item.name,category:item.category,quantityAdded:1,spiritStones:remaining,spentStones:price,stage:stage.stage,message:'Vật Phẩm đã được chuyển về bảng thuộc tính - mở bảng để xem'});
+    res.json({ok:true,item:item.name,category:item.category,quantityAdded:quantity,spiritStones:remaining,spentStones:price,unitPrice,stage:stage.stage,message:`Vật Phẩm đã được chuyển về bảng thuộc tính - mở bảng để xem · ${item.name} ×${quantity}`});
   }catch(e){
     try{await client.query('ROLLBACK')}catch{}
     console.error('treasury buy:',e);res.status(500).json({error:'Giao dịch Tàng Bảo Các thất bại. Vui lòng thử lại.'});

@@ -499,25 +499,27 @@ async function loadTreasure(){
   const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế'];
   const currentRealmIndex=realmNames.indexOf(String(d.realm||''));
   area.innerHTML=`<div class="treasure-wallet"><span>☯ Linh lực hiện có · 💎 Linh thạch</span><strong>${Number(d.spiritPower).toLocaleString('vi-VN')} · ${Number(d.spiritStones||0).toLocaleString('vi-VN')}</strong><small>${esc(d.realm)} · ${esc(d.tierName||(`Tầng ${d.tier}/9`))} · 100 linh lực = 1 linh thạch</small></div>
-  <div class="stone-exchange"><div><span class="eyebrow">🏯 TÀNG BẢO CÁC 2.0</span><h3>Mua pháp khí, vật phẩm, linh thú bằng linh thạch</h3><p>Giao dịch dùng linh thạch. Linh lực chỉ dùng để đổi sang linh thạch theo tỷ lệ 100 linh lực = 1 linh thạch.</p></div><span class="tag">☯ An toàn giao dịch</span></div>
+  <div class="stone-exchange"><div><span class="eyebrow">🏯 TÀNG BẢO CÁC 2.1</span><h3>Pháp khí · Đan dược · Dược Phường · Linh vật trong cùng một kho</h3><p>Toàn bộ vật phẩm của Dược Đường đã được tích hợp vào Tàng Bảo Các. Mua xong vật phẩm chuyển thẳng vào Tu Di Giới; đan dược có thể dùng trực tiếp, thức ăn/Khôi Lỗi/trang bị linh thú dùng tại Dưỡng Thú.</p></div><span class="tag">☯ Giao dịch thống nhất</span></div>
   <div class="stone-exchange-box"><div><b>🔄 Đổi linh lực → linh thạch</b><small>100 linh lực = 1 linh thạch</small></div><input id="exchangeStonesQty" type="number" min="1" max="100000" value="10"><button id="exchangeStonesBtn" class="btn small primary">Đổi linh thạch</button></div>
   <div class="treasure-grid">${d.items.map(i=>{
-    const stones=Number(d.spiritStones||0), price=Number(i.price||0);
+    const stones=Number(d.spiritStones||0), price=Number(i.price||0), owned=Number(i.quantity||0);
     const requiredRealmIndex=Number(i.min_realm)||0;
     const locked=currentRealmIndex<requiredRealmIndex;
-    const can=!locked&&stones>=price;
-    const text=locked?'🔒 Cần '+esc(realmNames[requiredRealmIndex]||'cảnh giới cao hơn'):can?'💎 Mua vật phẩm':'Thiếu '+Number(Math.max(0,price-stones)).toLocaleString('vi-VN')+' linh thạch';
-    return `<article class="treasure-card ${locked?'locked':''}"><span class="item-seal">${i.category==='Đan dược'?'◈':i.category==='Linh thú'?'🐉':'⚔'}</span><div><span class="eyebrow">${esc(i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p><small>Đang có: ${Number(i.quantity||0)} · Giá: 💎 ${price.toLocaleString('vi-VN')} linh thạch</small></div><button class="btn small primary buy-item" data-id="${i.id}" ${locked||!can?'disabled':''}>${text}</button></article>`;
+    const can= !locked && stones>=price;
+    const isDuoc=String(i.category||'').startsWith('Dược Đường');
+    const isFood=i.category==='Dược Đường · Linh thú thức ăn';
+    const isPuppet=Boolean(i.is_khoi_loi);
+    const isGear=Boolean(i.beast_gear_slot);
+    const icon=isFood?'🍖':isPuppet?'🪆':isGear?'🛡️':i.category==='Đan dược'?'◈':i.category==='Linh thú'?'🐉':'⚔';
+    const text=locked?'🔒 Cần '+esc(realmNames[requiredRealmIndex]||'cảnh giới cao hơn'):can?'💎 Mua':'Thiếu '+Number(Math.max(0,price-stones)).toLocaleString('vi-VN')+' linh thạch';
+    const use=owned>0 && Number(i.spirit_gain||0)>0 ? `<button class="btn small treasure-use-item" data-id="${i.id}">Dùng 1 · +${Number(i.spirit_gain).toLocaleString('vi-VN')} linh lực</button>` : '';
+    const beastAction=owned>0 && (isFood||isPuppet||isGear) ? `<button class="btn small treasure-open-beast" type="button">🐉 Dùng tại Dưỡng Thú</button>` : '';
+    return `<article class="treasure-card ${locked?'locked':''} ${isDuoc?'treasure-duoc-card':''}"><span class="item-seal">${icon}</span><div><span class="eyebrow">${esc(isDuoc?i.category.replace('Dược Đường · ','💊 '):i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p>${i.beast_food_gain?`<small>🐉 +${Number(i.beast_food_gain)} linh lực linh thú · 💗 +${Number(i.beast_joy_gain||0)} niềm vui</small>`:''}${isPuppet?`<small>🪆 Khôi Lỗi · +${Number(i.beast_joy_gain||0)} niềm vui</small>`:''}${isGear?`<small>⚔ +${Number(i.beast_gear_power||0)} linh thú · yêu cầu ${esc(realmNames[Number(i.beast_gear_min_realm)]||'cảnh giới cao hơn')}</small>`:''}<small>Đang có: ${owned} · Giá: 💎 ${price.toLocaleString('vi-VN')} linh thạch</small><div class="duoc-buy"><input class="treasure-qty" data-id="${i.id}" type="number" min="1" max="99" value="1" ${locked?'disabled':''}><button class="btn small primary buy-item" data-id="${i.id}" ${locked||!can?'disabled':''}>${text}</button>${use}${beastAction}</div></div></article>`;
   }).join('')}</div><p id="treasureMsg" class="train-msg"></p>`;
   $('#exchangeStonesBtn').onclick=async()=>{const b=$('#exchangeStonesBtn');const qty=Number($('#exchangeStonesQty').value||0);b.disabled=true;try{const x=await api('/api/currency/exchange',{method:'POST',headers:authHeaders(),body:JSON.stringify({stones:qty})});$('#treasureMsg').textContent=`🔄 Đã đổi ${Number(x.spentSpirit).toLocaleString('vi-VN')} linh lực → ${Number(x.receivedStones).toLocaleString('vi-VN')} linh thạch.`;await Promise.all([loadProfile(),loadTreasure()]);}catch(e){$('#treasureMsg').textContent='❌ '+e.message;}finally{b.disabled=false;}};
-  document.querySelectorAll('.buy-item').forEach(b=>b.onclick=async()=>{
-    b.disabled=true;
-    try{
-      const x=await api('/api/treasury/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id)})});
-      $('#treasureMsg').textContent=`✅ ${x.message||('Đã mua '+x.item)} · Trừ ${Number(x.spentStones||0).toLocaleString('vi-VN')} linh thạch.`;
-      await Promise.all([loadProfile(),loadTreasure(),loadTuDi()]);
-    }catch(e){$('#treasureMsg').textContent='❌ '+e.message;b.disabled=false;}
-  });
+  document.querySelectorAll('.buy-item').forEach(b=>b.onclick=async()=>{b.disabled=true;const q=Math.max(1,Math.min(99,Number(document.querySelector(`.treasure-qty[data-id="${b.dataset.id}"]`)?.value||1)));try{const x=await api('/api/treasury/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:q})});$('#treasureMsg').textContent=`✅ ${x.message||('Đã mua '+x.item)} · Trừ ${Number(x.spentStones||0).toLocaleString('vi-VN')} linh thạch.`;await Promise.all([loadProfile(),loadTreasure(),loadTuDi(),loadDuongThu()]);}catch(e){$('#treasureMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  document.querySelectorAll('.treasure-use-item').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/storage/use',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:1})});$('#treasureMsg').textContent=`✨ Đã dùng ${x.item}, +${Number(x.gained).toLocaleString('vi-VN')} linh lực.`;await Promise.all([loadProfile(),loadTreasure(),loadTuDi()]);}catch(e){$('#treasureMsg').textContent='❌ '+e.message;}finally{b.disabled=false;}});
+  document.querySelectorAll('.treasure-open-beast').forEach(b=>b.onclick=()=>document.getElementById('duong-thu')?.scrollIntoView({behavior:'smooth',block:'start'}));
  }catch(e){const area=$('#treasureArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 

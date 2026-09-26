@@ -1,0 +1,11 @@
+HÀN THIÊN MÔN v3.6.61
+TÍCH HỢP DƯỢC ĐƯỜNG VÀO TÀNG BẢO CÁC
+
+- Tàng Bảo Các hiển thị toàn bộ vật phẩm thuộc Dược Đường trong cùng catalog.
+- Mua vật phẩm Dược Đường trực tiếp bằng linh thạch tại Tàng Bảo Các.
+- Hỗ trợ mua 1-99 vật phẩm/lần.
+- Vật phẩm mua được ghi thẳng vào Tu Di Giới.
+- Đan dược có spirit_gain có nút Dùng 1 ngay tại Tàng Bảo Các.
+- Thức ăn linh thú, Khôi Lỗi và trang bị linh thú có nút chuyển tới Dưỡng Thú để sử dụng.
+- Giữ nguyên API Dược Đường và Dưỡng Thú cũ để tương thích các chức năng hiện có.
+- Giao dịch vẫn kiểm tra cảnh giới, linh thạch và dung lượng Tu Di Giới.
