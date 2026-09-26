@@ -2756,8 +2756,6 @@ app.post('/api/beast-house/buy',auth,async(req,res)=>{
     const item=(await client.query('SELECT * FROM spirit_beasts_catalog WHERE id=$1 FOR UPDATE',[id])).rows[0];
     const p=(await client.query('SELECT * FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
     if(!item||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy linh thú hoặc hồ sơ.'});}
-    const forbiddenNineTail=/(cực phẩm\s+)?cửu vĩ\s+(thiên hồ|yêu hồ)/iu.test(String(item.name||''));
-    if(forbiddenNineTail){await client.query('ROLLBACK');return res.status(403).json({error:'🦊 Cực Phẩm Cửu Vĩ là Tiên Thú đặc biệt, không thể mua tại Thú Đường. Hãy nhận từ Tiên Bàn hoặc cơ duyên đặc biệt.'});}
     const ri=realmIndexFor(Number(p.spirit_power)||0);
     if(ri<Number(item.min_realm)) {await client.query('ROLLBACK');return res.status(400).json({error:`Linh thú ${item.name} yêu cầu từ ${RANKS[item.min_realm]?.name||'cảnh giới cao hơn'}.`});}
     if(Number(p.spirit_stones)<Number(item.price_stones)){await client.query('ROLLBACK');return res.status(400).json({error:`Không đủ linh thạch. Cần ${Number(item.price_stones).toLocaleString('vi-VN')}, hiện có ${Number(p.spirit_stones).toLocaleString('vi-VN')}.`});}
