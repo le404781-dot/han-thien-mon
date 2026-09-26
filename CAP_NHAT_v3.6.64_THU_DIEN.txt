@@ -1,0 +1,21 @@
+HÀN THIÊN MÔN v3.6.64 · THÚ DIỆN · TIÊN THÚ · ỔN ĐỊNH PHIÊN
+
+1. Thú Diện:
+   - Đổi ảnh đại diện riêng cho từng Linh Thú sở hữu.
+   - Tải ảnh từ máy hoặc mở tìm kiếm ảnh web theo tên linh thú, sau đó dán URL ảnh.
+   - Ảnh linh thú đang trang bị hiển thị trong Đệ Tử Bảng/chi tiết môn nhân.
+2. Tiên Thú:
+   - Linh Thú Cửu Giai/Tiên Thú được viền hoàng kim và hào quang.
+3. Đột phá:
+   - Giữ thưởng linh thạch đối xứng từng đại cảnh giới; phần thưởng có khóa duy nhất theo tài khoản + cảnh giới, không nhận lặp.
+4. Thú Trường:
+   - Chọn chuỗi tuyệt kỹ theo từng lượt (5 lượt cấu hình, sau đó lặp kỹ năng cuối).
+   - Online, Offline/NPC và Thần Thú dùng chung cơ chế chọn kỹ năng tuần tự.
+   - Lưu chuỗi kỹ năng vào lịch sử trận.
+5. Thú Đường:
+   - Khóa mua Linh Thú có giá 0 linh thạch ở cả giao diện và máy chủ.
+6. Tàng Bảo Các/Tu Di Giới:
+   - Mua và hấp thụ vật phẩm theo số lượng 1–99.
+7. Ổn định tài khoản:
+   - Phiên hoạt động tự gia hạn dài hạn; chỉ thao tác Đăng xuất mới xóa token phiên.
+   - Giảm nguy cơ mất phiên do thời hạn session ngắn.

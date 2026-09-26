@@ -1,0 +1,8 @@
+v3.6.65 · Nâng cấp Thú Trường trực quan
+- Combat HUD mới: hai đấu thủ, Huyết Dịch/HP bar, hệ và lượt hiện tại.
+- Hoạt ảnh đánh/nhận đòn, rung khi trúng đòn, flash khi Bạo Kích.
+- Phát lại diễn biến theo từng lượt thay vì đổ toàn bộ log ngay lập tức.
+- Hiển thị kỹ năng theo chuỗi lượt đã chọn.
+- Hiển thị rõ KHẮC HỆ / BỊ KHẮC HỆ / BẠO KÍCH và sát thương từng đòn.
+- Hỗ trợ hiệu ứng hào quang Tiên Thú trên khu vực chiến đấu.
+- Không thay đổi công thức server: giữ khắc hệ x1.35, bị khắc x0.72 và crit hiện có.
