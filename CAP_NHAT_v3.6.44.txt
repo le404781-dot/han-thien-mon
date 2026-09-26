@@ -1,0 +1,9 @@
+HÀN THIÊN MÔN v3.6.44
+
+- Sửa Hòm Thư: thêm guard tự phục hồi schema mailbox để tránh lỗi “Không thể mở Hòm Thư” trên PostgreSQL/Render cũ.
+- Thêm mục 👁 Lôi Đài Trực Chiến.
+- Hiển thị toàn bộ lôi đài Online đang diễn ra cho môn nhân đã đăng nhập.
+- Theo dõi HP, vòng đấu, lượt đánh, tổng linh thạch đang cược và số cược cho từng bên.
+- Mọi môn nhân có thể đặt 1 cửa cho mỗi trận bằng linh thạch.
+- Tự cập nhật lôi đài và hòm thư định kỳ 5 giây.
+- Giữ nguyên cơ chế thanh toán cược khi trận kết thúc: người cược đúng chia toàn bộ quỹ theo tỷ lệ tiền đã cược; nếu không có người cược đúng thì hoàn tiền.

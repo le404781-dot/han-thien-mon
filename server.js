@@ -3413,7 +3413,39 @@ app.post('/api/disciples/gift',auth,async(req,res)=>{
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/mailbox',auth,async(req,res)=>{try{const uid=req.session.user_id;const [rows,meta]=await Promise.all([query(`SELECT id,type,title,message,link_hash,read_at,created_at FROM mailbox_notifications WHERE user_id=$1 ORDER BY id DESC LIMIT 100`,[uid]),query(`SELECT mailbox_enabled,COUNT(*) FILTER (WHERE read_at IS NULL)::int AS unread FROM profiles p WHERE p.user_id=$1 GROUP BY mailbox_enabled`,[uid])]);res.json({rows:rows.rows,enabled:meta.rows[0]?.mailbox_enabled!==false,unread:Number(meta.rows[0]?.unread||0)});}catch(e){res.status(500).json({error:'Không thể mở Hòm Thư.'});}});
+async function ensureMailboxSchema(){
+  await query(`
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS mailbox_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+    CREATE TABLE IF NOT EXISTS mailbox_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL DEFAULT 'system',
+      title TEXT NOT NULL DEFAULT 'Thông báo Hàn Thiên Môn',
+      message TEXT NOT NULL DEFAULT '',
+      link_hash TEXT NOT NULL DEFAULT '',
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'system';
+    ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Thông báo Hàn Thiên Môn';
+    ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS message TEXT NOT NULL DEFAULT '';
+    ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS link_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+    ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    CREATE INDEX IF NOT EXISTS idx_mailbox_user_unread ON mailbox_notifications(user_id,read_at,id DESC);
+  `);
+}
+
+app.get('/api/mailbox',auth,async(req,res)=>{
+  try{
+    await ensureMailboxSchema();
+    const uid=req.session.user_id;
+    const rows=await query(`SELECT id,type,title,message,link_hash,read_at,created_at FROM mailbox_notifications WHERE user_id=$1 ORDER BY id DESC LIMIT 100`,[uid]);
+    const meta=await query(`SELECT mailbox_enabled,COALESCE((SELECT COUNT(*) FROM mailbox_notifications mn WHERE mn.user_id=p.user_id AND mn.read_at IS NULL),0)::int AS unread FROM profiles p WHERE p.user_id=$1`,[uid]);
+    const m=meta.rows[0]||{};
+    res.json({rows:rows.rows,enabled:m.mailbox_enabled!==false,unread:Number(m.unread||0)});
+  }catch(e){console.error('mailbox load:',e);res.status(500).json({error:'Không thể mở Hòm Thư: '+(process.env.NODE_ENV==='production'?'máy chủ chưa sẵn sàng.':e.message)});}
+});
 app.post('/api/mailbox/toggle',auth,async(req,res)=>{try{const enabled=Boolean(req.body?.enabled);await query('UPDATE profiles SET mailbox_enabled=$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,enabled]);res.json({ok:true,enabled});}catch(e){res.status(500).json({error:'Không thể đổi trạng thái Hòm Thư.'});}});
 app.post('/api/mailbox/read',auth,async(req,res)=>{try{const id=Number(req.body?.id);if(id){await query('UPDATE mailbox_notifications SET read_at=NOW() WHERE id=$1 AND user_id=$2',[id,req.session.user_id]);}else await query('UPDATE mailbox_notifications SET read_at=NOW() WHERE user_id=$1 AND read_at IS NULL',[req.session.user_id]);res.json({ok:true});}catch(e){res.status(500).json({error:'Không thể đánh dấu đã đọc.'});}});
 
@@ -3672,6 +3704,27 @@ app.post('/api/challenges/online/leave',auth,async(req,res)=>{
     res.json({ok:true,status:'completed',winnerId,loserId,reward,penalty:loss,betSettlement:betResult,message:`${loser.display_name} đã rời khỏi lôi đài và bị tính thất bại. ${winner.display_name} chiến thắng.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge leave:',e);res.status(500).json({error:'Không thể rời khỏi lôi đài.'});}
   finally{client.release();}
+});
+
+app.get('/api/arena/live',auth,async(req,res)=>{
+  try{
+    await ensureChallengeSchema();
+    const uid=req.session.user_id;
+    const battles=(await query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_action,cr.last_damage,cr.started_at,
+                    cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,cp.spirit_power AS challenger_spirit,
+                    ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,op.spirit_power AS opponent_spirit,
+                    COALESCE((SELECT SUM(cb.amount) FROM challenge_bets cb WHERE cb.challenge_id=cr.id AND cb.status='open'),0)::int AS bet_pool,
+                    COALESCE((SELECT SUM(cb.amount) FROM challenge_bets cb WHERE cb.challenge_id=cr.id AND cb.status='open' AND cb.bet_on_user_id=cr.challenger_id),0)::int AS challenger_bet,
+                    COALESCE((SELECT SUM(cb.amount) FROM challenge_bets cb WHERE cb.challenge_id=cr.id AND cb.status='open' AND cb.bet_on_user_id=cr.opponent_id),0)::int AS opponent_bet,
+                    COALESCE((SELECT cb.bet_on_user_id FROM challenge_bets cb WHERE cb.challenge_id=cr.id AND cb.bettor_id=$1 AND cb.status='open' LIMIT 1),0)::int AS my_bet_on_user_id,
+                    COALESCE((SELECT cb.amount FROM challenge_bets cb WHERE cb.challenge_id=cr.id AND cb.bettor_id=$1 AND cb.status='open' LIMIT 1),0)::int AS my_bet_amount
+             FROM challenge_requests cr
+             JOIN users cu ON cu.id=cr.challenger_id JOIN profiles cp ON cp.user_id=cu.id
+             JOIN users ou ON ou.id=cr.opponent_id JOIN profiles op ON op.user_id=ou.id
+             WHERE cr.status='accepted' AND cr.mode='online' ORDER BY cr.id DESC LIMIT 50`,[uid])).rows;
+    const me=(await query(`SELECT spirit_stones FROM profiles WHERE user_id=$1`,[uid])).rows[0]||{};
+    res.json({battles,spiritStones:Number(me.spirit_stones||0)});
+  }catch(e){console.error('arena live:',e);res.status(500).json({error:'Không thể mở Lôi Đài Trực Chiến.'});}
 });
 
 app.post('/api/challenges/bet',auth,async(req,res)=>{
