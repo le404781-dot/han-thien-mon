@@ -23,6 +23,15 @@ async function sendPresenceHeartbeat(){
  if(!getToken())return;
  try{await api('/api/presence/heartbeat',{method:'POST',headers:authHeaders(),body:'{}'});}catch(e){}
 }
+let presenceTimer=null;
+function startPresenceHeartbeat(){
+ if(presenceTimer)clearInterval(presenceTimer);
+ if(!getToken())return;
+ sendPresenceHeartbeat();
+ presenceTimer=setInterval(()=>{if(getToken())sendPresenceHeartbeat();else{clearInterval(presenceTimer);presenceTimer=null;}},30000);
+}
+startPresenceHeartbeat();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')sendPresenceHeartbeat();});
 async function loadData(){
  try{
   const data=await api('/api/data'); members=data.members; memories=data.memories; timeline=data.timeline;
@@ -977,6 +986,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    try{
      audio.loop=true;
      audio.muted=false;
+     audio.setAttribute('playsinline','');
      if(audio.readyState===0) audio.load();
      await audio.play();
      localStorage.setItem(musicKey,'on');
@@ -992,7 +1002,9 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  audio.addEventListener('play',()=>setStatus(true,'Nhạc nền đang phát và sẽ tự động lặp lại.'));
  audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false,'Đã ngưng nhạc nền.');});
  audio.addEventListener('ended',()=>{audio.currentTime=0;start(false);});
- audio.addEventListener('error',()=>setStatus(false,'Không thể đọc file nhạc trên thiết bị này. Vui lòng kiểm tra lại file MP3.'));
+ audio.addEventListener('canplay',()=>{if(localStorage.getItem(musicKey)==='on' && audio.paused) start(false);});
+ audio.addEventListener('error',()=>setStatus(false,'Không thể đọc file nhạc. Hãy kiểm tra kết nối hoặc bấm Khởi Nhạc lại.'));
+ audio.addEventListener('stalled',()=>{if(localStorage.getItem(musicKey)==='on' && audio.paused) setTimeout(()=>start(false),500);});
  document.addEventListener('visibilitychange',()=>{
    if(document.visibilityState==='visible' && localStorage.getItem(musicKey)==='on' && audio.paused) start(false);
  });

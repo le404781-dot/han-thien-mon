@@ -1,0 +1,13 @@
+HÀN THIÊN MÔN v3.6.56
+
+1. ÂM THANH
+- Làm sạch file MP3: loại bỏ ảnh bìa/stream video nhúng để tăng tương thích Safari/iPhone và các trình duyệt khác.
+- Giữ MP3 stereo 44.1 kHz, 192 kbps, audio-only.
+- Audio preload auto + playsinline + cache-busting.
+- Tăng khả năng khôi phục phát nhạc sau khi trình duyệt cho phép.
+
+2. TU LUYỆN ONLINE
+- Thêm heartbeat trạng thái Xuất Quan mỗi 30 giây và khi quay lại tab.
+- Giữ cơ chế máy chủ cộng trực tiếp gain Online vào profiles.spirit_power.
+- Sau khi đủ linh lực, máy chủ tự tính lại cảnh giới/tầng và cập nhật rank + realm_tier.
+- Giao diện tự tải lại hồ sơ sau mỗi lần nhận linh lực để hiển thị ngay linh lực/cảnh giới mới.

@@ -197,7 +197,7 @@
   <div class="audio-art"><span>寒</span><small>HÀN THIÊN MÔN</small></div>
   <div class="audio-copy"><h3>Tinh Vệ · Bản vang vọng, không lời, có trống</h3><p>Nhạc nền sẽ tự động lặp lại từ đầu khi bản nhạc kết thúc.</p><div class="audio-controls"><button class="btn primary" id="audioPlayBtn" type="button">🔊 Khởi Nhạc</button><button class="btn ghost" id="audioStopBtn" type="button">🔇 Ngưng Nhạc</button></div><div class="audio-volume"><label for="audioVolume">Âm lượng</label><input id="audioVolume" type="range" min="0" max="1" step="0.01" value="0.35"><span id="audioVolumeValue">35%</span></div><p class="audio-note" id="audioMsg">Đang ngưng nhạc.</p><p class="audio-compat" id="audioCompat">✓ MP3 · tự động khôi phục khi trình duyệt cho phép</p></div>
  </div>
- <audio id="backgroundMusic" preload="metadata" loop playsinline><source src="assets/audio/tinh-ve-background.mp3" type="audio/mpeg"></audio>
+ <audio id="backgroundMusic" preload="auto" loop playsinline webkit-playsinline aria-label="Nhạc nền Hàn Thiên Môn"><source src="assets/audio/tinh-ve-background.mp3?v=3.6.56" type="audio/mpeg"></audio>
 </section>
 
 <section class="join-section"><div><span class="eyebrow">✦ NHẬP MÔN</span><h2>Ghi danh vào Hàn Thiên Môn</h2><p>Tạo tài khoản để có hồ sơ đệ tử riêng, tu luyện linh lực, trò chuyện cùng đạo hữu và lưu thành tích trong PostgreSQL.</p></div><button class="btn primary" id="joinBtn">Đăng ký môn nhân</button></section>
