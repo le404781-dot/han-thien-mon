@@ -274,13 +274,54 @@ async function openFriendChat(userId,name){
 }
 
 
+const TUTORIAL_STEPS=[
+ {seal:'寒',eyebrow:'✦ NHẬP MÔN',title:'Chào mừng đến Hàn Thiên Môn',text:'Mọi hành trình bắt đầu từ Hồ sơ. Hãy ghi danh, đặt danh xưng và hoàn thiện thông tin cơ bản. Sau khi đăng nhập, dữ liệu tu luyện của bạn sẽ được lưu lại.',tip:'Tân nhân không cần học hết mọi hệ thống ngay. Cứ đi từng bước, những khu vực chưa đủ cảnh giới sẽ tự chỉ dẫn cho bạn.',target:'#profile'},
+ {seal:'☯',eyebrow:'☯ TU LUYỆN',title:'Bước đầu: Vận Công',text:'Mỗi ngày hãy vận công để tích lũy linh lực. Khi đã hoàn thành lượt vận công theo ngày, hệ thống có thể mở chế độ tu luyện online nếu điều kiện phù hợp.',tip:'Gợi ý: luôn xem cảnh giới, linh lực và linh thạch ở Hồ sơ trước khi quyết định mua sắm hay khiêu chiến.',target:'#cultivation'},
+ {seal:'📖',eyebrow:'📚 TÀNG THƯ CÁC',title:'Lĩnh ngộ công pháp',text:'Bạn có thể học công pháp không giới hạn. Mỗi lần lĩnh ngộ đều có tỷ lệ thành công; Ngộ Tính và khoảng cách cảnh giới so với yêu cầu của công pháp sẽ ảnh hưởng đến khả năng thành công.',tip:'Thất bại không làm mất công pháp. Hãy tăng Ngộ Tính và cảnh giới rồi thử lại khi cần.',target:'#codex'},
+ {seal:'⚗️',eyebrow:'⚗️ ĐAN CÁC',title:'Biến vật phẩm thành linh thạch',text:'Đan Các là nơi thu mua. Khi Tu Di Giới có vật phẩm không dùng tới, bạn có thể bán chúng để nhận linh thạch.',tip:'Trước khi bán, nên kiểm tra Trang Bị để tránh bán nhầm vật phẩm đang sử dụng.',target:'#dan-cac'},
+ {seal:'🐉',eyebrow:'🐉 THÚ ĐƯỜNG',title:'Tìm linh thú đồng hành',text:'Thú Đường cung cấp nhiều chủng linh thú. Kho được làm mới theo chu kỳ 5 phút, vì vậy mỗi lần quay lại có thể gặp những linh thú khác.',tip:'Linh thú không chỉ để sưu tầm: hãy xem cảnh giới, phẩm cấp và khả năng hỗ trợ chiến lực trước khi lựa chọn.',target:'#beast-house'},
+ {seal:'📜',eyebrow:'📜 NHIỆM VỤ',title:'Làm nhiệm vụ để tích lũy tài nguyên',text:'Nhiệm Vụ Đường, Nghiệp Vụ, Tàng Bảo Các và các hoạt động khác giúp bạn có thêm linh thạch, vật phẩm và thành tích.',tip:'Nếu chưa biết làm gì tiếp theo, hãy mở Nhiệm Vụ Đường trước. Đây là lối chơi an toàn để làm quen với sơn môn.',target:'#quests'},
+ {seal:'⚔',eyebrow:'⚔ HÀNH TẨU',title:'Kết giao và bước lên Lôi Đài',text:'Bạn có thể kết bằng hữu, truyền âm, tham gia Bí Cảnh và khiêu chiến môn nhân. Lôi Đài Trực Chiến cho phép theo dõi các trận đang diễn ra và đặt cược linh thạch theo luật của trận.',tip:'Khi mới nhập môn, hãy ưu tiên giao lưu và tăng cảnh giới trước khi tham gia các trận đấu chênh lệch lớn.',target:'#challenge'},
+ {seal:'📬',eyebrow:'✦ HOÀN TẤT NHẬP MÔN',title:'Bạn đã nắm được căn bản',text:'Từ đây, hãy tự chọn con đường của mình: tu luyện, học công pháp, săn linh thú, làm nhiệm vụ, kết giao hoặc thử sức trên lôi đài.',tip:'Có thể mở lại hướng dẫn bất cứ lúc nào bằng nút “Mở hướng dẫn cơ bản” ở khu Tân Nhân. Chúc đạo hữu giữ vững đạo tâm.',target:'#tan-nhan'}
+];
+let tutorialIndex=0;
+const tutorialSeenKey=()=>`htm_tutorial_seen_v3646_${currentUser?.id||'guest'}`;
+function markTutorialSeen(){localStorage.setItem(tutorialSeenKey(),'1');}
+function renderTutorialStep(){
+ const s=TUTORIAL_STEPS[tutorialIndex], total=TUTORIAL_STEPS.length;
+ $('#tutorialSeal').textContent=s.seal; $('#tutorialEyebrow').textContent=s.eyebrow; $('#tutorialTitle').textContent=s.title; $('#tutorialText').textContent=s.text; $('#tutorialTip').textContent='☯ '+s.tip;
+ $('#tutorialProgressText').textContent=`HƯỚNG DẪN ${tutorialIndex+1}/${total}`; $('#tutorialProgressBar').style.width=`${((tutorialIndex+1)/total)*100}%`;
+ $('#tutorialNext').textContent=tutorialIndex===total-1?'Hoàn tất nhập môn':'Tiếp tục →';
+ $('#tutorialDots').innerHTML=TUTORIAL_STEPS.map((_,i)=>`<i class="${i===tutorialIndex?'active':''}"></i>`).join('');
+}
+function openTutorial(force=false){
+ const overlay=$('#tutorialOverlay'); if(!overlay)return;
+ tutorialIndex=0; renderTutorialStep(); overlay.classList.remove('hidden'); overlay.setAttribute('aria-hidden','false'); document.body.classList.add('tutorial-open');
+ if(force) localStorage.removeItem(tutorialSeenKey());
+}
+function closeTutorial(save=true){
+ const overlay=$('#tutorialOverlay'); if(!overlay)return; if(save)markTutorialSeen(); overlay.classList.add('hidden'); overlay.setAttribute('aria-hidden','true'); document.body.classList.remove('tutorial-open');
+}
+function maybeShowTutorial(){
+ if(!getToken()||!currentUser)return;
+ const key=tutorialSeenKey(); if(!localStorage.getItem(key))setTimeout(()=>openTutorial(),700);
+}
+function setupTutorial(){
+ $('#startTutorialBtn')?.addEventListener('click',()=>openTutorial(true));
+ $('#tutorialNext')?.addEventListener('click',()=>{if(tutorialIndex>=TUTORIAL_STEPS.length-1){closeTutorial(true);return;}tutorialIndex++;renderTutorialStep();});
+ $('#tutorialSkip')?.addEventListener('click',()=>closeTutorial(true));
+ $('#tutorialSkipTop')?.addEventListener('click',()=>closeTutorial(true));
+ $('#tutorialOverlay')?.addEventListener('click',e=>{if(e.target===e.currentTarget)closeTutorial(true);});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#tutorialOverlay')?.classList.contains('hidden'))closeTutorial(true);});
+}
+
 function accountUI(user){
  if(user){currentUser=user;$('#userBadge').textContent='☯ '+user.displayName;$('#userBadge').classList.remove('hidden');$('#accountBtn').textContent='Hồ sơ';}
  else{currentUser=null;$('#userBadge').classList.add('hidden');$('#accountBtn').textContent='☯ Đăng nhập';}
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadBeastHouse();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadBeastHouse();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
  catch{localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}
 }
 function renderGuestAreas(){
@@ -738,7 +779,7 @@ function renderAuth(mode){
  const register=mode==='register';
  $('#accountContent').innerHTML=`<div class="auth-title">寒天門</div><div class="auth-sub">Ghi danh môn nhân · Dữ liệu được lưu trong PostgreSQL</div><div class="tabs"><button class="tab ${!register?'active':''}" data-mode="login">Đăng nhập</button><button class="tab ${register?'active':''}" data-mode="register">Đăng ký</button></div><form id="authForm" class="auth-form"><div class="field ${register?'':'hidden'}"><label>Danh xưng</label><input id="displayName" maxlength="40" ${register?'required':''} placeholder="Tên hiển thị"></div><div class="field"><label>Tên tài khoản</label><input id="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="tu_tien_01"></div><div class="field"><label>Mật khẩu</label><input id="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Ít nhất 6 ký tự"></div><button class="btn primary" type="submit">${register?'Ghi danh vào sơn môn':'Nhập môn'}</button><div id="authMsg" class="auth-msg"></div></form>`;
  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>renderAuth(b.dataset.mode));
- $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadDisciples();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadBeastHouse();await loadLinhPhap();await loadEquipment();await loadTuDi();await loadMarket();await loadProfessions();await loadData();await loadSectPosts();await loadChallenges();await loadArenaLive();}}catch(err){msg.textContent=err.message;}};
+ $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadDisciples();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadBeastHouse();await loadLinhPhap();await loadEquipment();await loadTuDi();await loadMarket();await loadProfessions();await loadData();await loadSectPosts();await loadChallenges();await loadArenaLive();maybeShowTutorial();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }
 async function logout(){try{await api('/api/logout',{method:'POST',headers:authHeaders()});}catch{}finally{localStorage.removeItem(tokenKey);currentProfile=null;accountUI(null);$('#accountModal').close();renderGuestAreas();}}
@@ -750,6 +791,7 @@ $('#accountBtn').onclick=openAccount;$('#joinBtn').onclick=()=>getToken()?accoun
 $('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');const dark=document.body.classList.contains('dark');$('#themeBtn').textContent=dark?'☀':'☾';localStorage.setItem('theme',dark?'dark':'light');};
 $('#menuBtn').onclick=()=>$('#nav').classList.toggle('open');document.querySelectorAll('#nav a').forEach(a=>a.onclick=()=>$('#nav').classList.remove('open'));$('#topBtn').onclick=()=>scrollTo({top:0,behavior:'smooth'});
 if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$('#themeBtn').textContent='☀';}
+setupTutorial();
 
 loadData();loadSect();checkSession();
 setInterval(()=>{if(getToken()){sendPresenceHeartbeat();loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},5000);
