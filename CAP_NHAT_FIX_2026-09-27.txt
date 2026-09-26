@@ -1,0 +1,5 @@
+HÀN THIÊN MÔN · BẢN SỬA LỖI
+
+- Dược Đường: API /api/duoc-duong trả thêm số lượng vật phẩm hiện có trong Tu Di Giới theo từng tài khoản.
+- Dưỡng Thú: hiển thị đúng số lượng thức ăn, Khôi Lỗi và trang bị; khóa các lựa chọn đang có số lượng 0.
+- Đã kiểm tra cú pháp server.js và script.js sau khi sửa: hợp lệ.
