@@ -1,0 +1,33 @@
+HÀN THIÊN MÔN v3.6.35
+
+1. CHẾ ĐỘ ĐĂNG BÀI MÔN PHÁI
+- Thêm bảng sect_posts và sect_post_reactions.
+- Chỉ môn nhân từ Hóa Thần (realmIndex >= 4) mới được đăng bài.
+- Server kiểm tra cảnh giới, không chỉ khóa giao diện.
+- Bài đăng gồm tiêu đề + nội dung tối đa 3000 ký tự.
+- Mọi môn nhân có thể tương tác với bài đăng.
+
+2. BA ĐẠI LÃO
+- Xác định 3 môn nhân có thành tích cao nhất theo cùng công thức xếp hạng Thiên Bảng hiện tại:
+  achievement_score = linh lực + tổng điểm thành tích * 10.
+- Top 3 được đánh dấu "Đại Lão" và hiển thị trong khu vực Bài Đăng/Thiên Bảng.
+
+3. BA TƯƠNG TÁC BÀI ĐĂNG
+- 👍 Ưa thích
+- 👎 Khinh Thường
+- 📣 Truyền Âm
+- Mỗi môn nhân chỉ có một lựa chọn phản ứng trên mỗi bài; bấm lại cùng lựa chọn sẽ bỏ phản ứng.
+
+4. CHAT TỔNG
+- Mỗi lần một trong Top 3 Đại Lão gửi tin nhắn vào Chat Tổng, server tự thêm thông báo:
+  "Đại Lão Đã Đến ⛩️"
+- Giao diện hiển thị thông báo Đại Lão riêng biệt.
+
+5. DATABASE
+- Runtime schema tạo sect_posts, sect_post_reactions và index cần thiết.
+- Tương thích PostgreSQL Render cũ.
+
+6. KIỂM TRA
+- node --check server.js: OK
+- node --check script.js: OK
+- Chưa kết nối trực tiếp PostgreSQL Render trong môi trường phát triển này.

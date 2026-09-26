@@ -702,6 +702,24 @@ async function initDb() {
       message TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS sect_posts (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_sect_posts_created ON sect_posts(created_at DESC,id DESC);
+    CREATE TABLE IF NOT EXISTS sect_post_reactions (
+      id BIGSERIAL PRIMARY KEY,
+      post_id BIGINT NOT NULL REFERENCES sect_posts(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reaction TEXT NOT NULL CHECK(reaction IN ('like','dislike','voice')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(post_id,user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sect_post_reactions_post ON sect_post_reactions(post_id,reaction);
     CREATE TABLE IF NOT EXISTS friend_requests (
       id BIGSERIAL PRIMARY KEY,
       requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -2651,13 +2669,76 @@ app.get('/api/bicanh/history',auth,async(req,res)=>{
   catch(e){res.status(500).json({error:'Không thể tải lịch sử Bí Cảnh.'});}
 });
 
+function isElderStage(realmIndex){ return Number(realmIndex||0) >= 4; }
+
+async function topElders(limit=3){
+  const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,
+      COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
+      COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count,
+      (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
+      FROM users u JOIN profiles p ON p.user_id=u.id
+      ORDER BY achievement_score DESC,u.id ASC LIMIT $1`,[limit]);
+  return r.rows;
+}
+
+app.get('/api/sect-posts',auth,async(req,res)=>{
+  try{
+    await ensureRuntimeSchema();
+    const me=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const meStage=stageFor(Number(me?.spirit_power)||0);
+    const rows=(await query(`SELECT sp.id,sp.user_id,sp.title,sp.content,sp.created_at,sp.updated_at,
+      u.display_name,p.avatar,p.title AS author_title,p.rank,p.spirit_power,
+      COALESCE((SELECT COUNT(*) FROM sect_post_reactions r WHERE r.post_id=sp.id AND r.reaction='like'),0)::int AS likes,
+      COALESCE((SELECT COUNT(*) FROM sect_post_reactions r WHERE r.post_id=sp.id AND r.reaction='dislike'),0)::int AS dislikes,
+      COALESCE((SELECT COUNT(*) FROM sect_post_reactions r WHERE r.post_id=sp.id AND r.reaction='voice'),0)::int AS voices,
+      (SELECT r.reaction FROM sect_post_reactions r WHERE r.post_id=sp.id AND r.user_id=$1) AS my_reaction
+      FROM sect_posts sp JOIN users u ON u.id=sp.user_id JOIN profiles p ON p.user_id=u.id
+      ORDER BY sp.id DESC LIMIT 80`,[req.session.user_id])).rows;
+    const elders=await topElders(3);
+    const elderIds=new Set(elders.map(x=>Number(x.id)));
+    res.json({rows:rows.map(x=>({...x,isElder:elderIds.has(Number(x.user_id))})),canPost:isElderStage(meStage.realmIndex),stage:meStage.stage,elders});
+  }catch(e){console.error('sect posts load:',e);res.status(500).json({error:'Không thể mở chế độ đăng bài.'});}
+});
+
+app.post('/api/sect-posts',auth,async(req,res)=>{
+  try{
+    await ensureRuntimeSchema();
+    const p=(await query('SELECT spirit_power FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const st=stageFor(Number(p?.spirit_power)||0);
+    if(!isElderStage(st.realmIndex)) return res.status(403).json({error:'Chỉ môn nhân từ Hóa Thần trở lên mới được phép đăng bài.'});
+    const title=String(req.body?.title||'').trim().slice(0,100);
+    const content=String(req.body?.content||'').trim().slice(0,3000);
+    if(!title||!content)return res.status(400).json({error:'Tiêu đề và nội dung không được để trống.'});
+    const r=await query('INSERT INTO sect_posts(user_id,title,content) VALUES($1,$2,$3) RETURNING id',[req.session.user_id,title,content]);
+    res.status(201).json({ok:true,id:r.rows[0].id,message:'Bài viết đã được đăng lên Môn Phái.'});
+  }catch(e){console.error('sect post create:',e);res.status(500).json({error:'Không thể đăng bài.'});}
+});
+
+app.post('/api/sect-posts/:id/react',auth,async(req,res)=>{
+  try{
+    await ensureRuntimeSchema();
+    const postId=Number(req.params.id);
+    const reaction=String(req.body?.reaction||'').trim();
+    if(!Number.isInteger(postId)||!['like','dislike','voice'].includes(reaction))return res.status(400).json({error:'Phản ứng không hợp lệ.'});
+    const exists=await query('SELECT id FROM sect_posts WHERE id=$1',[postId]);
+    if(!exists.rows[0])return res.status(404).json({error:'Bài viết không tồn tại.'});
+    const old=(await query('SELECT id,reaction FROM sect_post_reactions WHERE post_id=$1 AND user_id=$2',[postId,req.session.user_id])).rows[0];
+    if(old && old.reaction===reaction) await query('DELETE FROM sect_post_reactions WHERE id=$1',[old.id]);
+    else if(old) await query('UPDATE sect_post_reactions SET reaction=$2,created_at=NOW() WHERE id=$1',[old.id,reaction]);
+    else await query('INSERT INTO sect_post_reactions(post_id,user_id,reaction) VALUES($1,$2,$3)',[postId,req.session.user_id,reaction]);
+    const c=(await query(`SELECT COUNT(*) FILTER(WHERE reaction='like')::int AS likes,COUNT(*) FILTER(WHERE reaction='dislike')::int AS dislikes,COUNT(*) FILTER(WHERE reaction='voice')::int AS voices,(SELECT reaction FROM sect_post_reactions WHERE post_id=$1 AND user_id=$2) AS my_reaction FROM sect_post_reactions WHERE post_id=$1`,[postId,req.session.user_id])).rows[0];
+    res.json({ok:true,...c});
+  }catch(e){console.error('sect post react:',e);res.status(500).json({error:'Không thể cập nhật phản ứng.'});}
+});
+
 app.get('/api/leaderboard',async(req,res)=>{
   try {
-    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,
+    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
       COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
-      COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count
-      FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10) DESC, u.id ASC LIMIT 50`);
-    res.json({rows:r.rows});
+      COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count,
+      (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
+      FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY achievement_score DESC, u.id ASC LIMIT 50`);
+    res.json({rows:r.rows.map((x,i)=>({...x,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
   } catch(e){res.status(500).json({error:'Không thể tải bảng thành tích.'});}
 });
 
@@ -2675,17 +2756,25 @@ app.get('/api/sect',async(req,res)=>{
 
 app.get('/api/chat',auth,async(req,res)=>{
   try {
-    const r=await query(`SELECT c.id,c.message,c.created_at,u.display_name,p.title,p.rank,p.avatar FROM chat_messages c JOIN users u ON u.id=c.user_id JOIN profiles p ON p.user_id=u.id ORDER BY c.id DESC LIMIT 60`);
-    res.json({rows:r.rows.reverse()});
+    const elders=await topElders(3); const elderIds=new Set(elders.map(x=>Number(x.id)));
+    const r=await query(`SELECT c.id,c.message,c.created_at,u.id AS user_id,u.display_name,p.title,p.rank,p.avatar FROM chat_messages c JOIN users u ON u.id=c.user_id JOIN profiles p ON p.user_id=u.id ORDER BY c.id DESC LIMIT 80`);
+    res.json({rows:r.rows.reverse().map(x=>({...x,isElder:elderIds.has(Number(x.user_id))}))});
   } catch(e){res.status(500).json({error:'Không thể tải chat tổng.'});}
 });
 app.post('/api/chat',auth,async(req,res)=>{
   try {
     const message=String(req.body?.message||'').trim().slice(0,500);
     if(!message)return res.status(400).json({error:'Tin nhắn không được để trống.'});
-    const r=await query('INSERT INTO chat_messages(user_id,message) VALUES($1,$2) RETURNING id,created_at',[req.session.user_id,message]);
-    res.status(201).json({ok:true,...r.rows[0]});
-  } catch(e){res.status(500).json({error:'Không thể gửi tin nhắn.'});}
+    const elders=await topElders(3); const isElder=elders.some(x=>Number(x.id)===Number(req.session.user_id));
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      if(isElder) await client.query('INSERT INTO chat_messages(user_id,message) VALUES($1,$2)',[req.session.user_id,'Đại Lão Đã Đến ⛩️']);
+      const r=await client.query('INSERT INTO chat_messages(user_id,message) VALUES($1,$2) RETURNING id,created_at',[req.session.user_id,message]);
+      await client.query('COMMIT');
+      res.status(201).json({ok:true,...r.rows[0],isElder});
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
+  } catch(e){console.error('chat send:',e);res.status(500).json({error:'Không thể gửi tin nhắn.'});}
 });
 
 
