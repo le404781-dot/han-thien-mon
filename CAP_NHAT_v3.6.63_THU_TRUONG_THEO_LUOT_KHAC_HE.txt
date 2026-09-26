@@ -1,0 +1,19 @@
+HÀN THIÊN MÔN v3.6.63 · THÚ TRƯỜNG THEO LƯỢT
+
+1. Thú Trường chuyển sang chiến đấu theo lượt.
+2. Huyết Dịch được tính theo tổng Công + Thủ + Thần, nhân hệ số cảnh giới và phẩm cấp.
+3. Môn nhân chọn 1 trong 3 tuyệt kỹ của linh thú trước khi xuất chiến.
+4. Trận đấu kết thúc khi một bên cạn Huyết Dịch.
+5. Mỗi lượt lưu: người ra đòn, tuyệt kỹ, sát thương, bạo kích, khắc hệ và Huyết Dịch hai bên.
+6. Thêm khắc hệ:
+   - Kim > Mộc > Thổ > Thủy > Hỏa > Kim
+   - Phong > Lôi > Thủy
+   - Băng > Phong
+   - Ảo > Linh > Long > Ảo
+   - Khắc hệ: sát thương x1.35; bị khắc: x0.72.
+7. Mọi môn nhân đăng nhập đều có thể xem Sàn Thú Trường và xem lại diễn biến các trận gần đây.
+8. Thách Chiến Online: người gửi chọn tuyệt kỹ; người nhận chọn linh thú và tuyệt kỹ khi chấp nhận trong Hòm Thư.
+9. Offline/NPC và Thần Thú cũng dùng cơ chế theo lượt, Huyết Dịch, 3 tuyệt kỹ và khắc hệ.
+10. Giữ cơ chế Thần Thú thất bại gây debuff -35% ngẫu nhiên trong 24 giờ.
+11. Thêm cột database an toàn: beast_type, skill/type/hp metadata của trận đấu; tự ALTER TABLE khi mở Thú Trường.
+12. Không xóa dữ liệu linh thú cũ; hệ linh thú hiện tại được tự suy luận hệ từ tên nếu chưa có beast_type.
