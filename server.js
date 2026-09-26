@@ -343,12 +343,16 @@ async function ensureBicanhSchema() {
 // Cửu Đại Cảnh Giới — mỗi cảnh giới có 9 tầng.
 const SPIRIT_TO_STONE_RATE = 100; // 100 linh lực = 1 linh thạch
 const REALM_DIFFICULTY_MULTIPLIER = 28;
+const EARLY_REALM_DIFFICULTY_MULTIPLIER = 2;
 const BASE_REALM_NAMES = [
   ['Luyện Khí','Cảnh giới nhập môn.'],['Trúc Cơ','Trúc lập đạo cơ, linh lực bắt đầu tăng mạnh.'],['Kim Đan','Ngưng tụ kim đan, cần linh lực vượt xa phàm tu.'],['Nguyên Anh','Nguyên anh xuất thế, con đường tu luyện ngày càng khó.'],['Hóa Thần','Thần niệm hóa hình, linh lực yêu cầu tăng vọt.'],['Luyện Hư','Luyện hóa hư không, mỗi bước tiến đều cần lượng linh lực khổng lồ.'],['Hợp Thể','Thân-hồn hợp nhất, đột phá cực kỳ gian nan.'],['Đại Thừa','Đạo vận đại thành, khoảng cách giữa các cảnh giới tăng mạnh.'],['Độ Kiếp','Đón thiên kiếp, chuẩn bị bước vào tiên giới.'],['Nhân Tiên','Bước vào tiên đạo, tiên pháp bắt đầu được mở khóa.'],['Chân Tiên','Tiên thể ổn định, tiên lực tinh thuần hơn.'],['Địa Tiên','Làm chủ địa mạch tiên vực, căn cơ ngày càng sâu.'],['Thiên Tiên','Tiên lực hòa nhập thiên địa.'],['Huyền Tiên','Lĩnh ngộ pháp tắc sâu hơn.'],['Kim Tiên','Thân thể và nguyên thần tiến vào bất hủ.'],['Tiên Quân','Bậc thống trị một phương tiên vực.'],['Tiên Tôn','Chạm tới đại đạo chí cao.'],['Tiên Đế','Cảnh giới tối cao, phân thành Nhất Tinh đến Cửu Cửu Tinh.']
 ];
-// Mỗi lần bước sang đại cảnh giới, ngưỡng linh lực cơ bản tăng 28 lần so với cảnh giới trước.
+// Từ Luyện Khí đến Đại Thừa dùng hệ số 2x; từ Độ Kiếp trở đi giữ nguyên hệ số 28x.
 const BASE_RANK_MINS = [0,1000,3000,7000,15000,30000,60000,120000,240000,510000,780000,1050000,1320000,1590000,1860000,2130000,2400000,2670000];
-const RANK_MINS = BASE_RANK_MINS.map((v,i)=>i===0?0:v*REALM_DIFFICULTY_MULTIPLIER);
+const RANK_MINS = BASE_RANK_MINS.map((v,i)=>{
+  if(i===0) return 0;
+  return v * (i <= 7 ? EARLY_REALM_DIFFICULTY_MULTIPLIER : REALM_DIFFICULTY_MULTIPLIER);
+});
 const RANKS = BASE_REALM_NAMES.map((x,i)=>({name:x[0],min:RANK_MINS[i],max:i===BASE_REALM_NAMES.length-1?Infinity:RANK_MINS[i+1]-1,description:x[1]}));
 const IMMORTAL_REALM_START = 9;
 const TIEN_DE_STARS = 99;
@@ -622,6 +626,8 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_online_at TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_date DATE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_earned INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS presence_status TEXT NOT NULL DEFAULT 'offline';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
 
     UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0), realm_tier=COALESCE(realm_tier,1);
@@ -1477,12 +1483,12 @@ app.get('/api/data',async(req,res)=>{
     const legends=(await query(`SELECT l.id,l.user_id,l.title,l.content,l.realm_index,l.realm_name,l.realm_tier,l.created_at,l.updated_at,u.display_name AS author_name,u.username,p.avatar,p.position
       FROM legends l JOIN users u ON u.id=l.user_id JOIN profiles p ON p.user_id=u.id ORDER BY l.updated_at DESC,l.id DESC LIMIT 200`)).rows.map(x=>({...x,charLimit:legendCharLimit(x.realm_index)}));
     const [accounts] = await Promise.all([
-      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier
+      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier,p.presence_status,p.last_seen_at
              FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY u.id`)
     ]);
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
-    const accountMembers=accounts.rows.map(x=>({...x,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true}));
+    const accountMembers=accounts.rows.map(x=>{const online=!!x.last_seen_at && (Date.now()-new Date(x.last_seen_at).getTime())<90000 && x.presence_status==='online'; return {...x,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true,online,presenceLabel:online?'Đang xuất quan':'Đã bế quan'};});
     res.json({members:accountMembers,memories:legends,timeline:t.rows,userCount:u.rows[0].c,memberCount:accountMembers.length});
   } catch(e) { res.status(500).json({error:'Không thể tải dữ liệu.'}); }
 });
@@ -1511,13 +1517,15 @@ app.post('/api/login',async(req,res)=>{
     const user=r.rows[0];
     if(!user||hashPassword(String(password||''),user.salt)!==user.password_hash)return res.status(401).json({error:'Tên đăng nhập hoặc mật khẩu không đúng.'});
     await ensureProfile(user.id);
+    await query("UPDATE profiles SET presence_status='online',last_seen_at=NOW(),updated_at=NOW() WHERE user_id=$1",[user.id]);
     const token=crypto.randomBytes(32).toString('hex');
     await query('INSERT INTO sessions(token,user_id,expires_at) VALUES($1,$2,$3)',[token,user.id,Date.now()+1000*60*60*24*30]);
     res.json({token,user:safeUser(user)});
   }catch(e){res.status(500).json({error:'Không thể đăng nhập.'});}
 });
 app.get('/api/me',auth,async(req,res)=>res.json({user:{id:req.session.user_id,username:req.session.username,displayName:req.session.display_name,createdAt:req.session.created_at}}));
-app.post('/api/logout',auth,async(req,res)=>{await query('DELETE FROM sessions WHERE token=$1',[req.token]);res.json({ok:true});});
+app.post('/api/presence/heartbeat',auth,async(req,res)=>{try{await query("UPDATE profiles SET presence_status='online',last_seen_at=NOW(),updated_at=NOW() WHERE user_id=$1",[req.session.user_id]);res.json({ok:true,status:'online',label:'Đang xuất quan'});}catch(e){res.status(500).json({error:'Không thể cập nhật trạng thái.'});}});
+app.post('/api/logout',auth,async(req,res)=>{await query("UPDATE profiles SET presence_status='offline',last_seen_at=NOW(),updated_at=NOW() WHERE user_id=$1",[req.session.user_id]);await query('DELETE FROM sessions WHERE token=$1',[req.token]);res.json({ok:true});});
 
 // NHẬN LINH THẠCH HẰNG NGÀY · 100 linh thạch / ngày
 // Giao dịch được khóa theo hồ sơ để tránh nhận trùng khi bấm nhiều lần hoặc nhiều tab.

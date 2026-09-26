@@ -17,6 +17,10 @@ async function api(url,opts={}){
  return d;
 }
 
+async function sendPresenceHeartbeat(){
+ if(!getToken())return;
+ try{await api('/api/presence/heartbeat',{method:'POST',headers:authHeaders(),body:'{}'});}catch(e){}
+}
 async function loadData(){
  try{
   const data=await api('/api/data'); members=data.members; memories=data.memories; timeline=data.timeline;
@@ -25,7 +29,7 @@ async function loadData(){
  }catch(e){console.error(e);}
 }
 function renderMembers(list=members){
- $('#membersGrid').innerHTML=list.length?list.map((m)=>`<article class="member-card" data-index="${members.indexOf(m)}"><div class="avatar">${esc(m.emoji||'🧑🏻‍🎓')}</div><div class="member-info"><span class="nickname">${esc(m.nick||'')}</span><h3>${esc(m.name)}</h3><p>${esc(m.role||'Đệ tử')}</p><div class="tags">${(Array.isArray(m.tags)?m.tags:[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div></article>`).join(''):`<p>Không tìm thấy môn nhân phù hợp.</p>`;
+ $('#membersGrid').innerHTML=list.length?list.map((m)=>`<article class="member-card" data-index="${members.indexOf(m)}"><div class="avatar">${avatarHtml(m.emoji)}</div><div class="member-info"><span class="nickname">${esc(m.nick||'')}</span><h3>${esc(m.name)}</h3><p>${esc(m.role||'Đệ tử')}</p><div class="presence-status ${m.online?'online':'offline'}"><span class="presence-dot"></span>${esc(m.presenceLabel||'Đã bế quan')}</div><div class="tags">${(Array.isArray(m.tags)?m.tags:[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div></div></article>`).join(''):`<p>Không tìm thấy môn nhân phù hợp.</p>`;
  document.querySelectorAll('.member-card').forEach(c=>c.onclick=()=>openMember(+c.dataset.index));
 }
 function renderGallery(){
@@ -46,7 +50,7 @@ function renderTimeline(){ $('#timelineList').innerHTML=timeline.map(e=>`<articl
 function openMember(i){
  const m=members[i];if(!m)return;
  const isSelf=currentUser&&Number(m.id)===Number(currentUser.id);
- $('#modalContent').innerHTML=`<div class="modal-avatar">${esc(m.emoji)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${(m.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${!getToken()||isSelf?'':`<div class="friend-actions" id="memberFriendActions"><button class="btn small primary" id="memberFriendBtn">🤝 Đang kiểm tra...</button><button class="btn small ghost hidden" id="memberChatBtn">💬 Chat riêng</button></div><div class="discipleship-actions" id="memberDiscipleshipActions"><button class="btn small primary" id="memberDiscipleshipBtn">👑 Đang kiểm tra Sư Đồ...</button></div><p id="memberDiscipleshipMsg" class="train-msg"></p><div class="challenge-actions"><button class="btn small primary" id="memberOnlineChallengeBtn">⚔ Mở lôi đài Online</button><button class="btn small ghost" id="memberOfflineChallengeBtn">🌓 Khiêu chiến Offline</button></div><p id="memberFriendMsg" class="train-msg"></p><p id="memberChallengeMsg" class="train-msg"></p>`}</div>`;
+ $('#modalContent').innerHTML=`<div class="modal-avatar">${avatarHtml(m.emoji)}</div><div class="modal-content"><span class="nickname">${esc(m.nick)}</span><h2>${esc(m.name)}</h2><p>${esc(m.bio||'Đã ghi danh vào Hàn Thiên Môn.')}</p><div class="facts"><div class="fact"><small>Cảnh giới</small><b>${esc(m.rank||'Luyện Khí')} · ${esc(m.realm_tier||1)}/9</b></div><div class="fact"><small>Linh lực</small><b>${Number(m.spirit_power||0).toLocaleString('vi-VN')}</b></div><div class="fact"><small>Sinh nhật</small><b>${esc(m.birthday||'—')}</b></div><div class="fact"><small>Sở thích</small><b>${esc(m.hobby||'—')}</b></div></div><div class="tags">${(m.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>${!getToken()||isSelf?'':`<div class="friend-actions" id="memberFriendActions"><button class="btn small primary" id="memberFriendBtn">🤝 Đang kiểm tra...</button><button class="btn small ghost hidden" id="memberChatBtn">💬 Chat riêng</button></div><div class="discipleship-actions" id="memberDiscipleshipActions"><button class="btn small primary" id="memberDiscipleshipBtn">👑 Đang kiểm tra Sư Đồ...</button></div><p id="memberDiscipleshipMsg" class="train-msg"></p><div class="challenge-actions"><button class="btn small primary" id="memberOnlineChallengeBtn">⚔ Mở lôi đài Online</button><button class="btn small ghost" id="memberOfflineChallengeBtn">🌓 Khiêu chiến Offline</button></div><p id="memberFriendMsg" class="train-msg"></p><p id="memberChallengeMsg" class="train-msg"></p>`}</div>`;
  const friendsHost=$('#memberModal').showModal();
  if(getToken()&&!isSelf){
   refreshMemberFriendState(Number(m.id));
@@ -686,4 +690,6 @@ $('#menuBtn').onclick=()=>$('#nav').classList.toggle('open');document.querySelec
 if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$('#themeBtn').textContent='☀';}
 
 loadData();loadSect();checkSession();
-setInterval(()=>{if(getToken()){loadChat();if(currentProfile?.activeBattle)loadChallenges();}},5000);
+setInterval(()=>{if(getToken()){sendPresenceHeartbeat();loadChat();if(currentProfile?.activeBattle)loadChallenges();}},5000);
+setInterval(()=>{if(getToken())sendPresenceHeartbeat();},30000);
+window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
