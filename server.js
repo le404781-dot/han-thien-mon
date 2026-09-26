@@ -636,8 +636,6 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_earned INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS presence_status TEXT NOT NULL DEFAULT 'offline';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auto_cultivation_last_at TIMESTAMPTZ;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS presence_started_at TIMESTAMPTZ;
 
 
     UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0), realm_tier=COALESCE(realm_tier,1);
@@ -1573,70 +1571,6 @@ app.post('/api/register',async(req,res)=>{
   } catch(e){if(e.code==='23505')return res.status(409).json({error:'Tên đăng nhập đã tồn tại.'});res.status(500).json({error:'Không thể tạo tài khoản.'});}
 });
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TU LUYỆN XUẤT QUAN · tích linh lực tự động theo số phút đang online
-// Tốc độ: Luyện Khí +18/phút, giảm 1/phút qua mỗi cảnh giới cho tới Tiên Đế +1/phút.
-// Chỉ tính thời gian từ lần đánh dấu xuất quan gần nhất; heartbeat 30s giúp cập nhật liên tục.
-// ─────────────────────────────────────────────────────────────────────────────
-async function settleAutoCultivation(client,userId,{force=false}={}){
-  const row=(await client.query(`
-    SELECT spirit_power,auto_cultivation_last_at,presence_status,
-           COALESCE(challenge_debuff_until,NOW()-INTERVAL '1 second') AS challenge_debuff_until
-    FROM profiles WHERE user_id=$1 FOR UPDATE
-  `,[userId])).rows[0];
-  if(!row) return {gain:0,minutes:0,rate:0,locked:false,spiritPower:0};
-
-  const mansion=(await client.query(`SELECT active FROM user_mansions WHERE user_id=$1 LIMIT 1`,[userId])).rows[0];
-  if(Boolean(mansion?.active)){
-    await client.query(`UPDATE profiles SET auto_cultivation_last_at=NOW() WHERE user_id=$1`,[userId]);
-    return {gain:0,minutes:0,rate:onlineSpiritRate(stageFor(Number(row.spirit_power)||0).realmIndex),locked:true,spiritPower:Number(row.spirit_power)||0,mansionLocked:true};
-  }
-
-  const nowMs=Date.now();
-  let lastMs=row.auto_cultivation_last_at?new Date(row.auto_cultivation_last_at).getTime():nowMs;
-  if(!Number.isFinite(lastMs) || lastMs>nowMs) lastMs=nowMs;
-
-  // Không tu luyện khi đã bế quan. Khi quay lại xuất quan, mốc tính được reset.
-  if(!force && String(row.presence_status||'offline')!=='online'){
-    await client.query(`UPDATE profiles SET auto_cultivation_last_at=NOW() WHERE user_id=$1`,[userId]);
-    return {gain:0,minutes:0,rate:onlineSpiritRate(stageFor(Number(row.spirit_power)||0).realmIndex),locked:true,spiritPower:Number(row.spirit_power)||0};
-  }
-
-  const minutes=Math.floor(Math.max(0,nowMs-lastMs)/60000);
-  const st=stageFor(Number(row.spirit_power)||0);
-  const rate=Math.max(1,onlineSpiritRate(st.realmIndex));
-
-  if(minutes<=0){
-    return {gain:0,minutes:0,rate,locked:false,spiritPower:Number(row.spirit_power)||0,realm:st.realm,realmIndex:st.realmIndex,tier:st.tier};
-  }
-
-  // Tính theo cảnh giới hiện tại tại thời điểm settle. Không giới hạn/ngày.
-  const gain=minutes*rate;
-  const oldPower=Number(row.spirit_power)||0;
-  const newPower=oldPower+gain;
-  const ns=stageFor(newPower);
-  const breakthroughRewards=await grantRealmBreakthroughRewards(client,userId,st.realmIndex,ns.realmIndex);
-
-  await client.query(`
-    UPDATE profiles
-    SET spirit_power=$2,
-        experience=experience+$3,
-        rank=$4,
-        realm_tier=$5,
-        auto_cultivation_last_at=NOW(),
-        last_online_at=NOW(),
-        updated_at=NOW()
-    WHERE user_id=$1
-  `,[userId,newPower,gain,ns.realm,ns.tier]);
-
-  return {
-    gain,minutes,rate,locked:false,spiritPower:newPower,
-    realm:ns.realm,realmIndex:ns.realmIndex,tier:ns.tier,
-    breakthroughRewards
-  };
-}
-
 app.post('/api/login',async(req,res)=>{
   try{
     const {username,password}=req.body||{};
@@ -1644,64 +1578,15 @@ app.post('/api/login',async(req,res)=>{
     const user=r.rows[0];
     if(!user||hashPassword(String(password||''),user.salt)!==user.password_hash)return res.status(401).json({error:'Tên đăng nhập hoặc mật khẩu không đúng.'});
     await ensureProfile(user.id);
-    await query("UPDATE profiles SET presence_status='online',last_seen_at=NOW(),auto_cultivation_last_at=NOW(),presence_started_at=NOW(),updated_at=NOW() WHERE user_id=$1",[user.id]);
+    await query("UPDATE profiles SET presence_status='online',last_seen_at=NOW(),updated_at=NOW() WHERE user_id=$1",[user.id]);
     const token=crypto.randomBytes(32).toString('hex');
     await query('INSERT INTO sessions(token,user_id,expires_at) VALUES($1,$2,$3)',[token,user.id,Date.now()+1000*60*60*24*30]);
     res.json({token,user:safeUser(user)});
   }catch(e){res.status(500).json({error:'Không thể đăng nhập.'});}
 });
 app.get('/api/me',auth,async(req,res)=>res.json({user:{id:req.session.user_id,username:req.session.username,displayName:req.session.display_name,createdAt:req.session.created_at}}));
-app.post('/api/presence/heartbeat',auth,async(req,res)=>{
-  const client=await pool.connect();
-  try{
-    await client.query('BEGIN');
-    await ensureProfile(req.session.user_id);
-    const settled=await settleAutoCultivation(client,req.session.user_id);
-    await client.query(`UPDATE profiles SET presence_status='online',last_seen_at=NOW(),auto_cultivation_last_at=COALESCE(auto_cultivation_last_at,NOW()),presence_started_at=COALESCE(presence_started_at,NOW()),updated_at=NOW() WHERE user_id=$1`,[req.session.user_id]);
-    await client.query('COMMIT');
-    res.json({ok:true,status:'online',label:'Đang xuất quan',autoCultivation:settled});
-  }catch(e){
-    try{await client.query('ROLLBACK')}catch{}
-    console.error('presence heartbeat:',e);
-    res.status(500).json({error:'Không thể cập nhật trạng thái.'});
-  }finally{client.release();}
-});
-app.post('/api/logout',auth,async(req,res)=>{
-  const client=await pool.connect();
-  try{
-    await client.query('BEGIN');
-    const settled=await settleAutoCultivation(client,req.session.user_id,{force:true});
-    await client.query(`UPDATE profiles SET presence_status='offline',last_seen_at=NOW(),auto_cultivation_last_at=NOW(),presence_started_at=NULL,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id]);
-    await client.query('DELETE FROM sessions WHERE token=$1',[req.token]);
-    await client.query('COMMIT');
-    res.json({ok:true,autoCultivation:settled});
-  }catch(e){
-    try{await client.query('ROLLBACK')}catch{}
-    console.error('logout:',e);
-    res.status(500).json({error:'Không thể bế quan.'});
-  }finally{client.release();}
-});
-
-// Beacon offline: dùng khi đóng tab/trình duyệt, vì sendBeacon không gửi Authorization header.
-app.post('/api/presence/offline',async(req,res)=>{
-  const token=String(req.body?.token||'').trim();
-  if(!token)return res.status(400).json({error:'Thiếu phiên đăng nhập.'});
-  const client=await pool.connect();
-  try{
-    await client.query('BEGIN');
-    const s=(await client.query(`SELECT s.user_id FROM sessions s WHERE s.token=$1 AND s.expires_at>$2`,[token,Date.now()])).rows[0];
-    if(!s){await client.query('ROLLBACK');return res.json({ok:true});}
-    const settled=await settleAutoCultivation(client,s.user_id,{force:true});
-    await client.query(`UPDATE profiles SET presence_status='offline',last_seen_at=NOW(),auto_cultivation_last_at=NOW(),presence_started_at=NULL,updated_at=NOW() WHERE user_id=$1`,[s.user_id]);
-    await client.query('DELETE FROM sessions WHERE token=$1',[token]);
-    await client.query('COMMIT');
-    res.json({ok:true,autoCultivation:settled});
-  }catch(e){
-    try{await client.query('ROLLBACK')}catch{}
-    console.error('presence offline beacon:',e);
-    res.status(500).json({error:'Không thể bế quan.'});
-  }finally{client.release();}
-});
+app.post('/api/presence/heartbeat',auth,async(req,res)=>{try{await query("UPDATE profiles SET presence_status='online',last_seen_at=NOW(),updated_at=NOW() WHERE user_id=$1",[req.session.user_id]);res.json({ok:true,status:'online',label:'Đang xuất quan'});}catch(e){res.status(500).json({error:'Không thể cập nhật trạng thái.'});}});
+app.post('/api/logout',auth,async(req,res)=>{await query("UPDATE profiles SET presence_status='offline',last_seen_at=NOW(),updated_at=NOW() WHERE user_id=$1",[req.session.user_id]);await query('DELETE FROM sessions WHERE token=$1',[req.token]);res.json({ok:true});});
 
 // NHẬN LINH THẠCH HẰNG NGÀY · 100 linh thạch / ngày
 // Giao dịch được khóa theo hồ sơ để tránh nhận trùng khi bấm nhiều lần hoặc nhiều tab.
@@ -1759,8 +1644,6 @@ app.get('/api/profile',auth,async(req,res)=>{
   try {
     await ensureRuntimeSchema();
     await ensureProfile(req.session.user_id);
-    const autoClient=await pool.connect();
-    try{await autoClient.query('BEGIN');await settleAutoCultivation(autoClient,req.session.user_id);await autoClient.query('COMMIT');}catch(e){try{await autoClient.query('ROLLBACK')}catch{};throw e;}finally{autoClient.release();}
     const mansionClient=await pool.connect();
     try{await mansionClient.query('BEGIN');await settleMansionIncome(mansionClient,req.session.user_id);await mansionClient.query('COMMIT');}catch(e){try{await mansionClient.query('ROLLBACK')}catch{};throw e;}finally{mansionClient.release();}
     const r=await query(`SELECT u.id,u.username,u.display_name,u.created_at,p.*,
@@ -1797,7 +1680,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const trainCount=String(activity?.activity_date||'').slice(0,10)===today ? Number(activity.train_count)||0 : 0;
     const maxDaily=Math.max(2,10-stage.realmIndex);
     const onlineRate=onlineSpiritRate(stage.realmIndex);
-    const onlineUnlocked=!Boolean(mansion?.active) && String(p.presence_status||'offline')==='online';
+    const onlineUnlocked=trainCount>=maxDaily && !Boolean(mansion?.active);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     const activeBattle=(await query(`SELECT id,challenger_id,opponent_id,challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action,started_at FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) ORDER BY id DESC LIMIT 1`,[p.id])).rows[0]||null;
     const healthMax=challengeHealth({...p,equipment_power:equipmentPower});
@@ -2044,46 +1927,53 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
 });
 
 app.post('/api/cultivation/online',auth,async(req,res)=>{
-  const client=await pool.connect();
   try{
-    await client.query('BEGIN');
     await ensureProfile(req.session.user_id);
-    const mansionState=await settleMansionIncome(client,req.session.user_id);
-    if(mansionState.active){
-      await client.query(`UPDATE profiles SET auto_cultivation_last_at=NOW() WHERE user_id=$1`,[req.session.user_id]);
+    const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const mansionState=await settleMansionIncome(client,req.session.user_id);
+      if(mansionState.active){await client.query('COMMIT');return res.status(423).json({mode:'mansion',active:false,locked:true,gain:mansionState.gain,mansion:mansionState.name,message:`Động phủ ${mansionState.name} đang khởi động; tích lũy Online cũng bị khóa cho đến khi ngưng động phủ.`});}
+      const p=(await client.query(`SELECT spirit_power,last_online_at,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
+      const st=stageFor(Number(p.spirit_power)||0);
+      const maxDaily=Math.max(2,10-st.realmIndex);
+      const a=(await client.query(`SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1`,[req.session.user_id])).rows[0];
+      const trainCount= a && String(a.activity_date).slice(0,10)===today ? Number(a.train_count)||0 : 0;
+      const baseOnlineRate=onlineSpiritRate(st.realmIndex);
+      if(trainCount<maxDaily){
+        await client.query('COMMIT');
+        return res.status(423).json({mode:'locked',active:false,locked:true,gain:0,onlineEarned:0,rate:baseOnlineRate,maxDaily,trainCount,message:`Online chỉ mở sau khi hoàn thành ${maxDaily}/${maxDaily} lượt vận công hôm nay.`});
+      }
+      let earned=String(p.online_spirit_date||'').slice(0,10)===today ? Number(p.online_spirit_earned)||0 : 0;
+      let last=p.last_online_at?new Date(p.last_online_at).getTime():Date.now();
+      if(!p.last_online_at || String(p.online_spirit_date||'').slice(0,10)!==today) last=Date.now();
+      const elapsed=Math.max(0,Date.now()-last);
+      const minutes=Math.floor(elapsed/60000);
+      const dailyCap=600;
+      const techRows=(await client.query(`SELECT ct.training_bonus_percent FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1`,[req.session.user_id])).rows;
+      const techniqueBonus=techniqueTrainingBonusFor(techRows);
+      const rate=Math.max(1,Math.round(onlineSpiritRate(st.realmIndex)*(1+techniqueBonus/100)));
+      const gain=Math.max(0,Math.min(minutes*rate,dailyCap-earned));
+      let spirit=Number(p.spirit_power)||0;
+      let breakthroughRewards=[];
+      if(gain>0){
+        spirit+=gain; earned+=gain;
+        const ns=stageFor(spirit);
+        breakthroughRewards=await grantRealmBreakthroughRewards(client,req.session.user_id,st.realmIndex,ns.realmIndex);
+        await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,last_online_at=NOW(),online_spirit_date=$6,online_spirit_earned=$7,updated_at=NOW() WHERE user_id=$1`,
+          [req.session.user_id,spirit,gain,ns.realm,ns.tier,today,earned]);
+      } else {
+        await client.query(`UPDATE profiles SET last_online_at=NOW(),online_spirit_date=$2,online_spirit_earned=$3 WHERE user_id=$1`,[req.session.user_id,today,earned]);
+      }
       await client.query('COMMIT');
-      return res.status(423).json({
-        mode:'mansion',active:false,locked:true,gain:0,
-        rate:onlineSpiritRate(stageFor(0).realmIndex),
-        mansion:mansionState.name,
-        message:`Động phủ ${mansionState.name} đang khởi động; tu luyện Xuất Quan tạm khóa cho đến khi ngưng động phủ.`
-      });
-    }
-    const settled=await settleAutoCultivation(client,req.session.user_id);
-    await client.query('COMMIT');
-    const stoneReward=(settled.breakthroughRewards||[]).reduce((sum,x)=>sum+Number(x.amount||0),0);
-    res.json({
-      mode:'auto',active:true,locked:false,
-      gain:Number(settled.gain)||0,
-      minutes:Number(settled.minutes)||0,
-      rate:Number(settled.rate)||1,
-      ratePerHour:Number(settled.rate||1)*60,
-      spiritPower:Number(settled.spiritPower)||0,
-      onlineEarned:Number(settled.gain)||0,
-      realm:settled.realm,realmIndex:settled.realmIndex,tier:settled.tier,
-      nextTickSeconds:30,
-      breakthroughRewards:settled.breakthroughRewards||[],
-      stoneReward,
-      message:stoneReward
-        ? `Đột phá ${settled.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch.`
-        : (settled.gain>0 ? `Tu luyện Xuất Quan +${settled.gain.toLocaleString('vi-VN')} linh lực trong ${settled.minutes} phút.` : `Đang tu luyện +${Number(settled.rate||1).toLocaleString('vi-VN')} linh lực/phút.`)
-    });
-  }catch(e){
-    try{await client.query('ROLLBACK')}catch{}
-    console.error('online cultivation:',e);
-    res.status(500).json({error:'Không thể cập nhật tu luyện Xuất Quan.'});
-  }finally{client.release();}
+      const ns=stageFor(spirit);
+      const stoneReward=breakthroughRewards.reduce((sum,x)=>sum+Number(x.amount||0),0);
+      res.json({mode:'online',active:true,gain,onlineEarned:earned,dailyCap,rate,ratePerHour:rate*60,realm:ns.realm,realmIndex:ns.realmIndex,stage:ns.stage,nextTickSeconds:60,breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
+  }catch(e){console.error('online cultivation:',e);res.status(500).json({error:'Không thể cập nhật linh lực trực tuyến.'});}
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TÀNG BẢO CÁC 2.1 · mua vật phẩm bằng linh thạch
@@ -2953,7 +2843,7 @@ app.post('/api/bicanh/invite',auth,async(req,res)=>{
     if(stageFor(Number(me.spirit_power)||0).realmIndex<Number(realm.required_realm_index))return res.status(403).json({error:`Bạn phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể mời vào Bí Cảnh này.`});
     if(stageFor(Number(friend.spirit_power)||0).realmIndex<Number(realm.required_realm_index))return res.status(400).json({error:`Bằng Hữu phải từ cảnh giới ${realm.required_realm_name} trở lên mới có thể tham gia Bí Cảnh này.`});
     const r=await query(`INSERT INTO secret_realm_invitations(realm_id,inviter_id,invitee_id,status) VALUES($1,$2,$3,'pending') ON CONFLICT(realm_id,inviter_id,invitee_id) DO UPDATE SET status='pending',created_at=NOW(),responded_at=NULL RETURNING id`,[realmId,uid,friendId]);
-    await createMailboxNotification(friendId,'bicanh_invite','🌌 Mời vào Bí Cảnh',`Bạn được mời tham gia ${realm.name}.`,`#bicanh:${r.rows[0].id}`);
+    await createMailboxNotification(friendId,'bicanh_invite','🌌 Mời vào Bí Cảnh',`Bạn được mời tham gia ${realm.name}.`,'#bicanh');
     res.json({ok:true,id:r.rows[0].id,message:'Đã gửi lời mời tham gia Bí Cảnh cho Bằng Hữu.'});
   }catch(e){console.error('bicanh invite:',e);res.status(500).json({error:`Không thể gửi lời mời Bí Cảnh: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}
 });
@@ -3695,26 +3585,7 @@ app.get('/api/mailbox',auth,async(req,res)=>{
     const rows=await query(`SELECT id,type,title,message,link_hash,read_at,created_at FROM mailbox_notifications WHERE user_id=$1 ORDER BY id DESC LIMIT 100`,[uid]);
     const meta=await query(`SELECT mailbox_enabled,COALESCE((SELECT COUNT(*) FROM mailbox_notifications mn WHERE mn.user_id=p.user_id AND mn.read_at IS NULL),0)::int AS unread FROM profiles p WHERE p.user_id=$1`,[uid]);
     const m=meta.rows[0]||{};
-    const parsed=(row)=>{
-      const raw=String(row.link_hash||'');
-      const mt=raw.match(/^#(challenge|friend|bicanh):(\d+)$/i);
-      if(!mt)return {...row,action:null,actionId:null};
-      const kind=mt[1].toLowerCase(), id=Number(mt[2]);
-      return {...row,action:kind,actionId:Number.isInteger(id)&&id>0?id:null};
-    };
-    const actionable=rows.rows.map(parsed);
-    // Chỉ hiển thị nút hành động nếu lời mời vẫn còn pending.
-    const challengeIds=actionable.filter(x=>x.action==='challenge'&&x.actionId).map(x=>x.actionId);
-    const friendIds=actionable.filter(x=>x.action==='friend'&&x.actionId).map(x=>x.actionId);
-    const bicanhIds=actionable.filter(x=>x.action==='bicanh'&&x.actionId).map(x=>x.actionId);
-    const [cr,fr,br]=await Promise.all([
-      challengeIds.length?query(`SELECT id FROM challenge_requests WHERE id=ANY($1::bigint[]) AND opponent_id=$2 AND mode='online' AND status='pending'`,[challengeIds,uid]):{rows:[]},
-      friendIds.length?query(`SELECT id FROM friend_requests WHERE id=ANY($1::bigint[]) AND addressee_id=$2 AND status='pending'`,[friendIds,uid]):{rows:[]},
-      bicanhIds.length?query(`SELECT id FROM secret_realm_invitations WHERE id=ANY($1::bigint[]) AND invitee_id=$2 AND status='pending'`,[bicanhIds,uid]):{rows:[]}
-    ]);
-    const valid=new Set([...(cr.rows||[]).map(x=>'challenge:'+x.id),...(fr.rows||[]).map(x=>'friend:'+x.id),...(br.rows||[]).map(x=>'bicanh:'+x.id)]);
-    const finalRows=actionable.map(x=>({...x,action:x.action&&x.actionId&&valid.has(`${x.action}:${x.actionId}`)?x.action:null,actionId:x.action&&x.actionId&&valid.has(`${x.action}:${x.actionId}`)?x.actionId:null}));
-    res.json({rows:finalRows,enabled:m.mailbox_enabled!==false,unread:Number(m.unread||0)});
+    res.json({rows:rows.rows,enabled:m.mailbox_enabled!==false,unread:Number(m.unread||0)});
   }catch(e){console.error('mailbox load:',e);res.status(500).json({error:'Không thể mở Hòm Thư: '+(process.env.NODE_ENV==='production'?'máy chủ chưa sẵn sàng.':e.message)});}
 });
 app.post('/api/mailbox/toggle',auth,async(req,res)=>{try{const enabled=Boolean(req.body?.enabled);await query('UPDATE profiles SET mailbox_enabled=$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,enabled]);res.json({ok:true,enabled});}catch(e){res.status(500).json({error:'Không thể đổi trạng thái Hòm Thư.'});}});
@@ -3862,7 +3733,7 @@ app.post('/api/challenges/online/request',auth,async(req,res)=>{
     const incoming=(await client.query(`SELECT id FROM challenge_requests WHERE challenger_id=$2 AND opponent_id=$1 AND mode='online' AND status='pending'`,[uid,target])).rows[0];
     if(incoming){await client.query('ROLLBACK');return res.status(409).json({error:'Đối phương đã mở lôi đài với bạn. Hãy vào Khiêu Chiến để đồng thuận.'});}
     const r=await client.query(`INSERT INTO challenge_requests(challenger_id,opponent_id,mode,status) VALUES($1,$2,'online','pending') RETURNING id,created_at`,[uid,target]);
-    await createMailboxNotification(target,'challenge','⚔️ Lời mời Khiêu Chiến','Bạn nhận được lời mời bước vào Lôi Đài.',`#challenge:${r.rows[0].id}`);
+    await createMailboxNotification(target,'challenge','⚔️ Lời mời Khiêu Chiến','Bạn nhận được lời mời bước vào Lôi Đài.','#challenge');
     await client.query('COMMIT');
     res.status(201).json({ok:true,...r.rows[0],message:'Đã mở lôi đài. Chờ đối phương đồng thuận.'});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge request:',e);res.status(500).json({error:'Không thể mở lôi đài.'});}
@@ -4058,7 +3929,7 @@ app.post('/api/friends/request',auth,async(req,res)=>{
     }
     if(old?.status==='rejected') await query('DELETE FROM friend_requests WHERE id=$1',[old.id]);
     const r=await query(`INSERT INTO friend_requests(requester_id,addressee_id,status) VALUES($1,$2,'pending') RETURNING id,created_at`,[uid,target]);
-    await createMailboxNotification(target,'friend','🤝 Lời mời kết giao',`Môn nhân #${uid} gửi lời mời kết giao bằng hữu.`, `#friend:${r.rows[0].id}`);
+    await createMailboxNotification(target,'friend','🤝 Lời mời kết giao',`Môn nhân #${uid} gửi lời mời kết giao bằng hữu.`, '#profile');
     res.status(201).json({ok:true,...r.rows[0],message:'Đã gửi lời mời kết bằng hữu.'});
   }catch(e){console.error('friend request:',e);res.status(500).json({error:'Không thể gửi lời mời bằng hữu.'});}
 });
