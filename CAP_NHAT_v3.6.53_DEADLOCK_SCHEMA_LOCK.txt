@@ -1,0 +1,9 @@
+HÀN THIÊN MÔN v3.6.53
+
+FIX RENDER PostgreSQL 40P01 deadlock
+- Dùng một PostgreSQL advisory lock chung cho toàn bộ migration/schema guards.
+- Áp dụng cho Runtime, Bí Cảnh, Tiên Pháp, Trang Bị, Hòm Thư và Khiêu Chiến.
+- initDb giữ cùng lock trong toàn bộ quá trình migration/seed.
+- Các schema guard trong cùng process tự dùng lock đã giữ, tránh tự chờ chính mình.
+- Giữ retry 40P01 tối đa 4 lần ở initDb.
+- Mục tiêu: không còn ALTER TABLE/CREATE TABLE chạy đồng thời giữa các process Render trong lúc deploy hoặc request đầu tiên.

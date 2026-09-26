@@ -19,10 +19,29 @@ const pool = new Pool({
 
 async function query(text, params = []) { return pool.query(text, params); }
 
+// v3.6.53: serialize ALL schema guards across Render instances.
+// A per-process Promise cache is not enough because Render may have two
+// Node processes during deploy. Every DDL guard must share the same
+// PostgreSQL advisory lock used by initDb().
+const SCHEMA_LOCK_KEY = 'han-thien-mon-schema-v3.6.53';
+let schemaLockHeld = false;
+async function withSchemaAdvisoryLock(work) {
+  if (schemaLockHeld) return work();
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock(hashtext($1))', [SCHEMA_LOCK_KEY]);
+    return await work();
+  } finally {
+    try { await client.query('SELECT pg_advisory_unlock(hashtext($1))', [SCHEMA_LOCK_KEY]); } catch {}
+    client.release();
+  }
+}
+
+
 // Runtime schema guard: Render/PostgreSQL deployments can keep an older schema
 // even after a newer app is deployed. Repair the columns used by profile,
 // cultivation and equipment before serving those endpoints.
-async function ensureRuntimeSchema() {
+async function _ensureRuntimeSchema() {
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
@@ -205,11 +224,23 @@ async function ensureRuntimeSchema() {
   `);
 }
 
+
+let runtimeSchemaPromise=null;
+async function ensureRuntimeSchema(){
+  if(!runtimeSchemaPromise){
+    runtimeSchemaPromise=withSchemaAdvisoryLock(()=>_ensureRuntimeSchema()).catch(err=>{
+      runtimeSchemaPromise=null;
+      throw err;
+    });
+  }
+  return runtimeSchemaPromise;
+}
+
 // v3.6.27: Bí Cảnh schema self-healing guard.
 // Một số Render databases được tạo từ các phiên bản rất cũ và có thể thiếu
 // cột dù migration lúc khởi động đã chạy trước đó. Các endpoint Bí Cảnh gọi
 // guard này để tự phục hồi ngay trước khi truy vấn dữ liệu.
-async function ensureBicanhSchema() {
+async function _ensureBicanhSchema() {
   await query(`
     CREATE TABLE IF NOT EXISTS secret_realms (
       id SERIAL PRIMARY KEY,
@@ -485,7 +516,20 @@ function progressFor(spirit) {
   return {rank:r.name,tier:s.tier,stage:s.stage,tierName:s.tierName,maxTier:9,percent,next:nextRealm?.name||null,remaining:nextRealm?Math.max(0,nextRealm.min-spirit):0};
 }
 
-async function ensureTienPhapSchema(){
+
+
+let bicanhSchemaPromise=null;
+async function ensureBicanhSchema(){
+  if(!bicanhSchemaPromise){
+    bicanhSchemaPromise=withSchemaAdvisoryLock(()=>_ensureBicanhSchema()).catch(err=>{
+      bicanhSchemaPromise=null;
+      throw err;
+    });
+  }
+  return bicanhSchemaPromise;
+}
+
+async function _ensureTienPhapSchema(){
   await query(`
     CREATE TABLE IF NOT EXISTS immortal_techniques (
       id SERIAL PRIMARY KEY,
@@ -511,6 +555,16 @@ async function ensureTienPhapSchema(){
     CREATE INDEX IF NOT EXISTS idx_immortal_techniques_realm ON immortal_techniques(realm_index,id);
   `);
 }
+let tienPhapSchemaPromise=null;
+async function ensureTienPhapSchema(){
+  if(!tienPhapSchemaPromise){
+    tienPhapSchemaPromise=withSchemaAdvisoryLock(()=>_ensureTienPhapSchema()).catch(err=>{
+      tienPhapSchemaPromise=null;
+      throw err;
+    });
+  }
+  return tienPhapSchemaPromise;
+}
 async function seedTienPhap(){
   const grades=['Hạ Tiên Pháp','Trung Tiên Pháp','Thượng Tiên Pháp'];
   for(let ri=IMMORTAL_REALM_START;ri<RANKS.length;ri++){
@@ -526,7 +580,7 @@ async function seedTienPhap(){
   }
 }
 
-async function initDb() {
+async function _initDbOnce() {
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -1275,6 +1329,39 @@ async function initDb() {
     await query(`UPDATE sect_quests SET reward_item_id=(SELECT id FROM treasure_items WHERE name=$2), reward_quantity=$3, reward_stones=0 WHERE name=$1`,[qname,itemName,qty]);
   }
 }
+
+
+// v3.6.52: PostgreSQL migration/seed lock + deadlock retry.
+// Render can briefly run overlapping instances during deploy. Without a
+// database advisory lock, two initDb() calls can concurrently ALTER/UPSERT
+// the same catalog tables and PostgreSQL may abort one with 40P01.
+async function initDb(){
+  const lockClient=await pool.connect();
+  try{
+    await lockClient.query('SELECT pg_advisory_lock(hashtext($1))',[SCHEMA_LOCK_KEY]);
+    schemaLockHeld = true;
+    let lastErr;
+    for(let attempt=1;attempt<=4;attempt++){
+      try{
+        await _initDbOnce();
+        return;
+      }catch(e){
+        lastErr=e;
+        const isDeadlock=String(e?.code||'')==='40P01' || /deadlock detected/i.test(String(e?.message||''));
+        if(!isDeadlock || attempt===4) throw e;
+        const waitMs=250*attempt;
+        console.warn(`Database deadlock khi khởi tạo DB, retry ${attempt}/3 sau ${waitMs}ms.`);
+        await new Promise(r=>setTimeout(r,waitMs));
+      }
+    }
+    throw lastErr;
+  }finally{
+    schemaLockHeld = false;
+    try{await lockClient.query('SELECT pg_advisory_unlock(hashtext($1))',[SCHEMA_LOCK_KEY]);}catch{}
+    lockClient.release();
+  }
+}
+
 
 async function ensureQuestCycle() {
   const cycle=Math.floor(Date.now()/300000); // 5 phút / chu kỳ
@@ -2479,7 +2566,7 @@ app.post('/api/linh-phap/buy',auth,async(req,res)=>{
 });
 
 // v3.6.34: self-healing schema for Trang Bị / Công Pháp.
-async function ensureEquipmentSchema(){
+async function _ensureEquipmentSchema(){
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
@@ -2524,6 +2611,18 @@ async function ensureEquipmentSchema(){
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS learned_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE user_techniques ADD COLUMN IF NOT EXISTS avatar TEXT;
   `);
+}
+
+
+let equipmentSchemaPromise=null;
+async function ensureEquipmentSchema(){
+  if(!equipmentSchemaPromise){
+    equipmentSchemaPromise=withSchemaAdvisoryLock(()=>_ensureEquipmentSchema()).catch(err=>{
+      equipmentSchemaPromise=null;
+      throw err;
+    });
+  }
+  return equipmentSchemaPromise;
 }
 
 // CÔNG PHÁP TRANG BỊ · đổi công pháp đang sử dụng
@@ -3587,6 +3686,7 @@ app.post('/api/disciples/gift',auth,async(req,res)=>{
 
 // ─────────────────────────────────────────────────────────────────────────────
 async function ensureMailboxSchema(){
+  return withSchemaAdvisoryLock(async()=>{
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS mailbox_enabled BOOLEAN NOT NULL DEFAULT TRUE;
     CREATE TABLE IF NOT EXISTS mailbox_notifications (
@@ -3607,6 +3707,7 @@ async function ensureMailboxSchema(){
     ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     CREATE INDEX IF NOT EXISTS idx_mailbox_user_unread ON mailbox_notifications(user_id,read_at,id DESC);
   `);
+  });
 }
 
 app.get('/api/mailbox',auth,async(req,res)=>{
@@ -3627,6 +3728,7 @@ app.post('/api/mailbox/read',auth,async(req,res)=>{try{const id=Number(req.body?
 // Khiêu chiến cần schema đầy đủ ngay cả khi Render đang dùng DB cũ.
 // Guard này chạy trước các API lôi đài để tránh SELECT vào cột chưa tồn tại.
 async function ensureChallengeSchema(){
+  return withSchemaAdvisoryLock(async()=>{
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
@@ -3680,6 +3782,7 @@ async function ensureChallengeSchema(){
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action TEXT NOT NULL DEFAULT '';
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
   `);
+  });
 }
 
 app.get('/api/challenges',auth,async(req,res)=>{

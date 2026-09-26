@@ -1,0 +1,25 @@
+HÀN THIÊN MÔN v3.6.52 — FIX DEADLOCK POSTGRESQL / RENDER
+
+Đã sửa lỗi Render "Exited with status 1" do PostgreSQL báo:
+  deadlock detected
+  routine: DeadLockReport
+
+Nguyên nhân chính:
+- Quá trình khởi tạo DB/seed có thể chạy đồng thời khi Render overlap instance lúc deploy.
+- Một số endpoint cũ gọi ALTER TABLE qua schema guard mỗi request, khiến nhiều request đồng thời tranh chấp DDL.
+
+Bản sửa:
+1. Thêm PostgreSQL advisory lock cho toàn bộ quá trình init DB, chỉ cho phép một tiến trình migration/seed chạy tại một thời điểm.
+2. Nếu PostgreSQL trả mã deadlock 40P01 trong lúc khởi tạo, server tự retry tối đa 4 lần với backoff ngắn.
+3. Cache các schema guard Runtime / Equipment / Bí Cảnh / Tiên Pháp thành Promise dùng chung, tránh chạy ALTER TABLE đồng thời từ nhiều request.
+4. Nếu schema guard lỗi, cache được reset để có thể tự thử lại lần sau.
+5. Không thay đổi dữ liệu game, giao diện, tài khoản, chức năng chiến đấu, trang bị hoặc hệ thống avatar.
+
+Kiểm tra:
+- node --check server.js: PASS
+- node --check script.js: PASS
+
+Deploy Render:
+- Upload/deploy bản ZIP mới.
+- Giữ nguyên DATABASE_URL hiện tại.
+- Sau deploy, nếu service còn restart loop, mở Application Logs; bản này đã có retry deadlock và log cảnh báo retry để dễ kiểm tra.
