@@ -797,3 +797,38 @@ loadData();loadSect();checkSession();
 setInterval(()=>{if(getToken()){sendPresenceHeartbeat();loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},5000);
 setInterval(()=>{if(getToken())sendPresenceHeartbeat();},30000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
+
+/* v3.6.47 · Điều hướng tập trung theo từng chức năng */
+(function setupFocusNavigation(){
+ const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
+ const labels={
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','dan-cac':'⚗️ Đan Các','beast-house':'🐉 Thú Đường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
+ };
+ const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
+ function exitFocus(push=true){
+   document.body.classList.remove('focus-mode','focus-lock');document.documentElement.classList.remove('focus-lock');
+   sections().forEach(s=>s.classList.remove('focus-active'));
+   if(push && location.hash && location.hash!=='#home') history.pushState('',document.title,location.pathname+location.search);
+   window.scrollTo({top:0,behavior:'smooth'});
+ }
+ function enterFocus(id,push=true){
+   const target=document.getElementById(id); if(!target)return;
+   document.body.classList.add('focus-mode','focus-lock');document.documentElement.classList.add('focus-lock');
+   sections().forEach(s=>s.classList.toggle('focus-active',s===target));
+   if(focusLabel)focusLabel.textContent=labels[id]||target.querySelector('h2')?.textContent||'Chế độ tập trung';
+   if(push)history.pushState(null,'','#'+id);
+   requestAnimationFrame(()=>{target.scrollTop=0;target.querySelector('.section-head')?.scrollIntoView({block:'start'});});
+   $('#nav')?.classList.remove('open');
+ }
+ function handleAnchor(a){
+   const href=a.getAttribute('href')||''; if(!href.startsWith('#'))return;
+   const id=href.slice(1); if(id==='home'||!labels[id]){if(id==='home')exitFocus(false);return;}
+   const target=document.getElementById(id);if(!target)return;
+   a.addEventListener('click',e=>{e.preventDefault();enterFocus(id,true);});
+ }
+ document.querySelectorAll('a[href^="#"]').forEach(handleAnchor);
+ focusExit?.addEventListener('click',()=>exitFocus(true));
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.body.classList.contains('focus-mode'))exitFocus(true);});
+ window.addEventListener('popstate',()=>{const id=location.hash.slice(1);if(id&&labels[id])enterFocus(id,false);else exitFocus(false);});
+ const initial=location.hash.slice(1);if(initial&&labels[initial])setTimeout(()=>enterFocus(initial,false),0);
+})();

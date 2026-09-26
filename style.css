@@ -300,3 +300,59 @@ body.dark .tan-nhan-panel{background:rgba(24,37,34,.82)}
 @media(max-width:620px){.tan-nhan-section{padding:38px 5%}.tan-nhan-panel{padding:20px}.tan-nhan-actions .btn{width:100%}.tan-nhan-roadmap{grid-template-columns:1fr}.tutorial-card{padding:23px 18px 18px}.tutorial-progress{padding-right:25px}.tutorial-actions{flex-direction:column-reverse}.tutorial-actions .btn{width:100%}.tutorial-close{top:20px}.tutorial-seal{margin-top:22px}}
 @media(max-width:1000px){.topbar nav.open{max-height:calc(100vh - 78px);overflow:auto;display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:14px 6%}.topbar nav.open a{padding:9px 10px;border:1px solid var(--line);background:var(--surface);border-radius:7px;font-size:.78rem}.topbar nav.open a:first-child{border-color:var(--gold);color:var(--jade)}}
 @media(max-width:620px){.topbar nav.open{grid-template-columns:1fr;max-height:calc(100vh - 72px);padding:12px 5%}.topbar{height:72px}.topbar nav.open{top:72px}.top-actions{gap:5px}.user-badge{display:none}.seal-btn{height:38px}.icon-btn{height:38px;width:38px}}
+
+/* v3.6.47 · Tiên hiệp cảnh nền + chế độ tập trung từng chức năng */
+.hero{
+  min-height:clamp(600px,82vh,860px);
+  padding:92px 6%;
+  background-image:linear-gradient(90deg,rgba(248,245,234,.94) 0%,rgba(248,245,234,.78) 42%,rgba(248,245,234,.28) 100%),url('tien-hiep-bg.jpg');
+  background-position:center;background-size:cover;
+  border-bottom:1px solid var(--line);
+}
+body.dark .hero{background-image:linear-gradient(90deg,rgba(10,21,19,.94) 0%,rgba(16,28,25,.78) 44%,rgba(16,28,25,.3) 100%),url('tien-hiep-bg.jpg')}
+.hero:before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.08),transparent 35%,rgba(20,35,30,.1));pointer-events:none}
+.hero-content{max-width:760px;padding:30px 34px;background:rgba(248,245,234,.62);border:1px solid rgba(169,130,58,.32);box-shadow:0 20px 55px rgba(36,47,41,.12);backdrop-filter:blur(5px)}
+body.dark .hero-content{background:rgba(16,29,26,.68)}
+.hero-card{background:rgba(255,253,245,.7);backdrop-filter:blur(5px)}
+body.dark .hero-card{background:rgba(25,43,38,.72)}
+.section{padding:62px 6%}
+.section-head{margin-bottom:24px}
+.section-head h2{letter-spacing:.01em}
+.section-lead{max-width:850px}
+.section>.section-head,.section>div[id$="Area"],.section>.members-grid,.section>.gallery-grid,.section>.timeline,.section>.bicanh-launcher,.section>.bicanh-selector{max-width:1240px;margin-left:auto;margin-right:auto}
+.members-grid{gap:14px}.member-card:hover{transform:translateY(-3px)}
+.join-section{margin:18px auto 70px;max-width:1240px}
+
+/* Focus mode: bấm một chức năng -> chỉ vùng đó được cuộn trên iPhone/desktop */
+html.focus-lock,body.focus-lock{overflow:hidden;height:100%;overscroll-behavior:none}
+body.focus-mode .hero,body.focus-mode .section:not(.focus-active),body.focus-mode .join-section,body.focus-mode footer{display:none!important}
+body.focus-mode .focus-active{
+  display:block!important;position:fixed;z-index:25;left:0;right:0;top:78px;bottom:0;height:calc(100vh - 78px);
+  overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;
+  padding:38px max(5vw,20px) 90px;background:var(--bg);scroll-behavior:smooth;
+}
+body.focus-mode .focus-active:before{content:'';position:absolute;inset:0 0 auto 0;height:260px;background:linear-gradient(180deg,rgba(208,221,211,.5),transparent);pointer-events:none;z-index:-1}
+body.focus-mode .focus-active>.section-head,body.focus-mode .focus-active>div[id$="Area"],body.focus-mode .focus-active>.members-grid,body.focus-mode .focus-active>.gallery-grid,body.focus-mode .focus-active>.timeline,body.focus-mode .focus-active>.bicanh-launcher,body.focus-mode .focus-active>.bicanh-selector{max-width:1180px;margin-left:auto;margin-right:auto}
+.focus-bar{position:fixed;top:88px;right:18px;z-index:60;display:none;align-items:center;gap:8px;padding:7px 9px 7px 12px;border:1px solid var(--gold);background:color-mix(in srgb,var(--surface) 92%,transparent);box-shadow:0 10px 28px rgba(0,0,0,.16);backdrop-filter:blur(10px);border-radius:999px}
+body.focus-mode .focus-bar{display:flex}.focus-bar-label{max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.7rem;font-weight:800;color:var(--jade)}
+.focus-exit{border:1px solid var(--line);background:var(--paper);color:var(--text);border-radius:999px;padding:7px 11px;font-weight:800;cursor:pointer}
+.focus-active .section-head{padding-right:210px}
+.focus-active .section-head:after{content:'Chế độ tập trung · chỉ cuộn trong chức năng này';display:block;position:absolute;right:0;bottom:0;color:var(--muted);font-size:.62rem;font-weight:700;letter-spacing:.03em}
+.section-head{position:relative}
+@media(max-width:1000px){
+  .topbar nav{display:none}.topbar nav.open{display:grid}
+  body.focus-mode .focus-active{top:72px;height:calc(100vh - 72px);padding-top:28px}
+  .focus-bar{top:80px;right:10px}
+}
+@media(max-width:700px){
+  .hero{min-height:720px;padding:55px 5%;background-position:center top}
+  .hero-content{padding:22px 18px;background:rgba(248,245,234,.72)}
+  .hero h1{font-size:clamp(3.3rem,18vw,5.5rem)}
+  .hero-actions{display:grid;grid-template-columns:1fr}.stats{gap:22px;flex-wrap:wrap}
+  .section{padding:42px 5%}.section-head{align-items:flex-start;flex-direction:column;gap:12px}.section-head h2{font-size:clamp(1.8rem,9vw,2.5rem)}
+  .section-head .live-pill{align-self:flex-start}
+  body.focus-mode .focus-active{padding:25px 5% 80px}
+  .focus-bar{left:10px;right:10px;justify-content:space-between}.focus-bar-label{max-width:calc(100vw - 135px)}
+  .focus-active .section-head{padding-right:0;padding-top:32px}.focus-active .section-head:after{top:0;bottom:auto;right:auto;left:0;font-size:.58rem}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn,.member-card{transition:none}}
