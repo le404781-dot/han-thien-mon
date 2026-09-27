@@ -868,6 +868,19 @@ async function initDb() {
       ('Thiên Tiên Túy','Cực Phẩm',800,'Túy phẩm cao cấp, chỉ dành cho những buổi tửu yến trọng thể.',1200,2200)
     ON CONFLICT(name) DO UPDATE SET grade=EXCLUDED.grade,price=EXCLUDED.price,description=EXCLUDED.description,buff_min=EXCLUDED.buff_min,buff_max=EXCLUDED.buff_max;
 
+    CREATE TABLE IF NOT EXISTS black_market_sales (
+      id BIGSERIAL PRIMARY KEY,
+      seller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      asset_type TEXT NOT NULL CHECK(asset_type IN ('root','beast')),
+      asset_id INTEGER NOT NULL,
+      asset_name TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
+      unit_price INTEGER NOT NULL CHECK(unit_price > 0),
+      total_price INTEGER NOT NULL CHECK(total_price > 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_black_market_sales_seller ON black_market_sales(seller_id,created_at DESC);
+
     CREATE TABLE IF NOT EXISTS profiles (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       title TEXT NOT NULL DEFAULT 'Tân đệ tử',
@@ -1512,6 +1525,15 @@ async function initDb() {
     'Bạch Vũ Ưng':[240,'Bạch Vũ: +8% né tránh.'],'Kim Giáp Tê':[250,'Kim Giáp: +9% phòng thủ.'],'Thanh Mộc Linh Lộc':[330,'Sinh Cơ: +8% hồi phục.'],'Phong Linh Hồ':[390,'Phong Ảnh: +12% thân pháp.'],'Huyền Băng Ly':[540,'Hàn Vực: +10% khống chế.'],'Xích Kim Viên':[650,'Liệt Kích: +12% sát thương.'],'U Minh Lang':[780,'Truy Hồn: +14% sát thương.'],'Vân Hải Kình':[1100,'Vân Hải: +18% công lực.'],'Hỏa Vân Tước':[280,'Phần Tức: +8% công lực.'],'Thạch Linh Tượng':[320,'Trấn Sơn: +12% phòng thủ.'],'Linh Sa Xà':[370,'Ẩn Tức: +10% né tránh.'],'Tử Vân Điệp':[430,'Huyễn Điệp: +12% thân pháp.'],'Ngân Nguyệt Thỏ':[580,'Tịnh Tâm: +10% hồi phục.'],'Cổ Mộc Long Xà':[720,'Long Huyết: +14% công lực.'],'Thiên Lôi Điểu':[920,'Lôi Minh: +18% sát thương.'],'Hàn Thiên Phượng':[1250,'Hàn Thiên: +18% công lực.'],'Thái Cổ Kim Long':[1900,'Long Uy: +25% công lực.'],'Cửu Sắc Linh Điểu':[2000,'Cửu Sắc: +22% toàn thuộc tính.'],'Tịnh Thế Bạch Liên Thú':[2300,'Tịnh Thế: +25% hiệu quả tu luyện.'],'Hư Không Miêu':[2100,'Vô Ảnh: +25% thân pháp.'],'Tinh Hà Kỳ Lân':[3000,'Tinh Hà: +30% công lực.'],'Cửu U Minh Phượng':[3300,'Minh Hỏa: +32% sát thương.'],'Đại Hoang Cổ Viên':[3100,'Cự Lực: +28% công lực.'],'Thiên Đạo Huyền Quy':[3600,'Huyền Giáp: +30% phòng thủ.'],'Vạn Kiếm Linh Hạc':[3800,'Hạc Vũ: +30% sát thương.'],'Hỗn Độn Ma Ngưu':[4300,'Ma Ngưu: +35% công lực.'],'Thái Sơ Đạo Hồ':[4700,'Đạo Hồ: +35% hiệu quả tu luyện.'],'Vạn Cổ Thần Long':[6000,'Thần Long: +45% công lực.']
   };
   for (const [name,[power,ability]] of Object.entries(extraBeastPowers)) await query('UPDATE spirit_beasts_catalog SET power_bonus=$2,ability=$3 WHERE name=$1',[name,power,ability]);
+  // Sửa các bản ghi có giá 0 về giá trị kinh tế thực tế dựa trên sức mạnh/hiệu quả.
+  await query(`UPDATE treasure_items SET price=GREATEST(50, ROUND(
+      COALESCE(spirit_gain,0)*4 + COALESCE(power_bonus,0)*3 +
+      CASE WHEN category ILIKE '%Đan%' THEN 120 ELSE 80 END
+    )) WHERE price<=0`);
+  await query(`UPDATE cultivation_techniques SET price_stones=GREATEST(100, ROUND((COALESCE(power_bonus,0)*8 + COALESCE(training_bonus_percent,0)*120))) WHERE price_stones<=0`);
+  await query(`UPDATE mansions SET price_stones=GREATEST(1000, ROUND(COALESCE(spirit_per_hour,0)*120)) WHERE price_stones<=0`);
+  await query(`UPDATE spirit_roots_catalog SET price_stones=GREATEST(250, ROUND(COALESCE(power_bonus,0)*12 + 180)) WHERE price_stones<=0`);
+  await query(`UPDATE spirit_beasts_catalog SET price_stones=GREATEST(500, ROUND((COALESCE(attack,0)+COALESCE(defense,0)+COALESCE(speed,0)+COALESCE(spirit,0))*18 + COALESCE(power_bonus,0)*10)) WHERE price_stones<=0`);
 
   const beastPowers = {
     'Hàn Ngọc Hồ':[160,'Cảm Hàn: +5% hồi phục linh lực khi tu luyện.'],
@@ -2893,6 +2915,46 @@ app.post('/api/dan-cac/sell',auth,async(req,res)=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // PHƯỜNG THỊ 1.0 · mua bán và trao đổi vật phẩm giữa các môn nhân
 // ─────────────────────────────────────────────────────────────────────────────
+
+app.get('/api/black-market',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id;
+    const [roots,beasts]=await Promise.all([
+      query(`SELECT o.root_id AS id,o.quantity,c.name,c.rarity,c.description,c.support,c.price_stones,c.power_bonus,c.ability
+             FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.price_stones DESC,c.id`,[uid]),
+      query(`SELECT o.beast_id AS id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.price_stones,c.power_bonus,c.ability
+             FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.price_stones DESC,c.id`,[uid])
+    ]);
+    const calc=(price,bonus)=>Math.max(50,Math.floor(Number(price||0)*0.60 + Number(bonus||0)*2));
+    res.json({roots:roots.rows.map(x=>({...x,sell_price:calc(x.price_stones,x.power_bonus)})),beasts:beasts.rows.map(x=>({...x,sell_price:calc(x.price_stones,x.power_bonus)}))});
+  }catch(e){console.error('black market:',e);res.status(500).json({error:'Không thể mở Chợ Đen.'});}
+});
+
+app.post('/api/black-market/sell',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,type=req.body?.type==='beast'?'beast':'root',id=Number(req.body?.id),qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));
+    if(!id)return res.status(400).json({error:'Tài sản không hợp lệ.'});
+    await client.query('BEGIN');
+    let row;
+    if(type==='root'){
+      row=(await client.query(`SELECT o.root_id AS id,o.quantity,c.name,c.price_stones,c.power_bonus FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.root_id=$2 FOR UPDATE`,[uid,id])).rows[0];
+    }else{
+      row=(await client.query(`SELECT o.beast_id AS id,o.quantity,c.name,c.price_stones,c.power_bonus FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 FOR UPDATE`,[uid,id])).rows[0];
+    }
+    if(!row||Number(row.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng trong kho không đủ.'});}
+    const unit=Math.max(50,Math.floor(Number(row.price_stones||0)*0.60 + Number(row.power_bonus||0)*2));
+    const total=unit*qty;
+    if(type==='root') await client.query(`UPDATE owned_spirit_roots SET quantity=quantity-$3 WHERE user_id=$1 AND root_id=$2`,[uid,id,qty]);
+    else await client.query(`UPDATE owned_spirit_beasts SET quantity=quantity-$3 WHERE user_id=$1 AND beast_id=$2`,[uid,id,qty]);
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[uid,total]);
+    await client.query(`INSERT INTO black_market_sales(seller_id,asset_type,asset_id,asset_name,quantity,unit_price,total_price) VALUES($1,$2,$3,$4,$5,$6,$7)`,[uid,type,id,row.name,qty,unit,total]);
+    await client.query('COMMIT');
+    res.json({ok:true,item:row.name,quantity:qty,unitPrice:unit,totalPrice:total,message:`Chợ Đen thu mua ${row.name} ×${qty}, nhận ${total.toLocaleString('vi-VN')} linh thạch.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('black market sell:',e);res.status(500).json({error:'Không thể bán cho Chợ Đen.'});}
+  finally{client.release();}
+});
+
 app.get('/api/market',auth,async(req,res)=>{
   try{
     const listings=(await query(`SELECT ml.id,ml.seller_id,ml.item_id,ml.quantity,ml.price_stones,ml.created_at,
@@ -5113,6 +5175,8 @@ ensureTienPhapSchema=__memoizeSchema(ensureTienPhapSchema,'tien-phap');
 ensureTienBanSchema=__memoizeSchema(ensureTienBanSchema,'tien-ban');
 ensureBeastArenaSchema=__memoizeSchema(ensureBeastArenaSchema,'beast-arena');
 ensureTavernSchema=__memoizeSchema(ensureTavernSchema,'tavern');
+// Chợ Đen dùng bảng đã được tạo trong initDb; route vẫn an toàn khi gọi sau deploy.
+
 ensureMailboxSchema=__memoizeSchema(ensureMailboxSchema,'mailbox');
 ensureChallengeSchema=__memoizeSchema(ensureChallengeSchema,'challenge');
 ensureEquipmentSchema=__memoizeSchema(ensureEquipmentSchema,'equipment');

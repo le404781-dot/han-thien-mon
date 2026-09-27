@@ -334,7 +334,7 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDanDuong();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDanDuong();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadBlackMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
  catch(e){if(e?.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}else{console.warn('Phiên vẫn được giữ, lỗi tải dữ liệu tạm thời:',e);}}
 }
 function renderGuestAreas(){
@@ -611,6 +611,17 @@ async function loadTuDi(){
     catch(e){$('#storageMsg').textContent='❌ '+e.message;b.disabled=false;}
   });
  }catch(e){const area=$('#sumeruArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
+}
+
+async function loadBlackMarket(){
+ const area=$('#blackMarketArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/black-market',{headers:authHeaders()});
+  const roots=d.roots||[], beasts=d.beasts||[];
+  const card=(x,type)=>`<article class="market-card black-market-card"><div><span class="eyebrow">${type==='root'?'🌿 LINH CĂN':'🐉 LINH THÚ'} · ${esc(x.rarity||x.beast_realm||'')}</span><h3>${esc(x.name)} ×${Number(x.quantity||0)}</h3><p>${esc(x.description||x.support||x.ability||'')}</p><small>💎 Giá thu mua: <b>${Number(x.sell_price||0).toLocaleString('vi-VN')}</b> linh thạch / 1</small></div><div class="market-black-actions"><input class="black-qty" data-id="${x.id}" data-type="${type}" type="number" min="1" max="${Number(x.quantity||1)}" value="1"><button class="btn small primary black-sell" data-id="${x.id}" data-type="${type}">Bán cho Chợ Đen</button></div></article>`;
+  area.innerHTML=`<div class="stone-exchange"><div><span class="eyebrow">🕶️ GIAO DỊCH KÍN</span><h3>Chợ Đen thu mua trực tiếp</h3><p>Chỉ bán Linh Căn và Linh Thú đang sở hữu. Giá thu mua được tính theo giá trị catalog và chiến lực/hiệu ứng của tài sản.</p></div><span class="tag">💎 TRẢ LINH THẠCH NGAY</span></div><div class="market-section"><div class="section-head"><div><span class="eyebrow">🌿 LINH CĂN</span><h3>Danh sách có thể bán</h3></div></div><div class="market-listings">${roots.length?roots.map(x=>card(x,'root')).join(''):'<div class="empty-state compact"><p>Không có Linh Căn để bán.</p></div>'}</div></div><div class="market-section"><div class="section-head"><div><span class="eyebrow">🐉 LINH THÚ</span><h3>Danh sách có thể bán</h3></div></div><div class="market-listings">${beasts.length?beasts.map(x=>card(x,'beast')).join(''):'<div class="empty-state compact"><p>Không có Linh Thú để bán.</p></div>'}</div></div><p id="blackMarketMsg" class="train-msg"></p>`;
+  document.querySelectorAll('.black-sell').forEach(b=>b.onclick=async()=>{b.disabled=true;const q=document.querySelector(`.black-qty[data-id="${b.dataset.id}"][data-type="${b.dataset.type}"]`);try{const x=await api('/api/black-market/sell',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(b.dataset.id),type:b.dataset.type,quantity:Number(q?.value||1)})});$('#blackMarketMsg').textContent=`🕶️ ${x.message}`;await Promise.all([loadProfile(),loadBlackMarket(),loadTuDi(),loadEquipment()]);}catch(e){$('#blackMarketMsg').textContent='❌ '+e.message;b.disabled=false;}});
+ }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
 async function loadMarket(){
@@ -1184,7 +1195,7 @@ function renderAuth(mode){
  $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();
 // loadProfile đã khởi động các module hồ sơ/công pháp/động phủ/kho chính.
 // Chỉ tải các module chưa được khởi động ở đây và chạy song song để giảm thời gian đăng nhập.
-await Promise.all([loadChat(),loadMailbox(),loadSectPosts(),loadLeaderboard(),loadDanDuong(),loadDuocDuong(),loadBeastFace(),loadDuongThu(),loadBeastArena(),loadTuDi(),loadMarket(),loadData(),loadArenaLive()]);
+await Promise.all([loadChat(),loadMailbox(),loadSectPosts(),loadLeaderboard(),loadDanDuong(),loadDuocDuong(),loadBeastFace(),loadDuongThu(),loadBeastArena(),loadTuDi(),loadMarket(),loadBlackMarket(),loadData(),loadArenaLive()]);
 maybeShowTutorial();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }

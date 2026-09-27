@@ -1,0 +1,7 @@
+HÀN THIÊN MÔN v3.6.73
+
+1. Sửa các bản ghi giá 0 linh thạch về giá trị kinh tế dương dựa trên linh lực/chiến lực/hiệu quả.
+2. Giữ Tửu Lâu và Đan Đường ở khu chức năng riêng, yêu cầu đăng nhập để tải dữ liệu và thao tác. Túy phẩm tiếp tục có buff linh lực ngẫu nhiên theo phẩm cấp.
+3. Thêm Chợ Đen: môn nhân có thể bán Linh Căn và Linh Thú đang sở hữu, nhận linh thạch trực tiếp.
+4. Giá thu mua Chợ Đen = 60% giá catalog + hệ số chiến lực/hiệu ứng, tối thiểu 50 linh thạch.
+5. Thêm menu 🕶️ Chợ Đen và giao diện riêng.
