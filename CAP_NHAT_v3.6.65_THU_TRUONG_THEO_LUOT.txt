@@ -1,0 +1,11 @@
+HÀN THIÊN MÔN v3.6.65 · FIX THÚ TRƯỜNG
+
+1. Sửa lỗi “Thách Chiến Thất Bại” do bộ mô phỏng tham chiếu biến kỹ năng không tồn tại.
+2. Thú Trường Online chuyển sang chiến đấu thực theo lượt, lưu trạng thái ở PostgreSQL.
+3. Mỗi lượt môn nhân tự chọn 1 trong 3 kỹ năng; máy chủ kiểm tra đúng người/đúng lượt trước khi gây sát thương.
+4. Lưu HP hiện tại/tối đa, lượt hiện tại, kỹ năng cuối, nhật ký chiến đấu và người được ra chiêu tiếp theo.
+5. Khi trận kết thúc mới phát thưởng; không mô phỏng toàn bộ trận ngay lúc đồng ý.
+6. Thêm hoạt ảnh lượt đánh, hiển thị kỹ năng vừa dùng, trạng thái “tới lượt bạn/chờ đối phương”.
+7. Thú Trường tự đồng bộ trận đang diễn ra khi môn nhân mở lại trang hoặc chuyển thiết bị.
+8. Offline/Thần Thú tiếp tục sử dụng mô phỏng theo chuỗi kỹ năng; sửa truyền skillQueue để không lỗi.
+9. Giữ cơ chế khắc hệ, bạo kích, chiến lực và phần thưởng hiện có.
