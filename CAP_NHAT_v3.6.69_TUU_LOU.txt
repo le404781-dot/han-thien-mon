@@ -1,0 +1,8 @@
+Hàn Thiên Môn v3.6.69 – Tửu Lâu
+
+- Thay nền Tửu Lâu bằng ảnh mới do người dùng cung cấp.
+- Giới hạn màu chữ Tửu Lâu ở xám khói và đỏ.
+- Tửu Lâu dùng focus-lock chung với Thú Diện: chỉ vùng chức năng được cuộn, tối ưu iPhone.
+- Thêm hiệu ứng ambient/mote/glow bên ngoài giao diện.
+- Thêm thanh thông báo nhận linh thạch/vật phẩm, hiển thị 10 giây; kiểm tra trạng thái mỗi 2 giây.
+- Nâng thưởng đột phá đủ 17 mốc từ Trúc Cơ đến Tiên Đế, đồng thời backfill dữ liệu cũ theo cảnh giới hiện tại và chống nhận lặp.
