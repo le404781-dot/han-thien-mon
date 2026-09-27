@@ -1051,12 +1051,12 @@ async function loadTavern(){
    </div>
    <div class="tavern-room-strip"><span>酒樓 · TỬU LÂU</span><span>TRUNG TÂM GIAO DỊCH TÚY PHẨM</span><span>PHÒNG YẾN · QUẦY RƯỢU · HÒM THƯ</span></div>
    <div class="tavern-rules">
-    <span>👑 Chỉ có <b>1 Lâu Chủ</b></span><span>🤖 NPC mua sau <b>5 phút</b> · Lâu Chủ nhận <b>31%</b></span><span>☯ Môn nhân mua · Lâu Chủ nhận <b>80%</b></span><span>📦 Hấp thu tại <b>Tửu Lâu</b> hoặc <b>Tu Di Giới</b></span>
+    <span>👑 Chỉ có <b>1 Lâu Chủ</b></span><span>🤖 NPC mua sau <b>5 phút</b> · nhận <b>80%</b></span><span>☯ Môn nhân mua · nhận <b>90%</b></span><span>📦 Hấp thu tại <b>Tửu Lâu</b> hoặc <b>Tu Di Giới</b></span>
    </div>
    <div class="tavern-grid">
     <div class="tavern-panel"><div class="tavern-panel-head"><h3>🍶 Túy Phẩm</h3><small>Phẩm cấp từ thấp đến cao</small></div>
       <div class="tavern-products">${products.map(p=>`<article class="tavern-product tavern-product-${Number(p.id)}">
-        <div class="tavern-bottle"><span class="tavern-bottle-icon">🍶</span><div><span class="tavern-grade">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><b>${Number(p.price).toLocaleString('vi-VN')} linh thạch</b><small class="tavern-benefit">✨ +${Number(p.spirit_gain||0).toLocaleString('vi-VN')} linh lực · 🎲 Buff ngẫu nhiên +${Number(p.buff_min_percent||0)}–${Number(p.buff_max_percent||0)}% · 60 phút</small></div></div>
+        <div class="tavern-bottle"><span class="tavern-bottle-icon">🍶</span><div><span class="tavern-grade">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><b>${Number(p.price).toLocaleString('vi-VN')} linh thạch</b></div></div>
         ${role?`<button class="btn small ${p.listed?'ghost':'primary'} tavern-list-btn" data-product="${p.id}" ${p.listed?'disabled':''}>${p.listed?'✓ Đang bán':'Mở bán'}</button>`:''}
       </article>`).join('')}</div>
     </div>
@@ -1081,9 +1081,6 @@ async function loadTavern(){
    </div>
    <div class="tavern-panel"><div class="tavern-panel-head"><h3>🎒 Túy Phẩm của ta</h3><small>Kho hấp thu tại Tửu Lâu</small></div>
     <div class="tavern-inventory">${inv.map(x=>`<span>🍶 ${esc(x.name)} <b>×${x.quantity}</b></span>`).join('')||'<small>Chưa có túy phẩm.</small>'}</div>
-   </div>
-   <div class="tavern-panel tavern-buff-panel"><div class="tavern-panel-head"><h3>✨ Túy Buff đang hiệu lực</h3><small>Buff được chọn ngẫu nhiên khi môn nhân mua túy phẩm · thời hạn 60 phút</small></div>
-    <div class="tavern-active-buff">${currentProfile?.tavern_buff_until && new Date(currentProfile.tavern_buff_until)>new Date() && Number(currentProfile.tavern_buff_percent)>0?`<b>🍷 ${esc(currentProfile.tavern_buff_name||'Túy Buff')}</b><span>+${Number(currentProfile.tavern_buff_percent)}% · ${esc(currentProfile.tavern_buff_text||'')}</span><small>Hết hạn: ${new Date(currentProfile.tavern_buff_until).toLocaleString('vi-VN')}</small>`:'<span>Chưa có túy buff đang hiệu lực.</span>'}</div>
    </div>`;
   $('#tavernApplyBtn')?.addEventListener('click',async()=>{});
   document.querySelectorAll('.tavern-list-btn').forEach(btn=>btn.addEventListener('click',async()=>{
@@ -1106,7 +1103,7 @@ async function loadTavern(){
   document.querySelectorAll('.tavern-invite-accept').forEach(btn=>btn.addEventListener('click',async()=>{
     const id=Number(btn.dataset.id),item=btn.closest('.tavern-inbox-item'),dest=item?.querySelector(`input[name="tavernDest${id}"]:checked`)?.value||'tavern';
     const msg=item?.querySelector('.mail-action-msg');btn.disabled=true;
-    try{const r=await api('/api/tavern/invite/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:id,action:'accept',destination:dest})});if(msg)msg.textContent='✓ '+r.message;if(currentProfile){currentProfile.spirit_power=Number(currentProfile.spirit_power||0)+Number(r.spiritGain||0);if(r.buff){currentProfile.tavern_buff_type=r.buff.type;currentProfile.tavern_buff_name=r.buff.name;currentProfile.tavern_buff_percent=r.buff.percent;currentProfile.tavern_buff_text=r.buff.text;currentProfile.tavern_buff_until=r.buff.until;}}await loadTavern();await loadProfile();}catch(e){if(msg)msg.textContent='❌ '+e.message;btn.disabled=false;}
+    try{const r=await api('/api/tavern/invite/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:id,action:'accept',destination:dest})});if(msg)msg.textContent='✓ '+r.message;await loadTavern();await loadProfile();}catch(e){if(msg)msg.textContent='❌ '+e.message;btn.disabled=false;}
   }));
   document.querySelectorAll('.tavern-invite-reject').forEach(btn=>btn.addEventListener('click',async()=>{
     const id=Number(btn.dataset.id),item=btn.closest('.tavern-inbox-item'),msg=item?.querySelector('.mail-action-msg');btn.disabled=true;

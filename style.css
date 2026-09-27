@@ -924,21 +924,3 @@ main>.section{content-visibility:auto;contain-intrinsic-size:720px}
 .reward-toast-time{font-size:.62rem;color:#b8b8b8;opacity:.6;align-self:start;}
 @keyframes rewardToastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 @media(max-width:600px){.reward-toast-host{top:76px}.reward-toast{font-size:.78rem;grid-template-columns:32px 1fr auto}.reward-toast-mark{width:30px;height:30px}}
-
-/* v3.6.73 · Tửu Lâu giao dịch + túy buff + khung giới hạn */
-.tavern-section{
-  border:2px solid rgba(201,74,74,.38);
-  outline:1px solid rgba(184,184,184,.18);
-  outline-offset:-7px;
-  box-shadow:inset 0 0 0 5px rgba(8,8,10,.22),inset 0 0 0 7px rgba(184,184,184,.10),0 18px 55px rgba(0,0,0,.16);
-}
-.tavern-section>.section-head,.tavern-section>#tavernArea{position:relative;z-index:2;}
-.tavern-section>#tavernArea{margin:14px;border:1px solid rgba(184,184,184,.22);padding:14px;box-shadow:inset 0 0 0 2px rgba(201,74,74,.10);}
-.tavern-benefit{display:block;margin-top:6px;color:#c94a4a!important;font-size:.72rem;line-height:1.45;}
-.tavern-buff-panel{border-color:rgba(201,74,74,.32)!important;}
-.tavern-active-buff{display:grid;gap:5px;padding:14px;border:1px solid rgba(201,74,74,.3);background:linear-gradient(90deg,rgba(201,74,74,.09),rgba(184,184,184,.035));border-radius:10px;}
-.tavern-active-buff b{color:#c94a4a!important;font-size:1rem;}
-.tavern-active-buff span,.tavern-active-buff small{font-size:.76rem;}
-.tavern-product{position:relative;overflow:hidden;}
-.tavern-product::after{content:"";position:absolute;inset:5px;border:1px solid rgba(184,184,184,.06);pointer-events:none;border-radius:9px;}
-@media(max-width:700px){.tavern-section>#tavernArea{margin:8px;padding:8px;}.tavern-section{outline-offset:-5px;}}

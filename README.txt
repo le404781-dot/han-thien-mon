@@ -47,6 +47,3 @@ Bản v3.0: đổi linh lực nhận vật phẩm, Tu Di Giới, Hàn Thiên Ký
 - Thêm graceful shutdown cho SIGTERM/SIGINT và đóng PostgreSQL pool.
 - Keep-alive/header timeout được cấu hình để phù hợp web service Node.js.
 - Mục tiêu vận hành khoảng 50 người dùng đồng thời ở mức tải thông thường; không phải cam kết 50 người spam realtime/combat/chat liên tục.
-
-
-v3.6.73: Tửu Lâu mở lại quyền mời môn nhân mua túy phẩm; NPC 31%, môn nhân 80%; túy phẩm cộng linh lực theo phẩm cấp và buff ngẫu nhiên 60 phút; thêm khung giới hạn Tửu Lâu.

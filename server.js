@@ -855,12 +855,12 @@ async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY(user_id,product_id)
     );
-    INSERT INTO tavern_products(name,grade,price,description,spirit_gain,buff_min_percent,buff_max_percent) VALUES
-      ('Túy Trà Linh','Hạ Đẳng',50,'Linh trà ủ men nhẹ, vị thanh và giúp môn nhân giải lao.',60,2,4),
-      ('Bách Hoa Tửu','Trung Đẳng',120,'Túy phẩm bách hoa, hương thơm dịu, linh khí ổn định.',180,4,7),
-      ('Nguyệt Quang Nhưỡng','Thượng Đẳng',300,'Tửu nhưỡng ánh nguyệt, linh khí nồng đậm và quý hiếm.',420,7,11),
-      ('Thiên Tiên Túy','Cực Phẩm',800,'Túy phẩm cao cấp, chỉ dành cho những buổi tửu yến trọng thể.',900,11,16)
-    ON CONFLICT(name) DO UPDATE SET grade=EXCLUDED.grade,price=EXCLUDED.price,description=EXCLUDED.description,spirit_gain=EXCLUDED.spirit_gain,buff_min_percent=EXCLUDED.buff_min_percent,buff_max_percent=EXCLUDED.buff_max_percent;
+    INSERT INTO tavern_products(name,grade,price,description) VALUES
+      ('Túy Trà Linh','Hạ Đẳng',50,'Linh trà ủ men nhẹ, vị thanh và giúp môn nhân giải lao.'),
+      ('Bách Hoa Tửu','Trung Đẳng',120,'Túy phẩm bách hoa, hương thơm dịu, linh khí ổn định.'),
+      ('Nguyệt Quang Nhưỡng','Thượng Đẳng',300,'Tửu nhưỡng ánh nguyệt, linh khí nồng đậm và quý hiếm.'),
+      ('Thiên Tiên Túy','Cực Phẩm',800,'Túy phẩm cao cấp, chỉ dành cho những buổi tửu yến trọng thể.')
+    ON CONFLICT(name) DO NOTHING;
 
     CREATE TABLE IF NOT EXISTS profiles (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -899,11 +899,6 @@ async function initDb() {
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_date DATE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_earned INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS online_spirit_remainder_seconds INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tavern_buff_type TEXT NOT NULL DEFAULT '';
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tavern_buff_name TEXT NOT NULL DEFAULT '';
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tavern_buff_percent INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tavern_buff_until TIMESTAMPTZ;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tavern_buff_text TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS presence_status TEXT NOT NULL DEFAULT 'offline';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
@@ -1811,9 +1806,6 @@ async function ensureTavernSchema(){
       storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL
     );
     ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL;
-    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS spirit_gain INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS buff_min_percent INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS buff_max_percent INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS tavern_listings (
       id BIGSERIAL PRIMARY KEY,
       owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1919,7 +1911,7 @@ app.get('/api/tavern',auth,async(req,res)=>{
       FROM tavern_roles r JOIN users u ON u.id=r.user_id JOIN profiles p ON p.user_id=r.user_id
       WHERE r.active=true LIMIT 1`)).rows[0]||null;
     const role=master&&Number(master.user_id)===Number(uid)?master:null;
-    const products=(await query(`SELECT p.id,p.name,p.grade,p.price,p.description,p.storage_item_id,p.spirit_gain,p.buff_min_percent,p.buff_max_percent,
+    const products=(await query(`SELECT p.id,p.name,p.grade,p.price,p.description,p.storage_item_id,
       EXISTS(SELECT 1 FROM tavern_listings l WHERE l.owner_id=$1 AND l.product_id=p.id AND l.active) AS listed
       FROM tavern_products p ORDER BY p.price ASC,p.id ASC`,[uid])).rows;
     const listings=(await query(`SELECT l.id,l.owner_id,l.product_id,l.active,l.npc_next_buy_at,p.name,p.grade,p.price,p.description,u.display_name AS owner_name,u.username AS owner_username
@@ -2015,7 +2007,7 @@ app.post('/api/tavern/invite',auth,async(req,res)=>{
     if(!buyerId||buyerId===uid)return res.status(400).json({error:'Môn nhân được mời không hợp lệ.'});
     const role=(await client.query('SELECT active FROM tavern_roles WHERE user_id=$1',[uid])).rows[0];
     if(!role?.active)return res.status(403).json({error:'Chỉ Lâu Chủ mới được mời môn nhân mua rượu.'});
-    const p=(await client.query('SELECT id,name,grade,price,spirit_gain,buff_min_percent,buff_max_percent FROM tavern_products WHERE id=$1',[productId])).rows[0];
+    const p=(await client.query('SELECT id,name,grade,price FROM tavern_products WHERE id=$1',[productId])).rows[0];
     if(!p)return res.status(404).json({error:'Túy phẩm không tồn tại.'});
     const listing=(await client.query('SELECT id FROM tavern_listings WHERE owner_id=$1 AND product_id=$2 AND active=true',[uid,productId])).rows[0];
     if(!listing)return res.status(400).json({error:'Hãy mở bán túy phẩm trước khi mời môn nhân.'});
@@ -2036,7 +2028,7 @@ app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
     const destination=req.body?.destination==='sumeru'?'sumeru':'tavern';
     if(!id||!['accept','reject'].includes(action))return res.status(400).json({error:'Phản hồi lời mời không hợp lệ.'});
     await client.query('BEGIN');
-    const inv=(await client.query(`SELECT i.*,p.name,p.grade,p.price AS current_price,p.storage_item_id,p.spirit_gain,p.buff_min_percent,p.buff_max_percent,u.display_name AS owner_name
+    const inv=(await client.query(`SELECT i.*,p.name,p.grade,p.price AS current_price,p.storage_item_id,u.display_name AS owner_name
       FROM tavern_member_invites i JOIN tavern_products p ON p.id=i.product_id JOIN users u ON u.id=i.owner_id
       WHERE i.id=$1 AND i.buyer_id=$2 AND i.status='pending' FOR UPDATE`,[id,uid])).rows[0];
     if(!inv){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời không còn hiệu lực.'});}
@@ -2050,25 +2042,8 @@ app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
     if(Number(buyer?.spirit_stones||0)<Number(inv.price)){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thạch không đủ để mua túy phẩm.'});}
     const seller=(await client.query('SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[inv.owner_id])).rows[0];
     if(!seller){await client.query('ROLLBACK');return res.status(404).json({error:'Lâu Chủ không còn tồn tại.'});}
-    const sellerReceive=Math.floor(Number(inv.price)*0.8),commission=Number(inv.price)-sellerReceive;
-    const buffTypes=[
-      {type:'training',name:'Tụ Linh Tửu',text:'Tăng linh lực nhận được khi Vận Công/Online'},
-      {type:'combat',name:'Cường Thân Tửu',text:'Tăng chiến lực trong giao chiến'},
-      {type:'defense',name:'Hộ Tâm Tửu',text:'Tăng phòng thủ khi giao chiến'},
-      {type:'comprehension',name:'Ngộ Đạo Tửu',text:'Tăng Ngộ Tính và khả năng lĩnh ngộ công pháp'}
-    ];
-    const bt=buffTypes[crypto.randomInt(0,buffTypes.length)];
-    const bmin=Math.max(0,Number(inv.buff_min_percent)||0), bmax=Math.max(bmin,Number(inv.buff_max_percent)||bmin);
-    const buffPercent=bmin>0?crypto.randomInt(bmin,bmax+1):0;
-    const spiritGain=Math.max(0,Number(inv.spirit_gain)||0);
-    const buffUntil=new Date(Date.now()+60*60*1000);
-    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,spirit_power=spirit_power+$3,experience=experience+$3,
-      tavern_buff_type=$4,tavern_buff_name=$5,tavern_buff_percent=$6,tavern_buff_until=$7,tavern_buff_text=$8,updated_at=NOW() WHERE user_id=$1`,
-      [uid,inv.price,spiritGain,bt.type,bt.name,buffPercent,buffUntil,`${bt.text} +${buffPercent}% · hiệu lực 60 phút`]);
-    const newSpirit=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1',[uid])).rows[0]?.spirit_power||0;
-    const newStage=stageFor(Number(newSpirit));
-    await client.query(`UPDATE profiles SET rank=$2,realm_tier=$3 WHERE user_id=$1`,[uid,newStage.realm,newStage.tier]);
-    const tavernBreakthrough=await grantRealmBreakthroughRewards(client,uid,stageFor(Number(newSpirit)-spiritGain).realmIndex,newStage.realmIndex);
+    const sellerReceive=Math.floor(Number(inv.price)*0.9),commission=Number(inv.price)-sellerReceive;
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,inv.price]);
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[inv.owner_id,sellerReceive]);
     if(destination==='tavern'){
       await client.query(`INSERT INTO tavern_inventory(user_id,product_id,quantity,updated_at) VALUES($1,$2,1,NOW())
@@ -2086,8 +2061,8 @@ app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
     await client.query(`UPDATE tavern_member_invites SET status='accepted',responded_at=NOW(),destination=$2 WHERE id=$1`,[id,destination]);
     await client.query('COMMIT');
     const destText=destination==='tavern'?'Tửu Lâu':'Tu Di Giới';
-    await createMailboxNotification(inv.owner_id,'tavern_sale','🥂 Giao dịch thành công',`Môn nhân đã nhận ${inv.name} vào ${destText}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (80%).`,'#tavern');
-    res.json({ok:true,message:`Đã mua ${inv.name}. +${spiritGain.toLocaleString('vi-VN')} linh lực · ${bt.name} +${buffPercent}% (60 phút) · ${bt.text}. Túy phẩm đã được đưa vào ${destText}.`,spiritGain,buff:{type:bt.type,name:bt.name,percent:buffPercent,text:bt.text,until:buffUntil},breakthroughRewards:tavernBreakthrough});
+    await createMailboxNotification(inv.owner_id,'tavern_sale','🥂 Giao dịch thành công',`Môn nhân đã nhận ${inv.name} vào ${destText}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (90%).`,'#tavern');
+    res.json({ok:true,message:`Đã mua ${inv.name}. Túy phẩm đã được đưa vào ${destText}.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tavern respond:',e);res.status(500).json({error:'Không thể hoàn tất giao dịch Tửu Lâu.'});}
   finally{client.release();}
 });
@@ -2106,13 +2081,13 @@ async function processTavernNpcSales(){
           FROM tavern_listings l JOIN tavern_products p ON p.id=l.product_id
           WHERE l.id=$1 AND l.active=true AND l.npc_next_buy_at<=NOW() FOR UPDATE`,[row.id])).rows[0];
         if(!locked){await client.query('ROLLBACK');continue;}
-        const sellerReceive=Math.floor(Number(locked.price)*0.31),commission=Number(locked.price)-sellerReceive;
+        const sellerReceive=Math.floor(Number(locked.price)*0.8),commission=Number(locked.price)-sellerReceive;
         await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[locked.owner_id,sellerReceive]);
         await client.query(`INSERT INTO tavern_sales(owner_id,buyer_id,product_id,buyer_type,listed_price,seller_received,commission)
           VALUES($1,NULL,$2,'npc',$3,$4,$5)`,[locked.owner_id,locked.product_id,locked.price,sellerReceive,commission]);
         await client.query(`UPDATE tavern_listings SET npc_next_buy_at=NOW()+INTERVAL '5 minutes' WHERE id=$1`,[locked.id]);
         await client.query('COMMIT');
-        await createMailboxNotification(locked.owner_id,'tavern_sale','🥂 NPC đã mua túy phẩm',`NPC đã mua ${locked.name}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (31% giá bán).`,'#tavern');
+        await createMailboxNotification(locked.owner_id,'tavern_sale','🥂 NPC đã mua túy phẩm',`NPC đã mua ${locked.name}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (80% giá bán).`,'#tavern');
       }catch(e){try{await client.query('ROLLBACK')}catch{}}
       finally{client.release();}
     }
@@ -2322,15 +2297,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const techniqueRows=(await query(`SELECT ct.id,ct.power_bonus,ct.training_bonus_percent,ct.required_comprehension,ct.name,ct.grade,ct.ability,ut.avatar, (p.equipped_technique_id=ct.id) AS equipped
       FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[p.id])).rows;
     const mansion=(await query(`SELECT um.active,m.id,m.name,m.grade,m.spirit_per_hour,um.last_tick_at FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1`,[p.id])).rows[0]||null;
-    const tavernBuffActive=p.tavern_buff_until && new Date(p.tavern_buff_until)>new Date() && Number(p.tavern_buff_percent)>0;
-    const tavernBuffPct=tavernBuffActive?Math.max(0,Number(p.tavern_buff_percent)||0):0;
-    const baseAttrRaw=attributesFor(p.spirit_power,p.comprehension);
-    const baseAttr={...baseAttrRaw};
-    if(tavernBuffActive){
-      if(p.tavern_buff_type==='defense') baseAttr.phongThu=Math.round(baseAttr.phongThu*(1+tavernBuffPct/100));
-      if(p.tavern_buff_type==='combat') baseAttr.congLuc=Math.round(baseAttr.congLuc*(1+tavernBuffPct/100));
-      if(p.tavern_buff_type==='comprehension') baseAttr.ngoTinh=Math.round(baseAttr.ngoTinh*(1+tavernBuffPct/100));
-    }
+    const baseAttr=attributesFor(p.spirit_power,p.comprehension);
     const equipmentPower=(Number(eq.beast_power)||0)+(Number(eq.root_power)||0)+(Number(eq.artifact_power)||0);
     const techniquePower=techniquePowerFor(techniqueRows);
     const secretDebuffActive=p.secret_realm_debuff_until && new Date(p.secret_realm_debuff_until)>new Date();
@@ -2342,7 +2309,7 @@ app.get('/api/profile',auth,async(req,res)=>{
     const activity=(await query('SELECT activity_date,train_count FROM daily_activity WHERE user_id=$1',[p.id])).rows[0];
     const trainCount=String(activity?.activity_date||'').slice(0,10)===today ? Number(activity.train_count)||0 : 0;
     const maxDaily=Math.max(2,10-stage.realmIndex);
-    const onlineRate=Math.max(1,Math.round(onlineSpiritRate(stage.realmIndex)*(1+(p.tavern_buff_type==='training'&&tavernBuffActive?tavernBuffPct:0)/100)));
+    const onlineRate=onlineSpiritRate(stage.realmIndex);
     const onlineUnlocked=!Boolean(mansion?.active);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
     const isTavernOwner=Boolean((await query(`SELECT 1 FROM tavern_roles WHERE user_id=$1 AND active=true LIMIT 1`,[p.id])).rowCount);
@@ -2573,7 +2540,7 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     if(!aR.rows.length) await client.query('INSERT INTO daily_activity(user_id,activity_date,train_count,buy_count,stone_claim_count) VALUES($1,$2,0,0,0)',[userId,today]);
     else if(String(aR.rows[0].activity_date).slice(0,10)!==today) await client.query('UPDATE daily_activity SET activity_date=$2,train_count=0,buy_count=0,stone_claim_count=0 WHERE user_id=$1',[userId,today]);
     else trainCount=Number(aR.rows[0].train_count)||0;
-    const prof=(await client.query('SELECT spirit_power,spirit_root_rarity,tavern_buff_type,tavern_buff_percent,tavern_buff_until FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0];
+    const prof=(await client.query('SELECT spirit_power,spirit_root_rarity FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0];
     const currentStage=stageFor(Number(prof.spirit_power)||0);
     const maxDaily=Math.max(2,10-currentStage.realmIndex);
     if(trainCount>=maxDaily){await client.query('ROLLBACK');return res.status(429).json({error:`Hôm nay đã vận công ${trainCount}/${maxDaily} lần. Cảnh giới càng cao càng khó tu luyện; hãy quay lại ngày mai.`,trainCount,maxDaily});}
@@ -2581,7 +2548,7 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     const techniqueTrainingBonus=techniqueTrainingBonusFor(techRows);
     const baseMax=Math.max(28,72-currentStage.realmIndex*5-currentStage.tier*2);
     const baseMin=Math.max(12,Math.floor(baseMax*0.55));
-    const rawGain=crypto.randomInt(baseMin,baseMax+1); const tavernTrainBonus=(prof.tavern_buff_type==='training'&&prof.tavern_buff_until&&new Date(prof.tavern_buff_until)>new Date())?Math.max(0,Number(prof.tavern_buff_percent)||0):0; const gain=Math.max(1,Math.round(rawGain*(1+rarityBonus(prof.spirit_root_rarity)+techniqueTrainingBonus/100+tavernTrainBonus/100)));
+    const rawGain=crypto.randomInt(baseMin,baseMax+1); const gain=Math.max(1,Math.round(rawGain*(1+rarityBonus(prof.spirit_root_rarity)+techniqueTrainingBonus/100)));
     const r=await client.query('UPDATE profiles SET spirit_power=spirit_power+$2, experience=experience+$2, updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,experience',[userId,gain]);
     const spirit=r.rows[0].spirit_power; const stage=stageFor(spirit);
     const breakthroughRewards=await grantRealmBreakthroughRewards(client,userId,currentStage.realmIndex,stage.realmIndex);
@@ -2606,7 +2573,7 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       await client.query('BEGIN');
       const mansionState=await settleMansionIncome(client,req.session.user_id);
       if(mansionState.active){await client.query('COMMIT');return res.status(423).json({mode:'mansion',active:false,locked:true,gain:mansionState.gain,mansion:mansionState.name,message:`Động phủ ${mansionState.name} đang khởi động; tích lũy Online cũng bị khóa cho đến khi ngưng động phủ.`});}
-      const p=(await client.query(`SELECT spirit_power,last_online_at,last_seen_at,presence_status,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned,COALESCE(online_spirit_remainder_seconds,0)::int AS online_spirit_remainder_seconds,tavern_buff_type,tavern_buff_percent,tavern_buff_until FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
+      const p=(await client.query(`SELECT spirit_power,last_online_at,last_seen_at,presence_status,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned,COALESCE(online_spirit_remainder_seconds,0)::int AS online_spirit_remainder_seconds FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
       const st=stageFor(Number(p.spirit_power)||0);
       const presenceFresh=String(p.presence_status||'')==='online' && p.last_seen_at && (Date.now()-new Date(p.last_seen_at).getTime())<90000;
       let earned=String(p.online_spirit_date||'').slice(0,10)===today ? Number(p.online_spirit_earned)||0 : 0;
@@ -2619,7 +2586,7 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       const dailyCap=999999999;
       const techRows=(await client.query(`SELECT ct.training_bonus_percent FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1`,[req.session.user_id])).rows;
       const techniqueBonus=techniqueTrainingBonusFor(techRows);
-      const tavernTrainBonus=(p.tavern_buff_type==='training'&&p.tavern_buff_until&&new Date(p.tavern_buff_until)>new Date())?Math.max(0,Number(p.tavern_buff_percent)||0):0; const rate=Math.max(1,Math.round(onlineSpiritRate(st.realmIndex)*(1+techniqueBonus/100+tavernTrainBonus/100)));
+      const rate=Math.max(1,Math.round(onlineSpiritRate(st.realmIndex)*(1+techniqueBonus/100)));
       const totalSeconds=remainder+elapsedSeconds;
       const gain=Math.max(0,Math.min(Math.floor(totalSeconds*rate/60),dailyCap-earned));
       const secondsPerGain=Math.max(1,Math.ceil(60/rate));
@@ -4064,10 +4031,6 @@ function challengeHealth(row){
   const spirit=Math.max(0,Number(row.spirit_power)||0);
   const st=stageFor(spirit);
   const base=attributesFor(spirit);
-  const buffActive=row.tavern_buff_until && new Date(row.tavern_buff_until)>new Date() && Number(row.tavern_buff_percent)>0;
-  const buffPct=buffActive?Math.max(0,Number(row.tavern_buff_percent)||0):0;
-  if(buffActive && row.tavern_buff_type==='defense') base.phongThu=Math.round(base.phongThu*(1+buffPct/100));
-  if(buffActive && row.tavern_buff_type==='combat') base.congLuc=Math.round(base.congLuc*(1+buffPct/100));
   const equipment=Number(row.equipment_power)||0;
   return Math.max(1200,Math.round(1200 + spirit*0.045 + base.phongThu*30 + base.congLuc*8 + st.realmIndex*700 + st.tier*120 + equipment*2));
 }
@@ -4077,12 +4040,6 @@ function ultimateDamage(attacker, defender){
   const dSpirit=Math.max(0,Number(defender.spirit_power)||0);
   const aStage=stageFor(aSpirit), dStage=stageFor(dSpirit);
   const aAttr=attributesFor(aSpirit), dAttr=attributesFor(dSpirit);
-  const aBuffActive=attacker.tavern_buff_until && new Date(attacker.tavern_buff_until)>new Date() && Number(attacker.tavern_buff_percent)>0;
-  const dBuffActive=defender.tavern_buff_until && new Date(defender.tavern_buff_until)>new Date() && Number(defender.tavern_buff_percent)>0;
-  const aBuffPct=aBuffActive?Math.max(0,Number(attacker.tavern_buff_percent)||0):0;
-  const dBuffPct=dBuffActive?Math.max(0,Number(defender.tavern_buff_percent)||0):0;
-  if(aBuffActive && attacker.tavern_buff_type==='combat') aAttr.congLuc=Math.round(aAttr.congLuc*(1+aBuffPct/100));
-  if(dBuffActive && defender.tavern_buff_type==='defense') dAttr.phongThu=Math.round(dAttr.phongThu*(1+dBuffPct/100));
   const equipment=Number(attacker.equipment_power)||0;
   const baseDamage=70 + aAttr.congLuc*2.4 + aSpirit*0.012 + equipment*0.55;
   const realmGap=aStage.realmIndex-dStage.realmIndex;
