@@ -1,0 +1,20 @@
+HÀN THIÊN MÔN v3.6.73 · TỬU LÂU GIAO DỊCH + TÚY BUFF
+
+1. MỞ LẠI QUYỀN MỜI
+- Tửu Lâu Chi Chủ có thể mời môn nhân khác mua túy phẩm qua Hòm Thư Tửu Lâu.
+- Chỉ Lâu Chủ hiện tại mới có quyền gửi lời mời. Sau khi @kien nhường chức, Lâu Chủ mới nhận quyền này.
+
+2. TỶ LỆ LINH THẠCH LÂU CHỦ NHẬN
+- NPC mua sau 5 phút: Lâu Chủ nhận 31% giá bán.
+- Môn nhân mua: Lâu Chủ nhận 80% giá bán.
+
+3. TÚY PHẨM
+- Hạ Đẳng: +60 linh lực, buff ngẫu nhiên +2–4%.
+- Trung Đẳng: +180 linh lực, buff ngẫu nhiên +4–7%.
+- Thượng Đẳng: +420 linh lực, buff ngẫu nhiên +7–11%.
+- Cực Phẩm: +900 linh lực, buff ngẫu nhiên +11–16%.
+- Buff được chọn ngẫu nhiên giữa Tụ Linh, Cường Thân, Hộ Tâm, Ngộ Đạo và có hiệu lực 60 phút.
+- Tụ Linh tăng linh lực từ Vận Công/Online; Cường Thân tăng công lực khi giao chiến; Hộ Tâm tăng phòng thủ; Ngộ Đạo tăng Ngộ Tính.
+
+4. KHUNG TỬU LÂU
+- Thêm viền giới hạn kép, viền nội khung và hiệu ứng khung riêng cho khu vực Tửu Lâu, tối ưu mobile.
