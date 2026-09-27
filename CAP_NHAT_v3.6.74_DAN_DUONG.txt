@@ -1,0 +1,17 @@
+HÀN THIÊN MÔN v3.6.74 — ĐAN ĐƯỜNG + LUYỆN ĐAN PHÒNG
+
+1. Thêm Đan Đường vào menu và chế độ tập trung: khi bấm Đan Đường, chỉ vùng Đan Đường được phép cuộn; mục phụ Luyện Đan Phòng mở cùng vùng và tự cuộn tới phòng.
+2. Giao diện Đan Đường dùng ảnh tham chiếu kiến trúc sơn môn, thêm màn sương, ấn Đan, ánh sáng, viền và hiệu ứng chuyển động; tối ưu responsive iPhone.
+3. Thêm Đan Chủ: chỉ 1 người tại một thời điểm; người ứng chức đầu tiên sau khi vị trí trống sẽ nhận; Đan Chủ hiện tại chỉ có thể tự nguyện nhường vị.
+4. Đan Đường bán linh dược và Đan lô từ Hạ Phẩm tới Cực Phẩm.
+5. Đan Chủ nhận 50% linh thạch từ doanh thu mua vật phẩm/Đan lô của Đan Đường (không tính khi chính Đan Chủ mua).
+6. Thêm chức nghiệp Luyện Đan Sư với Tư chất luyện đan và Điểm tinh thần.
+7. Thêm Luyện Đan Phòng: bật/tắt trạng thái hoạt động, chỉ Luyện Đan Sư mới vào được.
+8. Thêm công thức đan dược theo phẩm cấp; yêu cầu linh dược khác nhau; phẩm cấp cao khó luyện hơn.
+9. Tư chất vượt yêu cầu tạo thêm tỷ lệ luyện ra Cực Phẩm; Đan lô cao cấp tăng thêm tỷ lệ thành đan.
+10. Luyện đan thất bại có 10% khả năng mất 5 điểm tinh thần.
+11. Thêm đơn NPC: thù lao chuẩn 150% giá trị linh dược; nếu luyện ra Cực Phẩm, thù lao 500% giá trị linh dược.
+12. Thêm đơn môn nhân: chọn Luyện Đan Sư đang hoạt động; môn nhân trả trước 180% giá trị linh dược; thành công tự động đưa đan vào Tu Di Giới; Luyện Đan Sư nhận 180%; Cực Phẩm nhận 500% giá trị linh dược.
+13. Hòm Thư chung nhận được thông báo đơn luyện đan và có nút Tiếp nhận/Từ chối; Đan Đường cũng có Hòm Thư Luyện Đan riêng.
+14. Giao dịch dùng PostgreSQL transaction + row lock để tránh trừ linh thạch/vật phẩm trùng khi bấm nhiều lần.
+15. Không thêm polling riêng cho Đan Đường; chỉ tải lại sau giao dịch hoặc khi người dùng mở chức năng để giảm tải cho mục tiêu 50 người.

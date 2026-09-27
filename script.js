@@ -334,7 +334,7 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDanDuong();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
  catch(e){if(e?.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}else{console.warn('Phiên vẫn được giữ, lỗi tải dữ liệu tạm thời:',e);}}
 }
 function renderGuestAreas(){
@@ -342,7 +342,7 @@ function renderGuestAreas(){
  $('#profileArea').innerHTML=`<div class="empty-state"><div class="empty-seal">寒</div><h3>Đệ tử chưa nhập môn</h3><p>Đăng ký hoặc đăng nhập để mở hồ sơ, linh lực, cảnh giới và thành tích cá nhân.</p><button class="btn primary" onclick="renderAuth('register')">✦ Ghi danh</button></div>`;
  $('#cultivationArea').innerHTML=`<div class="empty-state compact"><h3>Thiên đạo chờ người hữu duyên</h3><p>Đăng nhập để bắt đầu vận công và tích lũy linh lực.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
  $('#chatArea').innerHTML=`<div class="empty-state compact"><h3>Truyền âm bị phong</h3><p>Chỉ môn nhân đã nhập môn mới có thể vào Chat tổng.</p><button class="btn primary" onclick="renderAuth('register')">Đăng ký</button></div>`; $('#sectPostsArea').innerHTML=`<div class="empty-state compact"><h3>📜 Bài Đăng đang phong ấn</h3><p>Đăng nhập để xem bài đăng của Môn Phái. Hóa Thần trở lên mới được đăng.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
- $('#challengeArea').innerHTML=`<div class="empty-state compact"><h3>Lôi đài đang phong ấn</h3><p>Đăng nhập để khiêu chiến môn nhân và mô phỏng đối thủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#arenaLiveArea').innerHTML=`<div class="empty-state compact"><h3>👁 Lôi Đài Trực Chiến đang phong ấn</h3><p>Đăng nhập để theo dõi các trận đấu đang diễn ra và đặt cược linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#bicanhArea').innerHTML=`<div class="empty-state compact"><h3>Bí Cảnh đang phong ấn</h3><p>Đăng nhập để đóng góp linh thạch, khởi động và thám hiểm Cửu Đại Bí Cảnh.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#treasureArea').innerHTML=`<div class="empty-state compact"><h3>Tàng Bảo Các đang phong ấn</h3><p>Đăng nhập để nhận linh thạch hằng ngày và mua vật phẩm.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#danCacArea').innerHTML=`<div class="empty-state compact"><h3>Đan Các đang phong ấn</h3><p>Đăng nhập để bán vật phẩm và nhận linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; ['#duocDuongArea','#duongThuArea','#beastArenaArea','#beastHouseArea','#linhPhapArea','#equipmentArea'].forEach(sel=>{const el=$(sel);if(el)el.innerHTML=`<div class="empty-state compact"><h3>Đường vào đang phong ấn</h3><p>Đăng nhập để dùng linh thạch mua Linh Thú và Linh Căn.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;}); $('#questsArea').innerHTML=`<div class="empty-state compact"><h3>Nhiệm Vụ Đường đang phong ấn</h3><p>Đăng nhập để nhận nhiệm vụ và linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#professionsArea').innerHTML=`<div class="empty-state compact"><h3>Nghiệp Vụ đang phong ấn</h3><p>Đăng nhập để tiếp nhận nghề và nhận thù lao linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; ['#codexArea','#mansionArea'].forEach(sel=>{const el=$(sel);if(el)el.innerHTML=`<div class="empty-state compact"><h3>Đường vào đang phong ấn</h3><p>Đăng nhập để mở công pháp và động phủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;}); renderLegendEditor();
+ $('#challengeArea').innerHTML=`<div class="empty-state compact"><h3>Lôi đài đang phong ấn</h3><p>Đăng nhập để khiêu chiến môn nhân và mô phỏng đối thủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#arenaLiveArea').innerHTML=`<div class="empty-state compact"><h3>👁 Lôi Đài Trực Chiến đang phong ấn</h3><p>Đăng nhập để theo dõi các trận đấu đang diễn ra và đặt cược linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#bicanhArea').innerHTML=`<div class="empty-state compact"><h3>Bí Cảnh đang phong ấn</h3><p>Đăng nhập để đóng góp linh thạch, khởi động và thám hiểm Cửu Đại Bí Cảnh.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#treasureArea').innerHTML=`<div class="empty-state compact"><h3>Tàng Bảo Các đang phong ấn</h3><p>Đăng nhập để nhận linh thạch hằng ngày và mua vật phẩm.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#danCacArea').innerHTML=`<div class="empty-state compact"><h3>Đan Các đang phong ấn</h3><p>Đăng nhập để bán vật phẩm và nhận linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#danDuongArea').innerHTML=`<div class="empty-state compact"><h3>⚗️ Đan Đường đang phong ấn</h3><p>Đăng nhập để mua linh dược, Đan lô và vào Luyện Đan Phòng.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; ['#duocDuongArea','#duongThuArea','#beastArenaArea','#beastHouseArea','#linhPhapArea','#equipmentArea'].forEach(sel=>{const el=$(sel);if(el)el.innerHTML=`<div class="empty-state compact"><h3>Đường vào đang phong ấn</h3><p>Đăng nhập để dùng linh thạch mua Linh Thú và Linh Căn.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;}); $('#questsArea').innerHTML=`<div class="empty-state compact"><h3>Nhiệm Vụ Đường đang phong ấn</h3><p>Đăng nhập để nhận nhiệm vụ và linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; $('#professionsArea').innerHTML=`<div class="empty-state compact"><h3>Nghiệp Vụ đang phong ấn</h3><p>Đăng nhập để tiếp nhận nghề và nhận thù lao linh thạch.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`; ['#codexArea','#mansionArea'].forEach(sel=>{const el=$(sel);if(el)el.innerHTML=`<div class="empty-state compact"><h3>Đường vào đang phong ấn</h3><p>Đăng nhập để mở công pháp và động phủ.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;}); renderLegendEditor();
  loadLeaderboard(); loadSect(); loadCodex(); loadSpiritRankings();
 }
 
@@ -993,7 +993,9 @@ async function respondMailboxAction(id, type, actionData, actionBtn){
         : actionData.action==='bicanh_invite'
           ? '/api/bicanh/invite/respond'
           : actionData.action==='tavern_sale'
-            ? '/api/tavern/invite/respond' : '';
+            ? '/api/tavern/invite/respond'
+            : actionData.action==='alchemy_order'
+              ? '/api/dan-duong/order/respond' : '';
   if(!endpoint)return;
   let body=actionData.action==='friend'
     ? {requestId:Number(actionData.requestId),action}
@@ -1003,7 +1005,9 @@ async function respondMailboxAction(id, type, actionData, actionBtn){
         ? {requestId:Number(actionData.requestId),action}
         : actionData.action==='tavern_sale'
           ? {requestId:Number(actionData.requestId),action}
-          : {invitationId:Number(actionData.invitationId),action};
+          : actionData.action==='alchemy_order'
+            ? {orderId:Number(actionData.requestId),action}
+            : {invitationId:Number(actionData.invitationId),action};
   if(actionData.action==='beast_challenge' && action==='accept'){
     body.beastId=Number(document.querySelector(`.mail-beast-select[data-id="${id}"]`)?.value||0);
     body.skillId=Number(document.querySelector(`.mail-skill-select[data-id="${id}"]`)?.value||1);
@@ -1025,6 +1029,7 @@ async function respondMailboxAction(id, type, actionData, actionBtn){
     if(actionData.action==='friend'){ await loadFriends?.(); await loadData?.(); }
     if(actionData.action==='bicanh_invite') await loadBicanh?.();
     if(actionData.action==='tavern_sale'){ await loadTavern?.(); await loadProfile?.(); }
+    if(actionData.action==='alchemy_order'){ await loadDanDuong?.(); await loadProfile?.(); await loadMailbox?.(); }
   }catch(e){
     if(actionBtn)actionBtn.removeAttribute('disabled');
     const mail=document.querySelector(`.mail-item[data-id="${id}"]`);
@@ -1032,6 +1037,59 @@ async function respondMailboxAction(id, type, actionData, actionBtn){
   }
 }
 
+
+async function loadDanDuong(){
+ const area=$('#danDuongArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/dan-duong',{headers:authHeaders()});
+  const me=d.me||{}, owner=d.owner||null, prof=d.profession||null, products=d.products||[], recipes=d.recipes||[], orders=d.orders||[], alchemists=d.alchemists||[];
+  const badge=$('#danHallRoleBadge'); if(badge)badge.textContent=d.isOwner?'⚗️ ĐAN CHỦ':'⚗️ ĐAN ĐƯỜNG · ĐANG MỞ';
+  const herbs=products.filter(x=>x.product_type==='herb'), cauldrons=products.filter(x=>x.product_type==='cauldron');
+  const pendingOrders=orders.filter(x=>x.status==='pending' && (x.order_type==='npc'||Number(x.alchemist_id)===Number(currentUser?.id)));
+  const myOrders=orders.filter(x=>Number(x.requester_id)===Number(currentUser?.id)||Number(x.alchemist_id)===Number(currentUser?.id));
+  area.innerHTML=`
+   <div class="dan-hall-hero">
+    <div class="dan-hall-overlay"></div><div class="dan-hall-mist dan-mist-a"></div><div class="dan-hall-mist dan-mist-b"></div>
+    <div class="dan-hall-copy"><span class="eyebrow">⚗️ ĐAN ĐẠO · 丹堂</span><h3>Đan Đường Hàn Thiên Môn</h3><p>${owner?`Đan Chủ hiện tại: <b>${esc(owner.display_name)}</b> · @${esc(owner.username)} · giữ vị trí duy nhất.`:'Đan Chủ đang khuyết vị. Người ứng chức nhanh nhất sẽ nhận trước; sau khi nhận, chỉ chính Đan Chủ mới có thể nhường vị.'}</p><div class="dan-seal">丹</div></div>
+   </div>
+   <div class="dan-room-tabs"><span>🌿 LINH DƯỢC</span><span>🔥 ĐAN LÔ</span><span>⚗️ LUYỆN ĐAN</span><span>📜 NHẬN ĐƠN</span></div>
+   <div class="dan-owner-panel">
+    <div><span class="eyebrow">⚜️ ĐAN CHỦ</span><h3>${owner?esc(owner.display_name):'Chưa có Đan Chủ'}</h3><p>${owner?'Vị trí chỉ đổi khi Đan Chủ hiện tại chủ động nhường.':'Môn nhân có thể ứng chức. Người khóa vị trí đầu tiên sẽ là Đan Chủ.'}</p></div>
+    <div class="dan-owner-actions">${!owner?`<button class="btn primary" id="danApplyOwner">⚗️ Ứng chức Đan Chủ</button>`:''}${d.isOwner?`<button class="btn ghost" id="danYieldOwner">↩ Nhường vị</button>`:''}<span class="dan-commission">💎 Đan Chủ nhận <b>50%</b> tiền bán linh dược & đan lô của Đan Đường</span></div>
+   </div>
+   <div class="dan-grid">
+    <div class="dan-panel"><div class="dan-panel-head"><div><span class="eyebrow">🌿 DƯỢC KHỐ</span><h3>Linh dược thu mua</h3></div><small>${herbs.length} loại</small></div>
+      <div class="dan-product-grid">${herbs.map(p=>`<article class="dan-product-card"><span class="dan-product-icon">🌿</span><div><span class="dan-grade grade-${Number(p.id)}">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><small>💎 ${Number(p.price).toLocaleString('vi-VN')} linh thạch · +${Number(p.power_bonus||0)} dược lực</small></div><div class="dan-buy-box"><input class="dan-qty" data-id="${p.id}" type="number" min="1" max="20" value="1" inputmode="numeric"><button class="btn small primary dan-buy" data-id="${p.id}">Mua</button></div></article>`).join('')}</div>
+    </div>
+    <div class="dan-panel"><div class="dan-panel-head"><div><span class="eyebrow">🔥 LÔ LUYỆN ĐAN</span><h3>Đan lô đa phẩm cấp</h3></div><small>${cauldrons.length} loại</small></div>
+      <div class="dan-product-grid">${cauldrons.map(p=>`<article class="dan-product-card cauldron"><span class="dan-product-icon">🔥</span><div><span class="dan-grade">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><small>💎 ${Number(p.price).toLocaleString('vi-VN')} linh thạch · +${Number(p.power_bonus||0)} hỗ trợ luyện</small></div><div class="dan-buy-box"><input class="dan-qty" data-id="${p.id}" type="number" min="1" max="5" value="1" inputmode="numeric"><button class="btn small primary dan-buy" data-id="${p.id}">Mua</button></div></article>`).join('')}</div>
+    </div>
+   </div>
+   <div id="luyen-dan-phong" class="dan-panel dan-room-panel ${prof?.alchemy_active?'room-open':''}">
+    <div class="dan-panel-head"><div><span class="eyebrow">🧪 LUYỆN ĐAN PHÒNG</span><h3>${prof?'Phòng luyện đan của '+esc(currentUser?.displayName||'môn nhân'):'Chỉ Luyện Đan Sư mới được vào phòng'}</h3></div><span class="dan-room-status">${prof?.alchemy_active?'● ĐANG HOẠT ĐỘNG':'○ ĐANG ĐÓNG'}</span></div>
+    ${prof?`<div class="dan-spirit-stats"><div><b>${Number(prof.alchemy_aptitude||0)}</b><span>Tư chất luyện đan</span></div><div><b>${Number(prof.spirit_points||0)}</b><span>Điểm tinh thần</span></div><div><b>${Number(d.stage?.realmIndex||0)+1}</b><span>Đại cảnh giới</span></div><button class="btn small ${prof.alchemy_active?'ghost':'primary'}" id="danRoomToggle">${prof.alchemy_active?'↩ Rời phòng':'🧪 Mở phòng & nhận đơn'}</button></div>
+    <div class="dan-room-note">Tư chất luyện đan chính là nền tảng của <b>điểm tinh thần</b>. Đan phẩm càng cao càng khó luyện. Nếu tư chất vượt yêu cầu, có thêm tỷ lệ luyện ra <b>Cực Phẩm</b>. Luyện đan thất bại có <b>10%</b> khả năng mất <b>5 điểm tinh thần</b>.</div>
+    <div class="dan-recipe-grid">${recipes.map(r=>{const req=Number(r.required_spirit),apt=Number(prof.alchemy_aptitude||0),base=Math.max(15,Math.min(96,Math.round(82-Number(r.difficulty||20)*.55+Math.max(0,apt-req)*.9)));return `<article class="dan-recipe-card"><div class="recipe-top"><span>${esc(r.grade)}</span><b>${esc(r.name)}</b></div><p>${esc(r.description)}</p><small>🌿 ${r.ingredients.map(i=>`${esc(i.name)} ×${i.qty}`).join(' · ')}</small><small>🧠 Yêu cầu ${req} điểm · 🎯 Tỷ lệ cơ bản khoảng ${base}% · ✨ Cực Phẩm tăng theo tư chất vượt yêu cầu</small><div class="recipe-actions"><button class="btn small primary dan-craft" data-id="${r.id}">⚗️ Luyện ngay</button><select class="dan-order-select" data-recipe="${r.id}"><option value="">Đơn đang nhận...</option>${orders.filter(o=>Number(o.recipe_id)===Number(r.id)&&o.status==='accepted'&&Number(o.alchemist_id)===Number(currentUser?.id)).map(o=>`<option value="${o.id}">Đơn #${o.id} · ${o.order_type==='npc'?'NPC':esc(o.requester_name||'Môn nhân')}</option>`).join('')}</select></div></article>`}).join('')}</div>`:`<div class="dan-locked-room"><span>🔒</span><h4>Chưa có chức nghiệp Luyện Đan Sư</h4><p>Hãy vào <b>Nghiệp Vụ</b> → tiếp nhận <b>Luyện Đan Sư</b>, sau đó quay lại đây.</p><a class="btn small primary" href="#professions">🛠 Đến Nghiệp Vụ</a></div>`}
+   </div>
+   <div class="dan-panel dan-orders-panel"><div class="dan-panel-head"><div><span class="eyebrow">📜 HÒM THƯ LUYỆN ĐAN</span><h3>Đơn NPC & đơn môn nhân</h3></div><button class="btn small primary" id="danNpcOrder">📜 Nhận đơn NPC</button></div>
+    <div class="dan-order-list">${pendingOrders.length?pendingOrders.map(o=>`<article class="dan-order-card"><div><b>#${o.id} · ${esc(o.recipe_name)}</b><small>${o.order_type==='npc'?'🤖 NPC':'☯ '+esc(o.requester_name||'Môn nhân')} · Giá trị linh dược ${Number(o.ingredient_value).toLocaleString('vi-VN')} · Thù lao ${Number(o.payout).toLocaleString('vi-VN')} linh thạch</small></div>${prof?.alchemy_active&&(!o.alchemist_id||Number(o.alchemist_id)===Number(currentUser?.id))?`<div><button class="btn small primary dan-order-accept" data-id="${o.id}">✓ Tiếp nhận</button><button class="btn small ghost dan-order-reject" data-id="${o.id}">✕ Từ chối</button></div>`:'<small>🔒 Mở phòng để nhận đơn</small>'}</article>`).join(''):'<div class="empty-state compact"><p>Hòm thư luyện đan đang tĩnh lặng.</p></div>'}</div>
+    <div class="dan-order-history">${myOrders.slice(0,12).map(o=>`<div><span>#${o.id}</span><b>${esc(o.recipe_name)}</b><small>${esc(o.status)} · ${o.order_type==='npc'?'NPC':esc(o.requester_name||'Môn nhân')}</small></div>`).join('')}</div>
+   </div>
+   <div class="dan-panel dan-member-order-panel"><div class="dan-panel-head"><div><span class="eyebrow">☯ ĐƠN TỪ MÔN NHÂN</span><h3>Gửi yêu cầu đến Luyện Đan Sư đang hoạt động</h3></div></div>
+    <form id="danMemberOrderForm" class="dan-member-form"><select id="danRecipeSelect"><option value="">Chọn đan dược</option>${recipes.map(r=>`<option value="${r.id}">${esc(r.name)} · ${esc(r.grade)}</option>`).join('')}</select><select id="danAlchemistSelect"><option value="">Chọn Luyện Đan Sư đang hoạt động</option>${alchemists.filter(a=>a.alchemy_active&&Number(a.id)!==Number(currentUser?.id)).map(a=>`<option value="${a.id}">${esc(a.display_name)} · ${esc(a.rank)} · Tư chất ${a.alchemy_aptitude}</option>`).join('')}</select><button class="btn primary" type="submit">📨 Gửi đơn · 180%</button></form><p id="danOrderMsg" class="train-msg">Môn nhân trả trước 180% giá trị linh dược. Nếu Luyện Đan Sư từ chối hoặc thất bại, linh thạch được hoàn lại.</p>
+   </div>
+  `;
+  $('#danApplyOwner')?.addEventListener('click',async()=>{try{const r=await api('/api/dan-duong/apply-owner',{method:'POST',headers:authHeaders()});alert(r.message);await loadDanDuong();await loadProfile();}catch(e){alert(e.message);}});
+  $('#danYieldOwner')?.addEventListener('click',async()=>{if(!confirm('Bạn chắc chắn muốn nhường vị Đan Chủ?'))return;try{const r=await api('/api/dan-duong/yield-owner',{method:'POST',headers:authHeaders()});alert(r.message);await loadDanDuong();await loadProfile();}catch(e){alert(e.message);}});
+  document.querySelectorAll('.dan-buy').forEach(btn=>btn.onclick=async()=>{const qty=Math.max(1,Math.min(20,Number(btn.parentElement.querySelector('.dan-qty')?.value)||1));btn.disabled=true;try{const r=await api('/api/dan-duong/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({productId:Number(btn.dataset.id),quantity:qty})});alert(r.message);await loadDanDuong();await loadProfile();}catch(e){alert(e.message);}finally{btn.disabled=false;}});
+  $('#danRoomToggle')?.addEventListener('click',async()=>{try{const r=await api('/api/dan-duong/room/toggle',{method:'POST',headers:authHeaders()});await loadDanDuong();alert(r.message);}catch(e){alert(e.message);}});
+  $('#danNpcOrder')?.addEventListener('click',async()=>{try{const r=await api('/api/dan-duong/order/npc',{method:'POST',headers:authHeaders()});alert(r.message);await loadDanDuong();}catch(e){alert(e.message);}});
+  document.querySelectorAll('.dan-order-accept').forEach(btn=>btn.onclick=async()=>{try{const r=await api('/api/dan-duong/order/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({orderId:Number(btn.dataset.id),action:'accept'})});alert(r.message);await loadDanDuong();}catch(e){alert(e.message);}});
+  document.querySelectorAll('.dan-order-reject').forEach(btn=>btn.onclick=async()=>{try{const r=await api('/api/dan-duong/order/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({orderId:Number(btn.dataset.id),action:'reject'})});alert(r.message);await loadDanDuong();}catch(e){alert(e.message);}});
+  document.querySelectorAll('.dan-craft').forEach(btn=>btn.onclick=async()=>{const sel=document.querySelector(`.dan-order-select[data-recipe="${btn.dataset.id}"]`);const orderId=Number(sel?.value||0);btn.disabled=true;try{const r=await api('/api/dan-duong/craft',{method:'POST',headers:authHeaders(),body:JSON.stringify({recipeId:Number(btn.dataset.id),orderId})});alert(r.message);await loadDanDuong();await loadProfile();await loadTuDi();}catch(e){alert(e.message);}finally{btn.disabled=false;}});
+  $('#danMemberOrderForm')?.addEventListener('submit',async e=>{e.preventDefault();const recipeId=Number($('#danRecipeSelect').value),alchemistId=Number($('#danAlchemistSelect').value),msg=$('#danOrderMsg');if(!recipeId||!alchemistId){msg.textContent='❌ Hãy chọn đan dược và Luyện Đan Sư đang hoạt động.';return;}try{const r=await api('/api/dan-duong/order/member',{method:'POST',headers:authHeaders(),body:JSON.stringify({recipeId,alchemistId})});msg.textContent='✅ '+r.message;await loadDanDuong();await loadProfile();}catch(e){msg.textContent='❌ '+e.message;}});
+ }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
+}
 
 async function loadTavern(){
  const area=$('#tavernArea'); if(!area||!getToken())return;
@@ -1051,12 +1109,12 @@ async function loadTavern(){
    </div>
    <div class="tavern-room-strip"><span>酒樓 · TỬU LÂU</span><span>TRUNG TÂM GIAO DỊCH TÚY PHẨM</span><span>PHÒNG YẾN · QUẦY RƯỢU · HÒM THƯ</span></div>
    <div class="tavern-rules">
-    <span>👑 Chỉ có <b>1 Lâu Chủ</b></span><span>🤖 NPC mua sau <b>5 phút</b> · nhận <b>80%</b></span><span>☯ Môn nhân mua · nhận <b>90%</b></span><span>📦 Hấp thu tại <b>Tửu Lâu</b> hoặc <b>Tu Di Giới</b></span>
+    <span>👑 Chỉ có <b>1 Lâu Chủ</b></span><span>🤖 NPC mua sau <b>5 phút</b> · Lâu Chủ nhận <b>31%</b></span><span>☯ Môn nhân mua · Lâu Chủ nhận <b>80%</b></span><span>📦 Hấp thu tại <b>Tửu Lâu</b> hoặc <b>Tu Di Giới</b></span>
    </div>
    <div class="tavern-grid">
     <div class="tavern-panel"><div class="tavern-panel-head"><h3>🍶 Túy Phẩm</h3><small>Phẩm cấp từ thấp đến cao</small></div>
       <div class="tavern-products">${products.map(p=>`<article class="tavern-product tavern-product-${Number(p.id)}">
-        <div class="tavern-bottle"><span class="tavern-bottle-icon">🍶</span><div><span class="tavern-grade">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><b>${Number(p.price).toLocaleString('vi-VN')} linh thạch</b></div></div>
+        <div class="tavern-bottle"><span class="tavern-bottle-icon">🍶</span><div><span class="tavern-grade">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><b>${Number(p.price).toLocaleString('vi-VN')} linh thạch</b><small class="tavern-benefit">✨ +${Number(p.spirit_gain||0).toLocaleString('vi-VN')} linh lực · 🎲 Buff ngẫu nhiên +${Number(p.buff_min_percent||0)}–${Number(p.buff_max_percent||0)}% · 60 phút</small></div></div>
         ${role?`<button class="btn small ${p.listed?'ghost':'primary'} tavern-list-btn" data-product="${p.id}" ${p.listed?'disabled':''}>${p.listed?'✓ Đang bán':'Mở bán'}</button>`:''}
       </article>`).join('')}</div>
     </div>
@@ -1081,6 +1139,9 @@ async function loadTavern(){
    </div>
    <div class="tavern-panel"><div class="tavern-panel-head"><h3>🎒 Túy Phẩm của ta</h3><small>Kho hấp thu tại Tửu Lâu</small></div>
     <div class="tavern-inventory">${inv.map(x=>`<span>🍶 ${esc(x.name)} <b>×${x.quantity}</b></span>`).join('')||'<small>Chưa có túy phẩm.</small>'}</div>
+   </div>
+   <div class="tavern-panel tavern-buff-panel"><div class="tavern-panel-head"><h3>✨ Túy Buff đang hiệu lực</h3><small>Buff được chọn ngẫu nhiên khi môn nhân mua túy phẩm · thời hạn 60 phút</small></div>
+    <div class="tavern-active-buff">${currentProfile?.tavern_buff_until && new Date(currentProfile.tavern_buff_until)>new Date() && Number(currentProfile.tavern_buff_percent)>0?`<b>🍷 ${esc(currentProfile.tavern_buff_name||'Túy Buff')}</b><span>+${Number(currentProfile.tavern_buff_percent)}% · ${esc(currentProfile.tavern_buff_text||'')}</span><small>Hết hạn: ${new Date(currentProfile.tavern_buff_until).toLocaleString('vi-VN')}</small>`:'<span>Chưa có túy buff đang hiệu lực.</span>'}</div>
    </div>`;
   $('#tavernApplyBtn')?.addEventListener('click',async()=>{});
   document.querySelectorAll('.tavern-list-btn').forEach(btn=>btn.addEventListener('click',async()=>{
@@ -1103,7 +1164,7 @@ async function loadTavern(){
   document.querySelectorAll('.tavern-invite-accept').forEach(btn=>btn.addEventListener('click',async()=>{
     const id=Number(btn.dataset.id),item=btn.closest('.tavern-inbox-item'),dest=item?.querySelector(`input[name="tavernDest${id}"]:checked`)?.value||'tavern';
     const msg=item?.querySelector('.mail-action-msg');btn.disabled=true;
-    try{const r=await api('/api/tavern/invite/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:id,action:'accept',destination:dest})});if(msg)msg.textContent='✓ '+r.message;await loadTavern();await loadProfile();}catch(e){if(msg)msg.textContent='❌ '+e.message;btn.disabled=false;}
+    try{const r=await api('/api/tavern/invite/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:id,action:'accept',destination:dest})});if(msg)msg.textContent='✓ '+r.message;if(currentProfile){currentProfile.spirit_power=Number(currentProfile.spirit_power||0)+Number(r.spiritGain||0);if(r.buff){currentProfile.tavern_buff_type=r.buff.type;currentProfile.tavern_buff_name=r.buff.name;currentProfile.tavern_buff_percent=r.buff.percent;currentProfile.tavern_buff_text=r.buff.text;currentProfile.tavern_buff_until=r.buff.until;}}await loadTavern();await loadProfile();}catch(e){if(msg)msg.textContent='❌ '+e.message;btn.disabled=false;}
   }));
   document.querySelectorAll('.tavern-invite-reject').forEach(btn=>btn.addEventListener('click',async()=>{
     const id=Number(btn.dataset.id),item=btn.closest('.tavern-inbox-item'),msg=item?.querySelector('.mail-action-msg');btn.disabled=true;
@@ -1120,8 +1181,8 @@ async function loadMailbox(){
   if(badge)badge.style.display=Number(d.unread||0)>0?'inline-flex':'none';
   area.innerHTML=`<div class="mailbox-toolbar"><label><input id="mailboxToggle" type="checkbox" ${d.enabled?'checked':''}> 🔔 Nhận thông báo Hòm Thư</label><button id="mailboxReadAll" class="btn small ghost">Đánh dấu tất cả đã đọc</button><span>Chưa đọc: <b>${Number(d.unread||0)}</b></span></div><div class="mailbox-list">${(d.rows||[]).map(x=>{
     const a=x.actionData||null;
-    const actionable=Boolean(a?.action && a?.action!=='tavern_sale' && (a.requestId||a.invitationId) && !x.read_at);
-    const icon=x.type==='challenge'?'⚔️':x.type==='beast_challenge'?'🪶':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='tavern_sale'?'🥂':x.type==='chat_total'?'☯':'📬';
+    const actionable=Boolean(a?.action && ['friend','challenge','beast_challenge','bicanh_invite','tavern_sale','alchemy_order'].includes(a.action) && (a.requestId||a.invitationId) && !x.read_at);
+    const icon=x.type==='challenge'?'⚔️':x.type==='beast_challenge'?'🪶':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='tavern_sale'?'🥂':x.type==='alchemy_order'?'⚗️':x.type==='chat_total'?'☯':'📬';
     const beastChoice=actionable&&a?.action==='beast_challenge'&&a?.requestId?`<div class="mail-beast-choice"><select class="mail-beast-select" data-id="${x.id}"><option value="0">Chọn linh thú xuất chiến</option>${(d.beastsForArena||[]).map(b=>`<option value="${b.beast_id}">${esc(b.name)} · ${esc(b.beast_realm)} · ${esc(b.beast_type)}</option>`).join('')}</select><select class="mail-skill-select" data-id="${x.id}"><option value="1">Tuyệt kỹ 1</option><option value="2">Tuyệt kỹ 2</option><option value="3">Tuyệt kỹ 3</option></select></div>`:'';
     const buttons=actionable?`${beastChoice}<div class="mail-actions"><button class="btn small primary mail-accept" data-id="${x.id}">✓ Đồng ý</button><button class="btn small ghost mail-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div>`:'';
     return `<article class="mail-item ${x.read_at?'':'unread'} ${actionable?'mail-actionable':''}" data-id="${x.id}"><div class="mail-icon">${icon}</div><div class="mail-content"><b>${esc(x.title)}</b><p>${esc(x.message)}</p><small>${new Date(x.created_at).toLocaleString('vi-VN')}</small>${buttons}</div>${x.read_at?'':'<span class="mail-new">MỚI</span>'}</article>`;
@@ -1195,7 +1256,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','duoc-duong':'💊 Dược Đường','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'⚗️ Đan Đường','duoc-duong':'💊 Dược Đường','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
@@ -1217,7 +1278,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    const href=a.getAttribute('href')||''; if(!href.startsWith('#'))return;
    const id=href.slice(1); if(id==='home'||!labels[id]){if(id==='home')exitFocus(false);return;}
    const target=document.getElementById(id);if(!target)return;
-   a.addEventListener('click',e=>{e.preventDefault();enterFocus(id,true);});
+   a.addEventListener('click',e=>{e.preventDefault();enterFocus(id,true);if(a.dataset.submenu==='true')setTimeout(()=>document.getElementById('luyen-dan-phong')?.scrollIntoView({behavior:'smooth',block:'start'}),80);});
  }
  document.querySelectorAll('a[href^="#"]').forEach(handleAnchor);
  focusExit?.addEventListener('click',()=>exitFocus(true));
