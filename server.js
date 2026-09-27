@@ -19,7 +19,7 @@ if (!DATABASE_URL) {
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: Number(process.env.DB_POOL_MAX || 5),
+  max: Number(process.env.DB_POOL_MAX || 3),
   idleTimeoutMillis: 15000,
   connectionTimeoutMillis: 5000,
   maxLifetimeSeconds: 300
@@ -30,7 +30,13 @@ async function query(text, params = []) { return pool.query(text, params); }
 // Runtime schema guard: Render/PostgreSQL deployments can keep an older schema
 // even after a newer app is deployed. Repair the columns used by profile,
 // cultivation and equipment before serving those endpoints.
-async function ensureRuntimeSchema() {
+let __ensureRuntimeSchemaPromise=null;
+async function ensureRuntimeSchema(){
+  if(!__ensureRuntimeSchemaPromise) __ensureRuntimeSchemaPromise=ensureRuntimeSchemaImpl().catch(err=>{__ensureRuntimeSchemaPromise=null;throw err;});
+  return __ensureRuntimeSchemaPromise;
+}
+
+async function ensureRuntimeSchemaImpl(){
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
@@ -244,7 +250,13 @@ async function ensureRuntimeSchema() {
 // Một số Render databases được tạo từ các phiên bản rất cũ và có thể thiếu
 // cột dù migration lúc khởi động đã chạy trước đó. Các endpoint Bí Cảnh gọi
 // guard này để tự phục hồi ngay trước khi truy vấn dữ liệu.
-async function ensureBicanhSchema() {
+let __ensureBicanhSchemaPromise=null;
+async function ensureBicanhSchema(){
+  if(!__ensureBicanhSchemaPromise) __ensureBicanhSchemaPromise=ensureBicanhSchemaImpl().catch(err=>{__ensureBicanhSchemaPromise=null;throw err;});
+  return __ensureBicanhSchemaPromise;
+}
+
+async function ensureBicanhSchemaImpl(){
   await query(`
     CREATE TABLE IF NOT EXISTS secret_realms (
       id SERIAL PRIMARY KEY,
@@ -538,7 +550,14 @@ function progressFor(spirit) {
   return {rank:r.name,tier:s.tier,stage:s.stage,tierName:s.tierName,maxTier:9,percent,next:nextRealm?.name||null,remaining:nextRealm?Math.max(0,nextRealm.min-spirit):0};
 }
 
+
+let __ensureTienPhapSchemaPromise=null;
 async function ensureTienPhapSchema(){
+  if(!__ensureTienPhapSchemaPromise) __ensureTienPhapSchemaPromise=ensureTienPhapSchemaImpl().catch(err=>{__ensureTienPhapSchemaPromise=null;throw err;});
+  return __ensureTienPhapSchemaPromise;
+}
+
+async function ensureTienPhapSchemaImpl(){
   await query(`
     CREATE TABLE IF NOT EXISTS immortal_techniques (
       id SERIAL PRIMARY KEY,
@@ -631,7 +650,14 @@ async function seedDuocDuong(){
 }
 
 
+
+let __ensureTienBanSchemaPromise=null;
 async function ensureTienBanSchema(){
+  if(!__ensureTienBanSchemaPromise) __ensureTienBanSchemaPromise=ensureTienBanSchemaImpl().catch(err=>{__ensureTienBanSchemaPromise=null;throw err;});
+  return __ensureTienBanSchemaPromise;
+}
+
+async function ensureTienBanSchemaImpl(){
   await query(`
     CREATE TABLE IF NOT EXISTS tien_ban_history (
       id BIGSERIAL PRIMARY KEY,
@@ -659,7 +685,14 @@ async function seedTienBan(){
   return beast.rows[0]?.id||null;
 }
 
+
+let __ensureBeastArenaSchemaPromise=null;
 async function ensureBeastArenaSchema(){
+  if(!__ensureBeastArenaSchemaPromise) __ensureBeastArenaSchemaPromise=ensureBeastArenaSchemaImpl().catch(err=>{__ensureBeastArenaSchemaPromise=null;throw err;});
+  return __ensureBeastArenaSchemaPromise;
+}
+
+async function ensureBeastArenaSchemaImpl(){
   await query(`
     ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS battle_debuff_percent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS battle_debuff_text TEXT NOT NULL DEFAULT '';
@@ -722,7 +755,14 @@ async function ensureBeastArenaSchema(){
   `);
 }
 
+
+let __ensureVenueRoleSchemaPromise=null;
 async function ensureVenueRoleSchema(){
+  if(!__ensureVenueRoleSchemaPromise) __ensureVenueRoleSchemaPromise=ensureVenueRoleSchemaImpl().catch(err=>{__ensureVenueRoleSchemaPromise=null;throw err;});
+  return __ensureVenueRoleSchemaPromise;
+}
+
+async function ensureVenueRoleSchemaImpl(){
   await query(`
     CREATE TABLE IF NOT EXISTS venue_roles (
       venue_code TEXT PRIMARY KEY,
@@ -736,6 +776,8 @@ async function ensureVenueRoleSchema(){
     CREATE INDEX IF NOT EXISTS idx_owned_roots_user_positive ON owned_spirit_roots(user_id) WHERE quantity>0;
     CREATE INDEX IF NOT EXISTS idx_owned_beasts_user_positive ON owned_spirit_beasts(user_id) WHERE quantity>0;
     CREATE INDEX IF NOT EXISTS idx_black_market_sales_created ON black_market_sales(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_black_market_sales_seller_created ON black_market_sales(seller_id,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_venue_roles_user_venue ON venue_roles(user_id,venue_code);
     CREATE TABLE IF NOT EXISTS dan_duong_member_invites (
       id BIGSERIAL PRIMARY KEY,
       owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -749,6 +791,7 @@ async function ensureVenueRoleSchema(){
       CHECK(owner_id<>buyer_id)
     );
     CREATE INDEX IF NOT EXISTS idx_dan_invites_buyer_status ON dan_duong_member_invites(buyer_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dan_invites_owner_status ON dan_duong_member_invites(owner_id,status,created_at DESC);
   `);
 }
 
@@ -906,6 +949,10 @@ async function initDb() {
       CHECK(owner_id <> buyer_id)
     );
     CREATE INDEX IF NOT EXISTS idx_tavern_invites_buyer_status ON tavern_member_invites(buyer_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tavern_invites_owner_status ON tavern_member_invites(owner_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tavern_listings_active ON tavern_listings(active,product_id);
+    CREATE INDEX IF NOT EXISTS idx_tavern_sales_owner_created ON tavern_sales(owner_id,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tavern_inventory_user_positive ON tavern_inventory(user_id) WHERE quantity>0;
     CREATE INDEX IF NOT EXISTS idx_tavern_listings_npc_due ON tavern_listings(active,npc_next_buy_at);
     CREATE TABLE IF NOT EXISTS tavern_sales (
       id BIGSERIAL PRIMARY KEY,
@@ -1877,7 +1924,14 @@ app.post('/api/legends',auth,async(req,res)=>{
 // ─────────────────────────────────────────────────────────────────────────────
 // TỬU LÂU · Lâu Chủ + túy phẩm + NPC tự mua sau 5 phút + mời môn nhân
 // ─────────────────────────────────────────────────────────────────────────────
+
+let __ensureTavernSchemaPromise=null;
 async function ensureTavernSchema(){
+  if(!__ensureTavernSchemaPromise) __ensureTavernSchemaPromise=ensureTavernSchemaImpl().catch(err=>{__ensureTavernSchemaPromise=null;throw err;});
+  return __ensureTavernSchemaPromise;
+}
+
+async function ensureTavernSchemaImpl(){
   await query(`
     CREATE TABLE IF NOT EXISTS tavern_roles (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -2025,7 +2079,10 @@ app.get('/api/venue-role/:venue',auth,async(req,res)=>{
     await ensureVenueRoleSchema();
     const row=(await query(`SELECT r.venue_code,r.user_id,r.applied_at,u.username,u.display_name,p.title,p.position
       FROM venue_roles r JOIN users u ON u.id=r.user_id JOIN profiles p ON p.user_id=r.user_id WHERE r.venue_code=$1`,[req.params.venue])).rows[0]||null;
-    res.json({venue:req.params.venue,meta,owner:row,me:row&&Number(row.user_id)===Number(req.session.user_id),canApply:!row,canTransfer:Boolean(row&&Number(row.user_id)===Number(req.session.user_id))});
+    const members=(await query(`SELECT u.id,u.display_name,u.username,p.rank
+      FROM users u JOIN profiles p ON p.user_id=u.id
+      WHERE u.id<>$1 ORDER BY u.id LIMIT 200`,[req.session.user_id])).rows;
+    res.json({venue:req.params.venue,meta,owner:row,me:Boolean(row&&Number(row.user_id)===Number(req.session.user_id)),canApply:!row,canTransfer:Boolean(row&&Number(row.user_id)===Number(req.session.user_id)),members});
   }catch(e){console.error('venue role:',e);res.status(500).json({error:'Không thể tải chức vị.'});}
 });
 
@@ -2039,7 +2096,7 @@ app.post('/api/venue-role/:venue/apply',auth,async(req,res)=>{
     const pr=(await client.query('SELECT title,position FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0]||{};
     if(!u){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân.'});}
     const ins=await client.query(`INSERT INTO venue_roles(venue_code,user_id,applied_at,previous_title,previous_position)
-      SELECT $1,$2,NOW(),$3,$4 WHERE NOT EXISTS(SELECT 1 FROM venue_roles WHERE venue_code=$1) RETURNING user_id,applied_at`,[req.params.venue,uid,pr.title||null,pr.position||null]);
+      VALUES($1,$2,NOW(),$3,$4) ON CONFLICT (venue_code) DO NOTHING RETURNING user_id,applied_at`,[req.params.venue,uid,pr.title||null,pr.position||null]);
     if(!ins.rowCount){
       const current=(await client.query(`SELECT u.display_name FROM venue_roles r JOIN users u ON u.id=r.user_id WHERE r.venue_code=$1`,[req.params.venue])).rows[0];
       await client.query('ROLLBACK');
@@ -3423,13 +3480,11 @@ app.get('/api/dan-duong',auth,async(req,res)=>{
     const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.min_realm,COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
       WHERE ti.category LIKE 'Đan Đường%' ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
-    const owner=(await query(`SELECT r.user_id,u.display_name,u.username FROM venue_roles r JOIN users u ON u.id=r.user_id WHERE r.venue_code='dan-duong'`)).rows[0]||null;
-    const members=owner&&Number(owner.user_id)===Number(req.session.user_id)?(await query(`SELECT u.id,u.display_name,u.username,p.rank FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name,u.id LIMIT 200`,[req.session.user_id])).rows:[];
     const inbox=(await query(`SELECT i.id,i.owner_id,i.buyer_id,i.item_id,i.price,i.status,i.created_at,ti.name,ti.category,ti.description,u.display_name AS owner_name,u.username AS owner_username
       FROM dan_duong_member_invites i JOIN treasure_items ti ON ti.id=i.item_id JOIN users u ON u.id=i.owner_id
       WHERE i.buyer_id=$1 AND i.status='pending' ORDER BY i.created_at DESC LIMIT 50`,[req.session.user_id])).rows;
     const stage=stageFor(Number(p?.spirit_power)||0);
-    res.json({items,profile:p||{},stage,owner,members,inbox,npc:{name:'Đan Đường · Huyền Lô',dialogue:'Linh thạch đổi linh tài, đan lô phân phẩm. Chọn đúng phẩm cấp rồi mới luyện được đại đan.'}});
+    res.json({items,profile:p||{},stage,inbox,npc:{name:'Đan Đường · Huyền Lô',dialogue:'Linh thạch đổi linh tài, đan lô phân phẩm. Chọn đúng phẩm cấp rồi mới luyện được đại đan.'}});
   }catch(e){console.error('dan duong:',e);res.status(500).json({error:'Không thể mở Đan Đường.'});}
 });
 app.post('/api/dan-duong/invite',auth,async(req,res)=>{
@@ -3667,7 +3722,14 @@ app.post('/api/linh-phap/buy',auth,async(req,res)=>{
 });
 
 // v3.6.34: self-healing schema for Trang Bị / Công Pháp.
+
+let __ensureEquipmentSchemaPromise=null;
 async function ensureEquipmentSchema(){
+  if(!__ensureEquipmentSchemaPromise) __ensureEquipmentSchemaPromise=ensureEquipmentSchemaImpl().catch(err=>{__ensureEquipmentSchemaPromise=null;throw err;});
+  return __ensureEquipmentSchemaPromise;
+}
+
+async function ensureEquipmentSchemaImpl(){
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
@@ -4776,7 +4838,14 @@ app.post('/api/disciples/gift',auth,async(req,res)=>{
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+let __ensureMailboxSchemaPromise=null;
 async function ensureMailboxSchema(){
+  if(!__ensureMailboxSchemaPromise) __ensureMailboxSchemaPromise=ensureMailboxSchemaImpl().catch(err=>{__ensureMailboxSchemaPromise=null;throw err;});
+  return __ensureMailboxSchemaPromise;
+}
+
+async function ensureMailboxSchemaImpl(){
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS mailbox_enabled BOOLEAN NOT NULL DEFAULT TRUE;
     CREATE TABLE IF NOT EXISTS mailbox_notifications (
@@ -4816,7 +4885,14 @@ app.post('/api/mailbox/read',auth,async(req,res)=>{try{const id=Number(req.body?
 // ─────────────────────────────────────────────────────────────────────────────
 // Khiêu chiến cần schema đầy đủ ngay cả khi Render đang dùng DB cũ.
 // Guard này chạy trước các API lôi đài để tránh SELECT vào cột chưa tồn tại.
+
+let __ensureChallengeSchemaPromise=null;
 async function ensureChallengeSchema(){
+  if(!__ensureChallengeSchemaPromise) __ensureChallengeSchemaPromise=ensureChallengeSchemaImpl().catch(err=>{__ensureChallengeSchemaPromise=null;throw err;});
+  return __ensureChallengeSchemaPromise;
+}
+
+async function ensureChallengeSchemaImpl(){
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
@@ -5487,3 +5563,44 @@ process.on('SIGINT',async()=>{
     process.exit(0);
   });
 });
+/* v3.6.76 · Venue roles: quyền chức vị dùng chung cho Chợ Đen/Đan Đường */
+async function loadVenueRole(venue){
+  return api('/api/venue-role/'+encodeURIComponent(venue),{headers:authHeaders()});
+}
+function venueRolePanel(role){
+  if(!role) return '';
+  const meta=role.meta||{};
+  const owner=role.owner;
+  const isBlack=role.venue==='black-market';
+  if(!owner){
+    return `<div class="venue-role-panel venue-role-open ${isBlack?'venue-black-aura':''}">
+      <div class="venue-role-emblem">${meta.icon||'◈'}</div>
+      <div><span class="eyebrow">${esc(meta.roleName||'Chức vị')}</span><h3>Chưa có người giữ chức</h3>
+      <p>Môn nhân ứng chức sớm nhất sẽ nhận vị trí duy nhất này.</p></div>
+      <button class="btn primary venue-apply-btn" data-venue="${esc(role.venue)}">⚜️ Ứng chức</button>
+      <span class="venue-role-msg" data-venue-msg="${esc(role.venue)}"></span>
+    </div>`;
+  }
+  const members=role.members||[];
+  return `<div class="venue-role-panel ${isBlack?'venue-black-aura':''}">
+    <div class="venue-role-emblem">${meta.icon||'◈'}</div>
+    <div class="venue-role-main">
+      <span class="eyebrow">${esc(meta.roleName||'Chức vị')}</span>
+      <h3>${isBlack?'<span class="black-master-aura">🕶️</span>':''}${esc(owner.display_name)} <small>@${esc(owner.username)}</small></h3>
+      <p>${isBlack?'Chủ Chợ Đen · nhận 20% giá trị linh thạch mỗi lần thu mua thành công.':'Chức vị duy nhất của Đan Đường.'}</p>
+    </div>
+    ${role.me?`<div class="venue-transfer-box">
+      <select class="venue-transfer-target" data-venue="${esc(role.venue)}">
+        <option value="">Chọn môn nhân để nhường vị</option>
+        ${members.map(m=>`<option value="${m.id}">${esc(m.display_name)} · @${esc(m.username)}</option>`).join('')}
+      </select>
+      <button class="btn small ghost venue-transfer-btn" data-venue="${esc(role.venue)}">Nhường vị</button>
+      <span class="venue-role-msg" data-venue-msg="${esc(role.venue)}"></span>
+    </div>`:''}
+  </div>`;
+}
+async function fillVenueTransferTargets(){
+  /* Target lists are rendered from the role response; kept as a compatibility hook. */
+}
+
+

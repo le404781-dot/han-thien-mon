@@ -959,3 +959,16 @@ main>.section{content-visibility:auto;contain-intrinsic-size:720px}
 @keyframes venueAura{0%,100%{transform:scale(.92);opacity:.35}50%{transform:scale(1.1);opacity:.9}}@keyframes venueAuraField{0%,100%{opacity:.22;transform:scale(1)}50%{opacity:.55;transform:scale(1.015)}}
 @media(max-width:700px){.venue-role-card{grid-template-columns:50px 1fr;padding:13px}.venue-role-card .venue-aura{width:46px;height:46px}.venue-transfer-row{display:grid}.venue-transfer-row select,.venue-transfer-row .btn{width:100%}.location-pin-toggle{margin-left:0}.pinned-locations{bottom:8px;overflow:auto;justify-content:flex-start;width:calc(100vw - 16px);border-radius:16px}.pinned-title{display:none}}
 @media(prefers-reduced-motion:reduce){.venue-role-card .venue-aura:before,.venue-black:before,.venue-white:before{animation:none}.pinned-locations{transition:none}}
+
+/* v3.6.76 · Chức vị + ghim nhanh */
+.venue-role-panel{position:relative;display:flex;align-items:center;gap:16px;margin:0 0 18px;padding:16px 18px;border:1px solid rgba(190,160,90,.28);border-radius:18px;background:linear-gradient(135deg,rgba(20,18,25,.94),rgba(45,32,22,.78));box-shadow:0 10px 30px rgba(0,0,0,.22);overflow:hidden}
+.venue-role-panel.venue-black-aura:before{content:"";position:absolute;inset:-35%;background:radial-gradient(circle,rgba(0,0,0,.72) 0%,rgba(20,20,28,.25) 35%,transparent 70%);animation:blackMasterAura 4s ease-in-out infinite;pointer-events:none}
+.venue-role-panel>*{position:relative;z-index:1}
+.venue-role-emblem{width:48px;height:48px;display:grid;place-items:center;border-radius:50%;font-size:25px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);flex:0 0 auto}
+.venue-role-main{flex:1;min-width:0}.venue-role-main h3{margin:.2rem 0}.venue-role-main h3 small{opacity:.65;font-weight:500;font-size:.72em}.venue-role-main p{margin:.25rem 0 0;opacity:.78}
+.black-master-aura{display:inline-block;filter:drop-shadow(0 0 8px rgba(0,0,0,.95));animation:blackMasterGlow 2.2s ease-in-out infinite}
+.venue-transfer-box{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.venue-transfer-target{max-width:240px}
+.venue-role-msg{font-size:.82rem;opacity:.85}
+@keyframes blackMasterAura{0%,100%{transform:scale(.96);opacity:.7}50%{transform:scale(1.04);opacity:1}}
+@keyframes blackMasterGlow{0%,100%{transform:scale(1);text-shadow:0 0 4px #000}50%{transform:scale(1.08);text-shadow:0 0 16px #000,0 0 28px #111}}
+@media(max-width:700px){.venue-role-panel{align-items:flex-start;flex-wrap:wrap}.venue-role-emblem{width:42px;height:42px}.venue-role-main{min-width:calc(100% - 60px)}.venue-role-panel>.btn{width:100%}.venue-transfer-box{width:100%;justify-content:stretch}.venue-transfer-box select,.venue-transfer-box button{flex:1;min-width:0}.venue-role-msg{width:100%}}

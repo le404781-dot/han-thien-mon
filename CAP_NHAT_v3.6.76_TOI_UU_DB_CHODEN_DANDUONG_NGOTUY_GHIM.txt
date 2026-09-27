@@ -1,0 +1,32 @@
+HÀN THIÊN MÔN v3.6.76
+========================
+
+1. TỐI ƯU DATABASE
+- Giảm DB pool mặc định từ 5 xuống 3 kết nối; có thể ghi đè bằng DB_POOL_MAX.
+- Cache các schema guard/migration để chỉ chạy một lần sau khi server khởi động thành công.
+- Tránh chạy lại DDL mỗi 30 giây từ tác vụ NPC Tửu Lâu.
+- Thêm một số index nhỏ, tập trung cho giao dịch Chợ Đen/Đan Đường/Tửu Lâu.
+- Giữ maintenance định kỳ để dọn session hết hạn, thông báo đã đọc và dữ liệu giao dịch cũ.
+
+2. CHỢ ĐEN / ĐAN ĐƯỜNG
+- Toàn bộ môn nhân đã đăng nhập được mở quyền truy cập Chợ Đen và Đan Đường.
+- Chức vị Chợ Đen Chi Chủ chỉ có đúng một người.
+- Ứng chức dùng INSERT ... ON CONFLICT để người ứng chức hợp lệ đầu tiên giữ vị trí khi có cạnh tranh đồng thời.
+- Chợ Đen Chi Chủ nhận 20% giá trị linh thạch của mỗi lần thu mua thành công.
+- Có cơ chế nhường vị.
+- Thêm hào quang hắc sắc quanh khu vực/chức vị Chợ Đen Chi Chủ.
+- Sửa lỗi frontend thiếu hàm quản lý chức vị khiến Chợ Đen/Đan Đường có thể không render.
+
+3. NGỘ TÚY / TỬU LÂU
+- Giữ Ngộ Túy hoạt động cho toàn bộ môn nhân có túy phẩm.
+- Giao dịch lời mời mua túy phẩm tiếp tục xử lý qua Hòm Thư Tửu Lâu.
+- Khóa giao dịch bằng transaction/row lock để tránh thanh toán trùng.
+
+4. GHIM VỊ TRÍ
+- Ghim nhanh: Chợ Đen, Đan Đường, Tửu Lâu.
+- Ghim được lưu trên thiết bị bằng localStorage.
+- Thanh ghim cố định, tối ưu cho màn hình iPhone.
+
+5. KIỂM TRA
+- node --check server.js: PASS
+- node --check script.js: PASS

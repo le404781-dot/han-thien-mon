@@ -614,6 +614,47 @@ async function loadTuDi(){
  }catch(e){const area=$('#sumeruArea');if(area)area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
+
+/* v3.6.76 · Venue roles: quyền chức vị dùng chung cho Chợ Đen/Đan Đường */
+async function loadVenueRole(venue){
+  return api('/api/venue-role/'+encodeURIComponent(venue),{headers:authHeaders()});
+}
+function venueRolePanel(role){
+  if(!role) return '';
+  const meta=role.meta||{};
+  const owner=role.owner;
+  const isBlack=role.venue==='black-market';
+  if(!owner){
+    return `<div class="venue-role-panel venue-role-open ${isBlack?'venue-black-aura':''}">
+      <div class="venue-role-emblem">${meta.icon||'◈'}</div>
+      <div><span class="eyebrow">${esc(meta.roleName||'Chức vị')}</span><h3>Chưa có người giữ chức</h3>
+      <p>Môn nhân ứng chức sớm nhất sẽ nhận vị trí duy nhất này.</p></div>
+      <button class="btn primary venue-apply-btn" data-venue="${esc(role.venue)}">⚜️ Ứng chức</button>
+      <span class="venue-role-msg" data-venue-msg="${esc(role.venue)}"></span>
+    </div>`;
+  }
+  const members=role.members||[];
+  return `<div class="venue-role-panel ${isBlack?'venue-black-aura':''}">
+    <div class="venue-role-emblem">${meta.icon||'◈'}</div>
+    <div class="venue-role-main">
+      <span class="eyebrow">${esc(meta.roleName||'Chức vị')}</span>
+      <h3>${isBlack?'<span class="black-master-aura">🕶️</span>':''}${esc(owner.display_name)} <small>@${esc(owner.username)}</small></h3>
+      <p>${isBlack?'Chủ Chợ Đen · nhận 20% giá trị linh thạch mỗi lần thu mua thành công.':'Chức vị duy nhất của Đan Đường.'}</p>
+    </div>
+    ${role.me?`<div class="venue-transfer-box">
+      <select class="venue-transfer-target" data-venue="${esc(role.venue)}">
+        <option value="">Chọn môn nhân để nhường vị</option>
+        ${members.map(m=>`<option value="${m.id}">${esc(m.display_name)} · @${esc(m.username)}</option>`).join('')}
+      </select>
+      <button class="btn small ghost venue-transfer-btn" data-venue="${esc(role.venue)}">Nhường vị</button>
+      <span class="venue-role-msg" data-venue-msg="${esc(role.venue)}"></span>
+    </div>`:''}
+  </div>`;
+}
+async function fillVenueTransferTargets(){
+  /* Target lists are rendered from the role response; kept as a compatibility hook. */
+}
+
 async function loadBlackMarket(){
  const area=$('#blackMarketArea'); if(!area||!getToken())return;
  try{
@@ -752,7 +793,7 @@ async function loadDanDuong(){
  try{
   const [d,role]=await Promise.all([api('/api/dan-duong',{headers:authHeaders()}),loadVenueRole('dan-duong')]);
   const items=d.items||[], p=d.profile||{}, ri=Number(d.stage?.realmIndex||0);
-  area.innerHTML=`${venueRolePanel(role)}<div class="dan-duong-head"><div><span class="eyebrow">🧪 ĐAN ĐƯỜNG · ĐỔI LINH THẠCH</span><h3>${esc(d.npc?.name||'Huyền Lô')}</h3><p>${esc(d.npc?.dialogue||'Đổi linh thạch lấy đan lô và linh dược theo phẩm cấp.')}</p></div><div class="duoc-wallet">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</div></div><div class="dan-duong-grid">${items.map(x=>{const locked=ri<Number(x.min_realm||0);const type=String(x.category||'').includes('Lò')?'🔥 LÒ LUYỆN ĐAN':'🌿 LINH DƯỢC';const grade=String(x.category||'').split('·').pop().trim();return `<article class="dan-card ${locked?'locked':''}"><div class="dan-card-icon">${String(x.category||'').includes('Lò')?'🔥':'🌿'}</div><span class="eyebrow">${type} · ${esc(grade)}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>Yêu cầu: ${esc(REALM_NAMES[Number(x.min_realm)]||'Luyện Khí')}</small><div class="dan-buy-row"><b>💎 ${Number(x.price||0).toLocaleString('vi-VN')}</b><span>Kho: ${Number(x.quantity||0)}</span><button class="btn small primary dan-exchange-btn" data-id="${x.id}" ${locked?'disabled':''}>${locked?'🔒 Chưa đủ cảnh giới':'Đổi linh thạch'}</button></div></article>`}).join('')}</div>${role?.me?`<div class="venue-invite-panel"><div class="section-head"><div><span class="eyebrow">📜 ĐAN CHỦ · GỬI LỜI MỜI</span><h3>Mời môn nhân mua vật phẩm</h3></div></div><form id="danInviteForm" class="tavern-invite-form"><select id="danBuyer"><option value="">Chọn môn nhân</option>${(d.members||[]).map(m=>`<option value="${m.id}">${esc(m.display_name)} · @${esc(m.username)}</option>`).join('')}</select><select id="danInviteItem"><option value="">Chọn vật phẩm</option>${items.map(x=>`<option value="${x.id}">${esc(x.name)} · ${Number(x.price).toLocaleString('vi-VN')} linh thạch</option>`).join('')}</select><button class="btn primary" type="submit">⚗️ Gửi lời mời</button></form><p id="danInviteMsg" class="tavern-msg"></p></div>`:''}<div class="venue-inbox-panel"><div class="section-head"><div><span class="eyebrow">📬 HÒM THƯ ĐAN ĐƯỜNG</span><h3>Lời mời mua vật phẩm</h3></div></div>${(d.inbox||[]).length?`<div class="tavern-inbox-list">${d.inbox.map(x=>`<article class="tavern-inbox-item" data-id="${x.id}"><div class="tavern-mail-icon">⚗️</div><div class="tavern-inbox-content"><b>${esc(x.owner_name)} mời bạn mua ${esc(x.name)}</b><p>${esc(x.category)} · ${Number(x.price).toLocaleString('vi-VN')} linh thạch</p><div class="mail-actions"><button class="btn small primary dan-invite-accept" data-id="${x.id}">✓ Đồng ý · Trả linh thạch</button><button class="btn small ghost dan-invite-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div></div></article>`).join('')}</div>`:'<div class="empty-state compact"><p>Hòm Thư Đan Đường đang tĩnh lặng.</p></div>'}</div><p id="danMsg" class="train-msg">Đan Đường đã mở cho toàn bộ môn nhân. Đan Chủ nhận 20% giá trị linh thạch của mỗi giao dịch thành công.</p>`;
+  area.innerHTML=`${venueRolePanel(role)}<div class="dan-duong-head"><div><span class="eyebrow">🧪 ĐAN ĐƯỜNG · ĐỔI LINH THẠCH</span><h3>${esc(d.npc?.name||'Huyền Lô')}</h3><p>${esc(d.npc?.dialogue||'Đổi linh thạch lấy đan lô và linh dược theo phẩm cấp.')}</p></div><div class="duoc-wallet">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</div></div><div class="dan-duong-grid">${items.map(x=>{const locked=ri<Number(x.min_realm||0);const type=String(x.category||'').includes('Lò')?'🔥 LÒ LUYỆN ĐAN':'🌿 LINH DƯỢC';const grade=String(x.category||'').split('·').pop().trim();return `<article class="dan-card ${locked?'locked':''}"><div class="dan-card-icon">${String(x.category||'').includes('Lò')?'🔥':'🌿'}</div><span class="eyebrow">${type} · ${esc(grade)}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>Yêu cầu: ${esc(REALM_NAMES[Number(x.min_realm)]||'Luyện Khí')}</small><div class="dan-buy-row"><b>💎 ${Number(x.price||0).toLocaleString('vi-VN')}</b><span>Kho: ${Number(x.quantity||0)}</span><button class="btn small primary dan-exchange-btn" data-id="${x.id}" ${locked?'disabled':''}>${locked?'🔒 Chưa đủ cảnh giới':'Đổi linh thạch'}</button></div></article>`}).join('')}</div>${role?.me?`<div class="venue-invite-panel"><div class="section-head"><div><span class="eyebrow">📜 ĐAN CHỦ · GỬI LỜI MỜI</span><h3>Mời môn nhân mua vật phẩm</h3></div></div><form id="danInviteForm" class="tavern-invite-form"><select id="danBuyer"><option value="">Chọn môn nhân</option>${(role?.members||[]).map(m=>`<option value="${m.id}">${esc(m.display_name)} · @${esc(m.username)}</option>`).join('')}</select><select id="danInviteItem"><option value="">Chọn vật phẩm</option>${items.map(x=>`<option value="${x.id}">${esc(x.name)} · ${Number(x.price).toLocaleString('vi-VN')} linh thạch</option>`).join('')}</select><button class="btn primary" type="submit">⚗️ Gửi lời mời</button></form><p id="danInviteMsg" class="tavern-msg"></p></div>`:''}<div class="venue-inbox-panel"><div class="section-head"><div><span class="eyebrow">📬 HÒM THƯ ĐAN ĐƯỜNG</span><h3>Lời mời mua vật phẩm</h3></div></div>${(d.inbox||[]).length?`<div class="tavern-inbox-list">${d.inbox.map(x=>`<article class="tavern-inbox-item" data-id="${x.id}"><div class="tavern-mail-icon">⚗️</div><div class="tavern-inbox-content"><b>${esc(x.owner_name)} mời bạn mua ${esc(x.name)}</b><p>${esc(x.category)} · ${Number(x.price).toLocaleString('vi-VN')} linh thạch</p><div class="mail-actions"><button class="btn small primary dan-invite-accept" data-id="${x.id}">✓ Đồng ý · Trả linh thạch</button><button class="btn small ghost dan-invite-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div></div></article>`).join('')}</div>`:'<div class="empty-state compact"><p>Hòm Thư Đan Đường đang tĩnh lặng.</p></div>'}</div><p id="danMsg" class="train-msg">Đan Đường đã mở cho toàn bộ môn nhân. Đan Chủ nhận 20% giá trị linh thạch của mỗi giao dịch thành công.</p>`;
   await fillVenueTransferTargets();
   document.querySelectorAll('.dan-exchange-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/dan-duong/exchange',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:1})});$('#danMsg').textContent='✅ '+x.message;await Promise.all([loadProfile(),loadDanDuong(),loadTuDi()]);}catch(e){$('#danMsg').textContent='❌ '+e.message;b.disabled=false;}});
   document.querySelectorAll('.venue-apply-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;const msg=document.querySelector(`[data-venue-msg="${b.dataset.venue}"]`);try{const x=await api('/api/venue-role/'+b.dataset.venue+'/apply',{method:'POST',headers:authHeaders(),body:'{}'});if(msg)msg.textContent='✓ '+x.message;await loadDanDuong();}catch(e){if(msg)msg.textContent='❌ '+e.message;b.disabled=false;}});
@@ -1229,7 +1270,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','duoc-duong':'💊 Dược Đường','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
@@ -1262,8 +1303,8 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 
 /* v3.6.75 · Ghim nhanh vị trí trọng yếu */
 (function setupPinnedLocations(){
- const ids=['black-market','duoc-duong','tavern'];
- const labels={'black-market':'🕶️ Chợ Đen','duoc-duong':'💊 Dược Đường','tavern':'🥂 Tửu Lâu'};
+ const ids=['black-market','dan-duong','tavern'];
+ const labels={'black-market':'🕶️ Chợ Đen','dan-duong':'🧪 Đan Đường','tavern':'🥂 Tửu Lâu'};
  let pinned=[]; try{pinned=JSON.parse(localStorage.getItem('htm_pinned_locations')||'[]').filter(x=>ids.includes(x));}catch{}
  const save=()=>localStorage.setItem('htm_pinned_locations',JSON.stringify(pinned));
  const go=id=>document.querySelector(`#nav a[href="#${id}"]`)?.click();
