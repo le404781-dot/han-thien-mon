@@ -1,0 +1,15 @@
+HÀN THIÊN MÔN v3.6.67 · TỬU LÂU
+
+1. Thêm Tửu Lâu 酒樓.
+2. Môn nhân có thể mua Túy Phẩm, lưu túy phẩm vào kho rượu và uống rượu.
+3. Túy Phẩm có 5 phẩm cấp, giá server-side bị giới hạn theo phẩm cấp trong khoảng 100–500 linh thạch.
+4. Môn nhân có thể ứng cử Lâu Chủ. Khi vị trí trống, ứng cử thành công 100%; tại một thời điểm chỉ có 1 Lâu Chủ.
+5. Lâu Chủ được đặt giá từng Túy Phẩm trong giới hạn phẩm cấp.
+6. NPC có thể tự động ghé mua ngẫu nhiên 5–10 phút/lần; nếu bật bán tự động, Lâu Chủ nhận 20% giá bán.
+7. Môn nhân mua trực tiếp: server trừ 100%, Lâu Chủ nhận 90%, 10% là phí hệ thống.
+8. Môn nhân có thể tạo bàn Tửu Lâu 2–12 chỗ và mời bằng hữu đã kết giao.
+9. Bàn có chat nhóm riêng; có WebRTC voice mesh qua server signaling, hỗ trợ microphone trên HTTPS.
+10. Lời mời Tửu Lâu xuất hiện trong Hòm Thư và có thể chấp nhận/từ chối trực tiếp.
+11. Thêm trạng thái Túy Ý 10 phút khi uống rượu.
+12. NPC settlement có cả timer 60 giây và lazy settlement khi mở Tửu Lâu để phù hợp môi trường Render có thể sleep.
+13. Server kiểm tra quyền ở tất cả endpoint; không tin dữ liệu giá từ client.

@@ -678,6 +678,120 @@ async function ensureBeastArenaSchema(){
   `);
 }
 
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // TỬU LÂU · 酒樓
+  // ───────────────────────────────────────────────────────────────────────────
+  await query(`
+    CREATE TABLE IF NOT EXISTS tavern_owner (
+      id INTEGER PRIMARY KEY DEFAULT 1 CHECK(id=1),
+      owner_user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,
+      first_application_done BOOLEAN NOT NULL DEFAULT FALSE,
+      appointed_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    INSERT INTO tavern_owner(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
+
+    CREATE TABLE IF NOT EXISTS tavern_products (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      grade TEXT NOT NULL,
+      min_price INTEGER NOT NULL CHECK(min_price >= 100),
+      max_price INTEGER NOT NULL CHECK(max_price <= 500 AND max_price >= min_price),
+      price INTEGER NOT NULL CHECK(price >= 100 AND price <= 500),
+      description TEXT NOT NULL DEFAULT '',
+      emoji TEXT NOT NULL DEFAULT '🥂',
+      active BOOLEAN NOT NULL DEFAULT TRUE
+    );
+    CREATE TABLE IF NOT EXISTS tavern_tables (
+      id BIGSERIAL PRIMARY KEY,
+      owner_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT 'Bàn Tửu Lâu',
+      seats INTEGER NOT NULL DEFAULT 6 CHECK(seats BETWEEN 2 AND 12),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      closed_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_tavern_tables_owner ON tavern_tables(owner_user_id,created_at DESC);
+    CREATE TABLE IF NOT EXISTS tavern_table_members (
+      table_id BIGINT NOT NULL REFERENCES tavern_tables(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'guest' CHECK(role IN ('host','guest')),
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(table_id,user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tavern_table_members_user ON tavern_table_members(user_id,table_id);
+    CREATE TABLE IF NOT EXISTS tavern_invites (
+      id BIGSERIAL PRIMARY KEY,
+      table_id BIGINT NOT NULL REFERENCES tavern_tables(id) ON DELETE CASCADE,
+      inviter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      invitee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected','cancelled')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      UNIQUE(table_id,invitee_id,status)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tavern_invites_user ON tavern_invites(invitee_id,status,created_at DESC);
+    CREATE TABLE IF NOT EXISTS tavern_messages (
+      id BIGSERIAL PRIMARY KEY,
+      table_id BIGINT NOT NULL REFERENCES tavern_tables(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_tavern_messages_table ON tavern_messages(table_id,id DESC);
+    CREATE TABLE IF NOT EXISTS tavern_drinks (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 0 CHECK(quantity >= 0),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,product_id)
+    );
+    CREATE TABLE IF NOT EXISTS tavern_sales (
+      id BIGSERIAL PRIMARY KEY,
+      table_id BIGINT REFERENCES tavern_tables(id) ON DELETE SET NULL,
+      buyer_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE RESTRICT,
+      quantity INTEGER NOT NULL DEFAULT 1 CHECK(quantity > 0),
+      price_each INTEGER NOT NULL CHECK(price_each BETWEEN 100 AND 500),
+      total INTEGER NOT NULL CHECK(total > 0),
+      buyer_type TEXT NOT NULL CHECK(buyer_type IN ('member','npc')),
+      owner_share INTEGER NOT NULL DEFAULT 0,
+      system_fee INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_tavern_sales_owner ON tavern_sales(owner_id,id DESC);
+    CREATE TABLE IF NOT EXISTS tavern_settings (
+      owner_user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      npc_auto_sell BOOLEAN NOT NULL DEFAULT FALSE,
+      npc_next_sale_at TIMESTAMPTZ,
+      npc_last_sale_at TIMESTAMPTZ,
+      drunk_until TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS tavern_voice_signals (
+      id BIGSERIAL PRIMARY KEY,
+      table_id BIGINT NOT NULL REFERENCES tavern_tables(id) ON DELETE CASCADE,
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      signal_type TEXT NOT NULL CHECK(signal_type IN ('offer','answer','ice','leave')),
+      payload TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_tavern_voice_recipient ON tavern_voice_signals(recipient_id,table_id,id);
+  `);
+
+  await query(`
+    INSERT INTO tavern_products(name,grade,min_price,max_price,price,description,emoji) VALUES
+      ('Thanh Trúc Tửu','Phàm',100,120,100,'Rượu trúc thanh nhẹ, hương thơm dịu.','🍶'),
+      ('Linh Hoa Tửu','Linh',130,220,180,'Rượu ủ từ linh hoa, linh khí nhu hòa.','🥂'),
+      ('Huyền Băng Ngọc Lộ','Huyền',230,320,280,'Ngọc lộ lạnh như băng, hậu vị sâu.','🍷'),
+      ('Địa Mạch Túy','Địa',330,430,380,'Túy phẩm lấy linh tuyền địa mạch làm cốt.','🍵'),
+      ('Thiên Tiên Túy','Thiên',440,500,500,'Túy phẩm thượng hạng dành cho tiên nhân.','🍾')
+    ON CONFLICT(name) DO NOTHING;
+    UPDATE tavern_products SET price=GREATEST(min_price,LEAST(max_price,price));
+  `);
+
 async function initDb() {
   await query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -4578,5 +4692,107 @@ app.post('/api/beast-arena/online/turn',auth,async(req,res)=>{
 });
 
 app.get('/api/beast-arena/spectate',auth,async(req,res)=>{try{await ensureBeastArenaSchema();const rows=(await query(`SELECT r.id,r.created_at,r.rounds,r.battle_log,r.winner_id,cu.display_name AS challenger_name,ou.display_name AS opponent_name,cb.name AS challenger_beast,ob.name AS opponent_beast,r.challenger_type,r.opponent_type,r.challenger_hp,r.opponent_hp FROM beast_arena_requests r JOIN users cu ON cu.id=r.challenger_id JOIN users ou ON ou.id=r.opponent_id JOIN spirit_beasts_catalog cb ON cb.id=r.challenger_beast_id LEFT JOIN spirit_beasts_catalog ob ON ob.id=r.opponent_beast_id WHERE r.status='completed' ORDER BY r.id DESC LIMIT 12`)).rows;res.json({rows});}catch(e){res.status(500).json({error:'Không thể tải sàn Thú Trường.'});}});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TỬU LÂU · 酒樓
+// ─────────────────────────────────────────────────────────────────────────────
+const TAVERN_PRICE_BY_GRADE={Phàm:[100,120],Linh:[130,220],Huyền:[230,320],Địa:[330,430],Thiên:[440,500]};
+function tavernRandNext(){ return new Date(Date.now()+(5+Math.floor(Math.random()*6))*60*1000); }
+async function ensureTavernSchema(){ await ensureRuntimeSchema(); }
+async function tavernFriend(client,a,b){
+  return !!(await client.query(`SELECT 1 FROM friend_requests WHERE status='accepted' AND ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) LIMIT 1`,[a,b])).rows[0];
+}
+async function tavernMember(client,tableId,userId){
+  return !!(await client.query('SELECT 1 FROM tavern_table_members WHERE table_id=$1 AND user_id=$2',[tableId,userId])).rows[0];
+}
+async function settleTavernNpc(){
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const owner=(await client.query(`SELECT owner_user_id FROM tavern_owner WHERE id=1 FOR UPDATE`)).rows[0];
+    const settings=owner?.owner_user_id?(await client.query(`SELECT npc_auto_sell,npc_next_sale_at FROM tavern_settings WHERE owner_user_id=$1 FOR UPDATE`,[owner.owner_user_id])).rows[0]:null;
+    if(!owner?.owner_user_id || !settings?.npc_auto_sell){await client.query('COMMIT');return null;}
+    const due=!settings.npc_next_sale_at || new Date(settings.npc_next_sale_at)<=new Date();
+    if(!due){await client.query('COMMIT');return null;}
+    const products=(await client.query('SELECT * FROM tavern_products WHERE active=TRUE ORDER BY id')).rows;
+    if(!products.length){await client.query('COMMIT');return null;}
+    const product=products[Math.floor(Math.random()*products.length)];
+    const price=Math.max(Number(product.min_price),Math.min(Number(product.max_price),Number(product.price)||Number(product.min_price)));
+    const ownerShare=Math.floor(price*.20), fee=price-ownerShare;
+    await client.query('UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1',[owner.owner_user_id,ownerShare]);
+    await client.query(`INSERT INTO tavern_sales(owner_id,product_id,quantity,price_each,total,buyer_type,owner_share,system_fee) VALUES($1,$2,1,$3,$3,'npc',$4,$5)`,[owner.owner_user_id,product.id,price,ownerShare,fee]);
+    const next=tavernRandNext();
+    await client.query(`UPDATE tavern_settings SET npc_last_sale_at=NOW(),npc_next_sale_at=$2,updated_at=NOW() WHERE owner_user_id=$1`,[owner.owner_user_id,next]);
+    await client.query('COMMIT');
+    return {product,price,ownerShare,next};
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tavern npc:',e);return null}finally{client.release();}
+}
+
+app.get('/api/tavern',auth,async(req,res)=>{
+  try{
+    await ensureTavernSchema();
+    await settleTavernNpc();
+    const uid=Number(req.session.user_id);
+    const owner=(await query(`SELECT o.owner_user_id,o.first_application_done,o.appointed_at,u.display_name,p.rank,p.avatar FROM tavern_owner o LEFT JOIN users u ON u.id=o.owner_user_id LEFT JOIN profiles p ON p.user_id=o.owner_user_id WHERE o.id=1`)).rows[0]||{};
+    const products=(await query('SELECT * FROM tavern_products WHERE active=TRUE ORDER BY id')).rows;
+    const settings=owner.owner_user_id?(await query('SELECT * FROM tavern_settings WHERE owner_user_id=$1',[owner.owner_user_id])).rows[0]||{}:{};
+    const tables=(await query(`SELECT t.id,t.name,t.seats,t.created_at,t.owner_user_id,u.display_name AS host_name,
+      (SELECT COUNT(*) FROM tavern_table_members tm WHERE tm.table_id=t.id)::int AS member_count,
+      EXISTS(SELECT 1 FROM tavern_table_members tm WHERE tm.table_id=t.id AND tm.user_id=$1) AS joined
+      FROM tavern_tables t JOIN users u ON u.id=t.owner_user_id WHERE t.closed_at IS NULL ORDER BY t.id DESC LIMIT 30`,[uid])).rows;
+    const mine=(await query(`SELECT t.id,t.name,t.seats,t.owner_user_id FROM tavern_tables t JOIN tavern_table_members tm ON tm.table_id=t.id WHERE tm.user_id=$1 AND t.closed_at IS NULL ORDER BY t.id DESC LIMIT 1`,[uid])).rows[0]||null;
+    const invites=(await query(`SELECT i.id,i.table_id,i.inviter_id,u.display_name AS inviter_name,t.name,t.seats FROM tavern_invites i JOIN users u ON u.id=i.inviter_id JOIN tavern_tables t ON t.id=i.table_id WHERE i.invitee_id=$1 AND i.status='pending' ORDER BY i.id DESC LIMIT 20`,[uid])).rows;
+    const drinks=(await query(`SELECT td.product_id,SUM(td.quantity)::int AS quantity,p.name,p.grade,p.emoji,p.description FROM tavern_drinks td JOIN tavern_products p ON p.id=td.product_id WHERE td.user_id=$1 GROUP BY td.product_id,p.name,p.grade,p.emoji,p.description ORDER BY p.id`,[uid])).rows;
+    let messages=[]; let members=[];
+    if(mine){
+      messages=(await query(`SELECT m.id,m.message,m.created_at,m.user_id,u.display_name,p.avatar,p.rank FROM tavern_messages m JOIN users u ON u.id=m.user_id JOIN profiles p ON p.user_id=u.id WHERE m.table_id=$1 ORDER BY m.id DESC LIMIT 100`,[mine.id])).rows.reverse();
+      members=(await query(`SELECT tm.user_id,tm.role,u.display_name,p.avatar,p.rank FROM tavern_table_members tm JOIN users u ON u.id=tm.user_id JOIN profiles p ON p.user_id=u.id WHERE tm.table_id=$1 ORDER BY tm.role DESC,tm.joined_at`,[mine.id])).rows;
+    }
+    res.json({owner,products,settings:{npcAutoSell:!!settings.npc_auto_sell,npcNextSaleAt:settings.npc_next_sale_at,npcLastSaleAt:settings.npc_last_sale_at},tables,mine,invites,drinks,messages,members,me:{id:uid}});
+  }catch(e){console.error('tavern load:',e);res.status(500).json({error:'Không thể mở Tửu Lâu.'});}
+});
+
+app.post('/api/tavern/apply-owner',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const row=(await client.query('SELECT * FROM tavern_owner WHERE id=1 FOR UPDATE')).rows[0];
+    if(row?.owner_user_id){await client.query('ROLLBACK');return res.status(409).json({error:'Tửu Lâu hiện đã có Lâu Chủ.'});}
+    await client.query(`UPDATE tavern_owner SET owner_user_id=$1,first_application_done=TRUE,appointed_at=NOW(),updated_at=NOW() WHERE id=1`,[req.session.user_id]);
+    await client.query(`INSERT INTO tavern_settings(owner_user_id,npc_auto_sell,npc_next_sale_at) VALUES($1,FALSE,$2) ON CONFLICT(owner_user_id) DO NOTHING`,[req.session.user_id,tavernRandNext()]);
+    await client.query(`UPDATE profiles SET title='Lâu Chủ',position='Lâu Chủ Tửu Lâu',updated_at=NOW() WHERE user_id=$1`,[req.session.user_id]);
+    await client.query('COMMIT');
+    res.json({ok:true,message:'Ứng cử thành công 100%. Đạo hữu đã trở thành Lâu Chủ duy nhất của Tửu Lâu.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tavern owner:',e);res.status(500).json({error:'Không thể ứng cử Lâu Chủ.'});}finally{client.release();}
+});
+app.post('/api/tavern/resign-owner',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN');const o=(await client.query('SELECT owner_user_id FROM tavern_owner WHERE id=1 FOR UPDATE')).rows[0];if(Number(o?.owner_user_id)!==Number(req.session.user_id)){await client.query('ROLLBACK');return res.status(403).json({error:'Bạn không phải Lâu Chủ.'});}await client.query('UPDATE tavern_owner SET owner_user_id=NULL,updated_at=NOW() WHERE id=1');await client.query('DELETE FROM tavern_settings WHERE owner_user_id=$1',[req.session.user_id]);await client.query(`UPDATE profiles SET title='Tân đệ tử',position=CASE WHEN position='Lâu Chủ Tửu Lâu' THEN 'Ngoại môn đệ tử' ELSE position END,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id]);await client.query('COMMIT');res.json({ok:true,message:'Đã từ nhiệm Lâu Chủ. Tửu Lâu đang chờ người kế nhiệm.'});}catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể từ nhiệm.'});}finally{client.release();}
+});
+app.patch('/api/tavern/product',auth,async(req,res)=>{
+  try{const id=Number(req.body?.productId),price=Math.round(Number(req.body?.price));const o=(await query('SELECT owner_user_id FROM tavern_owner WHERE id=1')).rows[0];if(Number(o?.owner_user_id)!==Number(req.session.user_id))return res.status(403).json({error:'Chỉ Lâu Chủ mới được đặt giá Túy Phẩm.'});const p=(await query('SELECT * FROM tavern_products WHERE id=$1',[id])).rows[0];if(!p)return res.status(404).json({error:'Túy phẩm không tồn tại.'});if(price<Number(p.min_price)||price>Number(p.max_price))return res.status(400).json({error:`Giá ${p.name} phải từ ${p.min_price}–${p.max_price} linh thạch.`});await query('UPDATE tavern_products SET price=$2 WHERE id=$1',[id,price]);res.json({ok:true,message:`Đã đặt ${p.name} = ${price} linh thạch.`});}catch(e){res.status(500).json({error:'Không thể đặt giá Túy Phẩm.'});}
+});
+app.patch('/api/tavern/npc-auto',auth,async(req,res)=>{
+  try{const enabled=Boolean(req.body?.enabled),o=(await query('SELECT owner_user_id FROM tavern_owner WHERE id=1')).rows[0];if(Number(o?.owner_user_id)!==Number(req.session.user_id))return res.status(403).json({error:'Chỉ Lâu Chủ mới có quyền bật bán tự động.'});await query(`INSERT INTO tavern_settings(owner_user_id,npc_auto_sell,npc_next_sale_at) VALUES($1,$2,$3) ON CONFLICT(owner_user_id) DO UPDATE SET npc_auto_sell=EXCLUDED.npc_auto_sell,npc_next_sale_at=CASE WHEN EXCLUDED.npc_auto_sell THEN COALESCE(tavern_settings.npc_next_sale_at,$3) ELSE NULL END,updated_at=NOW()`,[req.session.user_id,enabled,enabled?tavernRandNext():null]);res.json({ok:true,enabled,message:enabled?'Đã mở NPC tự động bán · NPC sẽ ghé ngẫu nhiên 5–10 phút/lần và Lâu Chủ nhận 20%.':'Đã tắt NPC tự động bán.'});}catch(e){res.status(500).json({error:'Không thể đổi chế độ bán tự động.'});}
+});
+
+app.post('/api/tavern/table',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{await client.query('BEGIN');const name=String(req.body?.name||'Bàn Tửu Lâu').trim().slice(0,60)||'Bàn Tửu Lâu';const seats=Math.max(2,Math.min(12,Number(req.body?.seats)||6));const old=(await client.query(`SELECT t.id FROM tavern_tables t JOIN tavern_table_members tm ON tm.table_id=t.id WHERE tm.user_id=$1 AND t.closed_at IS NULL LIMIT 1`,[req.session.user_id])).rows[0];if(old){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã có một bàn Tửu Lâu đang mở.'});}const t=(await client.query(`INSERT INTO tavern_tables(owner_user_id,name,seats) VALUES($1,$2,$3) RETURNING id,name,seats`,[req.session.user_id,name,seats])).rows[0];await client.query(`INSERT INTO tavern_table_members(table_id,user_id,role) VALUES($1,$2,'host')`,[t.id,req.session.user_id]);await client.query('COMMIT');res.json({ok:true,table:t,message:'Đã mở bàn Tửu Lâu. Hãy mời bằng hữu vào bàn.'});}catch(e){try{await client.query('ROLLBACK')}catch{}res.status(500).json({error:'Không thể tạo bàn Tửu Lâu.'});}finally{client.release();}
+});
+app.post('/api/tavern/table/close',auth,async(req,res)=>{try{const id=Number(req.body?.tableId);const r=await query('UPDATE tavern_tables SET closed_at=NOW() WHERE id=$1 AND owner_user_id=$2 RETURNING id',[id,req.session.user_id]);if(!r.rows[0])return res.status(403).json({error:'Bạn không phải chủ bàn.'});res.json({ok:true});}catch(e){res.status(500).json({error:'Không thể đóng bàn.'});}});
+app.post('/api/tavern/invite',auth,async(req,res)=>{const client=await pool.connect();try{await client.query('BEGIN');const tableId=Number(req.body?.tableId),invitee=Number(req.body?.userId);if(!Number.isInteger(tableId)||!Number.isInteger(invitee)||invitee===Number(req.session.user_id))throw Object.assign(new Error('Lời mời không hợp lệ.'),{status:400});if(!(await tavernMember(client,tableId,req.session.user_id)))throw Object.assign(new Error('Bạn chưa ngồi tại bàn này.'),{status:403});if(!(await tavernFriend(client,req.session.user_id,invitee)))throw Object.assign(new Error('Chỉ có thể mời bằng hữu đã kết giao.'),{status:403});const seats=(await client.query('SELECT seats FROM tavern_tables WHERE id=$1 AND closed_at IS NULL FOR UPDATE',[tableId])).rows[0];if(!seats)throw Object.assign(new Error('Bàn không tồn tại.'),{status:404});const count=Number((await client.query('SELECT COUNT(*) c FROM tavern_table_members WHERE table_id=$1',[tableId])).rows[0].c);if(count>=Number(seats.seats))throw Object.assign(new Error('Bàn đã đủ chỗ.'),{status:409});const inv=(await client.query(`INSERT INTO tavern_invites(table_id,inviter_id,invitee_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id`,[tableId,req.session.user_id,invitee])).rows[0];if(!inv)throw Object.assign(new Error('Lời mời này đã được gửi.'),{status:409});await createMailboxNotification(invitee,'tavern_invite','🥂 Lời mời Tửu Lâu',`Đạo hữu mời bạn đến ${String((await client.query('SELECT name FROM tavern_tables WHERE id=$1',[tableId])).rows[0]?.name||'bàn Tửu Lâu')}.`,'#tavern',{action:'tavern_invite',invitationId:Number(inv.id),tableId});await client.query('COMMIT');res.json({ok:true,message:'Đã gửi lời mời.'});}catch(e){try{await client.query('ROLLBACK')}catch{}res.status(e.status||500).json({error:e.message||'Không thể mời bằng hữu.'});}finally{client.release();}});
+app.post('/api/tavern/invite/respond',auth,async(req,res)=>{const client=await pool.connect();try{await client.query('BEGIN');const id=Number(req.body?.inviteId),action=String(req.body?.action||'');const inv=(await client.query(`SELECT i.*,t.seats,t.closed_at FROM tavern_invites i JOIN tavern_tables t ON t.id=i.table_id WHERE i.id=$1 AND i.invitee_id=$2 AND i.status='pending' FOR UPDATE`,[id,req.session.user_id])).rows[0];if(!inv){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời không còn hiệu lực.'});}if(action!=='accept'){await client.query(`UPDATE tavern_invites SET status='rejected',responded_at=NOW() WHERE id=$1`,[id]);await client.query('COMMIT');return res.json({ok:true,message:'Đã từ chối lời mời.'});}const count=Number((await client.query('SELECT COUNT(*) c FROM tavern_table_members WHERE table_id=$1',[inv.table_id])).rows[0].c);if(inv.closed_at||count>=Number(inv.seats)){await client.query('ROLLBACK');return res.status(409).json({error:'Bàn đã đóng hoặc đủ chỗ.'});}await client.query(`INSERT INTO tavern_table_members(table_id,user_id,role) VALUES($1,$2,'guest') ON CONFLICT DO NOTHING`,[inv.table_id,req.session.user_id]);await client.query(`UPDATE tavern_invites SET status='accepted',responded_at=NOW() WHERE id=$1`,[id]);await client.query('COMMIT');res.json({ok:true,tableId:inv.table_id,message:'Đã nhập bàn Tửu Lâu.'});}catch(e){try{await client.query('ROLLBACK')}catch{}res.status(500).json({error:'Không thể xử lý lời mời.'});}finally{client.release();}});
+app.post('/api/tavern/table/join',auth,async(req,res)=>{try{const tableId=Number(req.body?.tableId);const r=await query(`SELECT 1 FROM tavern_invites WHERE table_id=$1 AND invitee_id=$2 AND status='pending'`,[tableId,req.session.user_id]);if(!r.rows[0])return res.status(403).json({error:'Bạn cần lời mời hợp lệ để vào bàn.'});return res.status(400).json({error:'Hãy chấp nhận lời mời từ Hòm Thư.'});}catch(e){res.status(500).json({error:'Không thể vào bàn.'});}});
+app.post('/api/tavern/message',auth,async(req,res)=>{try{const tableId=Number(req.body?.tableId),message=String(req.body?.message||'').trim().slice(0,1000);if(!message)return res.status(400).json({error:'Truyền âm không được để trống.'});if(!await tavernMember(pool,tableId,req.session.user_id))return res.status(403).json({error:'Bạn chưa ở trong bàn Tửu Lâu.'});const r=await query(`INSERT INTO tavern_messages(table_id,user_id,message) VALUES($1,$2,$3) RETURNING id,created_at`,[tableId,req.session.user_id,message]);res.status(201).json({ok:true,...r.rows[0]});}catch(e){res.status(500).json({error:'Không thể gửi truyền âm Tửu Lâu.'});}});
+app.post('/api/tavern/buy',auth,async(req,res)=>{const client=await pool.connect();try{await client.query('BEGIN');const uid=Number(req.session.user_id),productId=Number(req.body?.productId),tableId=Number(req.body?.tableId)||null;const p=(await client.query('SELECT * FROM tavern_products WHERE id=$1 AND active=TRUE FOR UPDATE',[productId])).rows[0];if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Túy phẩm không tồn tại.'});}if(tableId && !await tavernMember(client,tableId,uid)){await client.query('ROLLBACK');return res.status(403).json({error:'Bạn chưa ở bàn giao dịch.'});}const price=Number(p.price);const buyer=(await client.query('SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];if(!buyer||Number(buyer.spirit_stones)<price){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ linh thạch.'});}const owner=(await client.query('SELECT owner_user_id FROM tavern_owner WHERE id=1 FOR UPDATE')).rows[0];if(!owner?.owner_user_id){await client.query('ROLLBACK');return res.status(409).json({error:'Tửu Lâu hiện chưa có Lâu Chủ.'});}const ownerShare=Math.floor(price*.90),fee=price-ownerShare;await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[uid,price]);await client.query('UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1',[owner.owner_user_id,ownerShare]);await client.query(`INSERT INTO tavern_drinks(user_id,product_id,quantity) VALUES($1,$2,1) ON CONFLICT(user_id,product_id) DO UPDATE SET quantity=tavern_drinks.quantity+1`,[uid,productId]);const sale=(await client.query(`INSERT INTO tavern_sales(table_id,buyer_id,owner_id,product_id,quantity,price_each,total,buyer_type,owner_share,system_fee) VALUES($1,$2,$3,$4,1,$5,$5,'member',$6,$7) RETURNING id`,[tableId,uid,owner.owner_user_id,productId,price,ownerShare,fee])).rows[0];if(tableId)await client.query(`INSERT INTO tavern_messages(table_id,user_id,message) VALUES($1,$2,$3)`,[tableId,uid,`🥂 Giao dịch thành công: ${p.emoji} ${p.name} · ${price} linh thạch · Lâu Chủ nhận ${ownerShare} linh thạch.`]);await client.query('COMMIT');res.json({ok:true,message:`Đã mua ${p.name}. Giao dịch thành công; Lâu Chủ nhận 90%.`,price,ownerShare,saleId:sale.id});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tavern buy:',e);res.status(500).json({error:'Giao dịch Tửu Lâu thất bại.'});}finally{client.release();}});
+app.post('/api/tavern/drink',auth,async(req,res)=>{const client=await pool.connect();try{await client.query('BEGIN');const uid=Number(req.session.user_id),productId=Number(req.body?.productId);const d=(await client.query('SELECT td.quantity,p.name,p.emoji,p.grade FROM tavern_drinks td JOIN tavern_products p ON p.id=td.product_id WHERE td.user_id=$1 AND td.product_id=$2 FOR UPDATE',[uid,productId])).rows[0];if(!d||Number(d.quantity)<1){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa có túy phẩm này.'});}await client.query('UPDATE tavern_drinks SET quantity=quantity-1 WHERE user_id=$1 AND product_id=$2',[uid,productId]);await client.query(`INSERT INTO tavern_settings(owner_user_id,drunk_until) VALUES($1,NOW()+INTERVAL '10 minutes') ON CONFLICT(owner_user_id) DO UPDATE SET drunk_until=GREATEST(COALESCE(tavern_settings.drunk_until,NOW()),NOW()+INTERVAL '10 minutes'),updated_at=NOW()`,[uid]);await client.query('COMMIT');res.json({ok:true,message:`${d.emoji} ${d.name} 入喉 · Túy Ý kéo dài 10 phút.`});}catch(e){try{await client.query('ROLLBACK')}catch{}res.status(500).json({error:'Không thể uống rượu.'});}finally{client.release();}});
+app.get('/api/tavern/table/:id',auth,async(req,res)=>{try{const id=Number(req.params.id);if(!await tavernMember(pool,id,req.session.user_id))return res.status(403).json({error:'Bạn chưa ở bàn.'});const rows=await query(`SELECT m.id,m.message,m.created_at,m.user_id,u.display_name,p.avatar,p.rank FROM tavern_messages m JOIN users u ON u.id=m.user_id JOIN profiles p ON p.user_id=u.id WHERE m.table_id=$1 ORDER BY m.id DESC LIMIT 100`,[id]);const members=await query(`SELECT tm.user_id,tm.role,u.display_name,p.avatar,p.rank FROM tavern_table_members tm JOIN users u ON u.id=tm.user_id JOIN profiles p ON p.user_id=u.id WHERE tm.table_id=$1`,[id]);res.json({rows:rows.rows.reverse(),members:members.rows});}catch(e){res.status(500).json({error:'Không thể tải bàn Tửu Lâu.'});}});
+app.get('/api/tavern/voice',auth,async(req,res)=>{try{const tableId=Number(req.query.tableId);if(!await tavernMember(pool,tableId,req.session.user_id))return res.status(403).json({error:'Bạn chưa ở bàn.'});const r=await query(`SELECT id,sender_id,signal_type,payload,created_at FROM tavern_voice_signals WHERE table_id=$1 AND recipient_id=$2 ORDER BY id ASC LIMIT 50`,[tableId,req.session.user_id]);if(r.rows.length)await query(`DELETE FROM tavern_voice_signals WHERE id=ANY($1::bigint[])`,[r.rows.map(x=>x.id)]);const m=await query(`SELECT user_id FROM tavern_table_members WHERE table_id=$1 AND user_id<>$2`,[tableId,req.session.user_id]);res.json({signals:r.rows,members:m.rows.map(x=>Number(x.user_id)),me:Number(req.session.user_id)});}catch(e){res.status(500).json({error:'Không thể đồng bộ voice Tửu Lâu.'});}});
+app.post('/api/tavern/voice',auth,async(req,res)=>{try{const tableId=Number(req.body?.tableId),recipient=Number(req.body?.recipientId),type=String(req.body?.signalType||''),payload=String(req.body?.payload||'');if(!['offer','answer','ice','leave'].includes(type)||!payload)return res.status(400).json({error:'Tín hiệu voice không hợp lệ.'});if(!await tavernMember(pool,tableId,req.session.user_id)||!await tavernMember(pool,tableId,recipient))return res.status(403).json({error:'Thành viên voice không hợp lệ.'});await query(`INSERT INTO tavern_voice_signals(table_id,sender_id,recipient_id,signal_type,payload) VALUES($1,$2,$3,$4,$5)`,[tableId,req.session.user_id,recipient,type,payload.slice(0,20000)]);res.json({ok:true});}catch(e){res.status(500).json({error:'Không thể gửi tín hiệu voice.'});}});
+
+// NPC ghé Tửu Lâu tự động; không phụ thuộc người dùng đang mở trang.
+setInterval(()=>{settleTavernNpc().catch(()=>{});},60000);
 
 initDb().then(()=>app.listen(PORT,()=>console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`))).catch(err=>{console.error('Không khởi tạo được database:',err);process.exit(1);});
