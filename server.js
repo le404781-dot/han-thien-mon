@@ -396,8 +396,9 @@ async function ensureBicanhSchema() {
 
 // Cửu Đại Cảnh Giới — mỗi cảnh giới có 9 tầng.
 const SPIRIT_TO_STONE_RATE = 100; // 100 linh lực = 1 linh thạch
-const REALM_DIFFICULTY_MULTIPLIER = 28;
+const REALM_DIFFICULTY_MULTIPLIER = 50;
 const EARLY_REALM_DIFFICULTY_MULTIPLIER = 2;
+const IMMORTAL_EMPEROR_DIFFICULTY_MULTIPLIER = 100;
 const BASE_REALM_NAMES = [
   ['Luyện Khí','Cảnh giới nhập môn.'],['Trúc Cơ','Trúc lập đạo cơ, linh lực bắt đầu tăng mạnh.'],['Kim Đan','Ngưng tụ kim đan, cần linh lực vượt xa phàm tu.'],['Nguyên Anh','Nguyên anh xuất thế, con đường tu luyện ngày càng khó.'],['Hóa Thần','Thần niệm hóa hình, linh lực yêu cầu tăng vọt.'],['Luyện Hư','Luyện hóa hư không, mỗi bước tiến đều cần lượng linh lực khổng lồ.'],['Hợp Thể','Thân-hồn hợp nhất, đột phá cực kỳ gian nan.'],['Đại Thừa','Đạo vận đại thành, khoảng cách giữa các cảnh giới tăng mạnh.'],['Độ Kiếp','Đón thiên kiếp, chuẩn bị bước vào tiên giới.'],['Nhân Tiên','Bước vào tiên đạo, tiên pháp bắt đầu được mở khóa.'],['Chân Tiên','Tiên thể ổn định, tiên lực tinh thuần hơn.'],['Địa Tiên','Làm chủ địa mạch tiên vực, căn cơ ngày càng sâu.'],['Thiên Tiên','Tiên lực hòa nhập thiên địa.'],['Huyền Tiên','Lĩnh ngộ pháp tắc sâu hơn.'],['Kim Tiên','Thân thể và nguyên thần tiến vào bất hủ.'],['Tiên Quân','Bậc thống trị một phương tiên vực.'],['Tiên Tôn','Chạm tới đại đạo chí cao.'],['Tiên Đế','Cảnh giới tối cao, phân thành Nhất Tinh đến Cửu Cửu Tinh.']
 ];
@@ -405,6 +406,7 @@ const BASE_REALM_NAMES = [
 const BASE_RANK_MINS = [0,1000,3000,7000,15000,30000,60000,120000,240000,510000,780000,1050000,1320000,1590000,1860000,2130000,2400000,2670000];
 const RANK_MINS = BASE_RANK_MINS.map((v,i)=>{
   if(i===0) return 0;
+  if (i === BASE_REALM_NAMES.length - 1) return v * IMMORTAL_EMPEROR_DIFFICULTY_MULTIPLIER;
   return v * (i <= 7 ? EARLY_REALM_DIFFICULTY_MULTIPLIER : REALM_DIFFICULTY_MULTIPLIER);
 });
 const RANKS = BASE_REALM_NAMES.map((x,i)=>({name:x[0],min:RANK_MINS[i],max:i===BASE_REALM_NAMES.length-1?Infinity:RANK_MINS[i+1]-1,description:x[1]}));
@@ -577,6 +579,25 @@ async function seedTienPhap(){
   }
 }
 
+
+async function seedDanDuong(){
+  const items=[
+    ['Thanh Mộc Đan Lô','Đan Đường · Lò Luyện Đan','Lò luyện đan Hạ Phẩm, ổn định hỏa hầu và thích hợp luyện linh dược nhập môn.',1000,0,0,'Hạ Phẩm'],
+    ['Tử Kim Đan Lô','Đan Đường · Lò Luyện Đan','Lò luyện đan Trung Phẩm, linh hỏa tụ ổn định hơn.',8000,0,3,'Trung Phẩm'],
+    ['Huyền Ngọc Đan Lô','Đan Đường · Lò Luyện Đan','Lò luyện đan Thượng Phẩm, chịu được tiên hỏa sơ cấp.',50000,0,6,'Thượng Phẩm'],
+    ['Cửu Long Đan Lô','Đan Đường · Lò Luyện Đan','Lò luyện đan Cực Phẩm, long văn tụ hỏa, thích hợp luyện linh dược cao giai.',300000,0,9,'Cực Phẩm'],
+    ['Thái Hư Tiên Lô','Đan Đường · Lò Luyện Đan','Tiên lô hiếm, dung luyện tiên dược và linh dược Tiên phẩm.',2000000,0,12,'Tiên Phẩm'],
+    ['Tụ Linh Hoa','Đan Đường · Linh Dược','Linh hoa Hạ Phẩm, nguyên liệu cơ bản để luyện Tụ Linh đan.',120,0,0,'Hạ Phẩm'],
+    ['Bích Ngọc Linh Chi','Đan Đường · Linh Dược','Linh chi Trung Phẩm, dược tính ôn hòa và tinh thuần.',900,0,3,'Trung Phẩm'],
+    ['Cửu Diệp Tiên Chi','Đan Đường · Linh Dược','Linh chi Thượng Phẩm, ẩn chứa tiên khí mỏng.',8000,0,6,'Thượng Phẩm'],
+    ['Huyền Thiên Thánh Liên','Đan Đường · Linh Dược','Thánh liên Cực Phẩm, nguyên liệu quý cho đại đan.',60000,0,9,'Cực Phẩm'],
+    ['Cửu Chuyển Tiên Dược','Đan Đường · Linh Dược','Tiên dược hiếm, chỉ xuất hiện tại tiên vực.',500000,0,12,'Tiên Phẩm']
+  ];
+  for(const [name,category,description,price,spirit_gain,min_realm,grade] of items){
+    await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,$2,$3,$4,$5,$6)
+      ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,price=EXCLUDED.price,spirit_gain=EXCLUDED.spirit_gain,min_realm=EXCLUDED.min_realm`,[name,category,description,price,spirit_gain,min_realm]);
+  }
+}
 
 async function seedDuocDuong(){
   const items=[
@@ -1354,6 +1375,7 @@ async function initDb() {
   await ensureRuntimeSchema();
   await ensureTienBanSchema();
   await seedDuocDuong();
+  await seedDanDuong();
   await ensureTienPhapSchema();
   await seedTienBan();
   await seedTienPhap();
@@ -1935,8 +1957,24 @@ async function ensureTavernSchema(){
   }
 }
 
+async function regionAccessFor(userId, region){
+  const u=(await query('SELECT username FROM users WHERE id=$1',[userId])).rows[0];
+  const username=String(u?.username||'').toLowerCase();
+  // Mở khóa riêng cho môn nhân thienha_666; @kien vẫn được giữ quyền vận hành Tửu Lâu.
+  if(region==='tavern') return username==='thienha_666' || username==='kien';
+  if(region==='dan-duong' || region==='black-market') return username==='thienha_666';
+  return false;
+}
+function regionLockMessage(region){
+  if(region==='tavern') return 'Khu vực Tửu Lâu đang phong ấn. Chỉ môn nhân được cấp quyền mới có thể tiến vào.';
+  if(region==='dan-duong') return 'Đan Đường đang phong ấn. Môn nhân thienha_666 đã được mở khóa vùng này.';
+  if(region==='black-market') return 'Chợ Đen đang phong ấn. Môn nhân thienha_666 đã được mở khóa vùng này.';
+  return 'Khu vực đang phong ấn.';
+}
+
 app.get('/api/tavern',auth,async(req,res)=>{
   try{
+    if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
     await ensureTavernSchema();
     const uid=req.session.user_id;
     const master=(await query(`SELECT r.user_id,r.role_code,r.applied_at,u.username,u.display_name,p.title,p.position,p.avatar
@@ -1962,6 +2000,7 @@ app.get('/api/tavern',auth,async(req,res)=>{
 });
 
 app.post('/api/tavern/apply',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
   try{
     await ensureTavernSchema();
     const uid=req.session.user_id;
@@ -1978,6 +2017,7 @@ app.post('/api/tavern/apply',auth,async(req,res)=>{
 });
 
 app.post('/api/tavern/transfer',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
   const client=await pool.connect();
   try{
     await ensureTavernSchema();
@@ -2006,6 +2046,7 @@ app.post('/api/tavern/transfer',auth,async(req,res)=>{
 });
 
 app.post('/api/tavern/listings',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
   try{
     await ensureTavernSchema();
     const uid=req.session.user_id;
@@ -2022,6 +2063,7 @@ app.post('/api/tavern/listings',auth,async(req,res)=>{
 });
 
 app.post('/api/tavern/listings/stop',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
   try{
     await ensureTavernSchema();
     const id=Number(req.body?.id);
@@ -2032,6 +2074,7 @@ app.post('/api/tavern/listings/stop',auth,async(req,res)=>{
 });
 
 app.post('/api/tavern/invite',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
   const client=await pool.connect();
   try{
     await ensureTavernSchema();
@@ -2053,6 +2096,7 @@ app.post('/api/tavern/invite',auth,async(req,res)=>{
 });
 
 app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
   const client=await pool.connect();
   try{
     await ensureTavernSchema();
@@ -2100,6 +2144,7 @@ app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
 });
 
 app.post('/api/tavern/consume',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
   const client=await pool.connect();
   try{
     await ensureTavernSchema();
@@ -2832,17 +2877,21 @@ app.post('/api/storage/use',auth,async(req,res)=>{
     const qty=Math.max(1,Math.min(99,Number(req.body?.quantity)||1));
     if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
     await client.query('BEGIN');
-    const r=await client.query(`SELECT ti.id,ti.name,ti.description,ti.category,ti.spirit_gain,i.quantity,
-        tp.buff_min AS tavern_buff_min,tp.buff_max AS tavern_buff_max
+    const r=await client.query(`SELECT ti.id,ti.name,ti.description,ti.category,ti.spirit_gain,i.quantity
       FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
-      LEFT JOIN tavern_products tp ON tp.storage_item_id=ti.id
       WHERE i.user_id=$1 AND ti.id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
     if(!r.rows.length||Number(r.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng vật phẩm trong Tu Di Giới không đủ.'});}
     const item=r.rows[0];
     let gain=Number(item.spirit_gain)||0;
-    if(String(item.category||'').startsWith('Tửu Lâu · Túy Phẩm') && Number(item.tavern_buff_max)>0){
-      const min=Math.max(1,Number(item.tavern_buff_min)||0),max=Math.max(min,Number(item.tavern_buff_max)||min);
-      gain=min+Math.floor(Math.random()*(max-min+1));
+    let buffText='';
+    // Tửu Lâu túy phẩm được lưu trong Tu Di Giới nhưng hiệu quả vẫn lấy từ bản gốc.
+    if(String(item.category||'').startsWith('Tửu Lâu · Túy Phẩm')){
+      const tp=(await client.query('SELECT buff_min,buff_max FROM tavern_products WHERE storage_item_id=$1 LIMIT 1',[item.id])).rows[0];
+      if(tp && Number(tp.buff_max)>0){
+        const min=Math.max(1,Number(tp.buff_min)||0),max=Math.max(min,Number(tp.buff_max)||min);
+        gain=min+Math.floor(Math.random()*(max-min+1));
+        buffText=` · buff túy phẩm ngẫu nhiên +${gain.toLocaleString('vi-VN')} linh lực`;
+      }
     }
     if(gain<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Vật phẩm này không thể sử dụng trực tiếp.'});}
     const nr=await client.query(`UPDATE profiles SET spirit_power=spirit_power+$2,experience=experience+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,
@@ -2850,7 +2899,7 @@ app.post('/api/storage/use',auth,async(req,res)=>{
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,
       [req.session.user_id,itemId,qty]);
     await client.query('COMMIT');
-    res.json({ok:true,item:item.name,quantityUsed:qty,gained:gain*qty,spirit:Number(nr.rows[0].spirit_power)});
+    res.json({ok:true,item:item.name,quantityUsed:qty,gained:gain*qty,spirit:Number(nr.rows[0].spirit_power),buffText});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('storage use:',e);res.status(500).json({error:'Không thể sử dụng vật phẩm.'});}
   finally{client.release();}
 });
@@ -2918,6 +2967,7 @@ app.post('/api/dan-cac/sell',auth,async(req,res)=>{
 
 app.get('/api/black-market',auth,async(req,res)=>{
   try{
+    if(!(await regionAccessFor(req.session.user_id,'black-market'))) return res.status(403).json({error:regionLockMessage('black-market'),regionLocked:true});
     const uid=req.session.user_id;
     const [roots,beasts]=await Promise.all([
       query(`SELECT o.root_id AS id,o.quantity,c.name,c.rarity,c.description,c.support,c.price_stones,c.power_bonus,c.ability
@@ -2931,6 +2981,7 @@ app.get('/api/black-market',auth,async(req,res)=>{
 });
 
 app.post('/api/black-market/sell',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'black-market'))) return res.status(403).json({error:regionLockMessage('black-market'),regionLocked:true});
   const client=await pool.connect();
   try{
     const uid=req.session.user_id,type=req.body?.type==='beast'?'beast':'root',id=Number(req.body?.id),qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));
@@ -3259,6 +3310,41 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
     res.json({ok:true,special:false,cost,remainingStones:Number(p.spirit_stones)-cost,reward:{type:'item',id:item.id,name:item.name,category:item.category,description:item.description,rarity,power:Number(item.power_bonus||0),ability:item.ability||''},message:`🎴 Tiên Bàn ban thưởng: ${item.name} ×1.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien ban spin:',e);res.status(500).json({error:'Tiên Bàn thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
+});
+
+app.get('/api/dan-duong',auth,async(req,res)=>{
+  try{
+    if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
+    const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
+    const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.min_realm,COALESCE(i.quantity,0)::int AS quantity
+      FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
+      WHERE ti.category LIKE 'Đan Đường%' ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
+    const stage=stageFor(Number(p?.spirit_power)||0);
+    res.json({items,profile:p||{},stage,npc:{name:'Đan Đường · Huyền Lô',dialogue:'Linh thạch đổi linh tài, đan lô phân phẩm. Chọn đúng phẩm cấp rồi mới luyện được đại đan.'}});
+  }catch(e){console.error('dan duong:',e);res.status(500).json({error:'Không thể mở Đan Đường.'});}
+});
+app.post('/api/dan-duong/exchange',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
+    const id=Number(req.body?.itemId),qty=clampInt(req.body?.quantity,1,99);
+    await client.query('BEGIN');
+    const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND category LIKE 'Đan Đường%' FOR UPDATE`,[id])).rows[0];
+    const p=(await client.query('SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
+    if(!item||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy linh tài.'});}
+    const stage=stageFor(Number(p.spirit_power)||0);
+    if(stage.realmIndex<Number(item.min_realm||0)){await client.query('ROLLBACK');return res.status(403).json({error:`${item.name} yêu cầu ${RANKS[Number(item.min_realm)]?.name||'cảnh giới cao hơn'}.`});}
+    const total=Number(item.price||0)*qty;
+    if(Number(p.spirit_stones||0)<total){await client.query('ROLLBACK');return res.status(400).json({error:`Không đủ linh thạch. Cần ${total.toLocaleString('vi-VN')}.`});}
+    const used=Number((await client.query('SELECT COUNT(*)::int AS c FROM inventory WHERE user_id=$1 AND quantity>0',[req.session.user_id])).rows[0]?.c||0);
+    const owned=Number((await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[req.session.user_id,id])).rows[0]?.quantity||0);
+    const cap=Math.max(1,Number(p.storage_capacity)||30);
+    if(used>=cap&&owned<=0){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}).`});}
+    await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,total]);
+    const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW() RETURNING quantity`,[req.session.user_id,id,qty]);
+    await client.query('COMMIT');
+    res.json({ok:true,item:item.name,grade:item.category.split('·').pop().trim(),quantity:qty,totalQuantity:Number(ir.rows[0].quantity),spent:total,message:`Đã đổi ${total.toLocaleString('vi-VN')} linh thạch lấy ${item.name} ×${qty}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('dan duong exchange:',e);res.status(500).json({error:'Đổi linh tài thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}
 });
 
 app.get('/api/duoc-duong',auth,async(req,res)=>{

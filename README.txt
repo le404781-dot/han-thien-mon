@@ -38,7 +38,7 @@ v2.8 cập nhật: Tụ Di Giới 30 ô chứa vật phẩm; đan dược/pháp 
 Bản v3.0: đổi linh lực nhận vật phẩm, Tu Di Giới, Hàn Thiên Ký Sự, Chức Vị theo cảnh giới, Tông chủ: Thiên Gia Đạo.
 
 
-=== HÀN THIÊN MÔN v3.6.71 · RENDER READY ===
+=== HÀN THIÊN MÔN v3.6.74 · TU DI / TIÊN QUÂN / ĐAN ĐƯỜNG ===
 - Web server bind 0.0.0.0 và đọc PORT từ Render (mặc định 10000).
 - HTTP listener mở trước khi chạy PostgreSQL schema initialization, tránh lỗi Port scan timeout khi startup/migration lâu.
 - Thêm GET /health: 503 khi đang khởi động/chưa sẵn sàng DB; 200 khi PostgreSQL sẵn sàng.

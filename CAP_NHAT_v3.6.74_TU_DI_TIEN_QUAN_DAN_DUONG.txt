@@ -1,0 +1,24 @@
+HÀN THIÊN MÔN v3.6.74
+
+1. FIX TU DI GIỚI
+- Nút Hấp thu/ Sử dụng xuất hiện cả với túy phẩm Tửu Lâu được lưu vào Tu Di Giới.
+- API /api/storage/use tách truy vấn túy phẩm khỏi truy vấn inventory để tránh lỗi PostgreSQL planner make_outerjoininfo.
+- Túy phẩm trong Tu Di Giới vẫn lấy buff ngẫu nhiên đúng phẩm cấp từ tavern_products.
+
+2. ĐỘ KHÓ CẢNH GIỚI
+- Luyện Khí -> Đại Thừa: giữ hệ số 2x.
+- Độ Kiếp -> Tiên Tôn: hệ số 50x.
+- Tiên Đế: hệ số 100x.
+- Mốc Tiên Quân được đưa vào hệ số 50x; Tiên Đế chuyển sang 100x.
+
+3. KHÓA/MỞ VÙNG
+- Tửu Lâu: mở cho thienha_666; @kien vẫn giữ quyền vận hành Lâu Chủ.
+- Đan Đường: mở cho thienha_666.
+- Chợ Đen: mở cho thienha_666.
+- API và giao diện đều xử lý trạng thái phong ấn, không chỉ ẩn menu.
+
+4. ĐAN ĐƯỜNG
+- Đổi công dụng thành nơi dùng linh thạch đổi Đan Lô và Linh Dược.
+- Phẩm cấp: Hạ Phẩm, Trung Phẩm, Thượng Phẩm, Cực Phẩm, Tiên Phẩm.
+- Đan Lô và Linh Dược có cảnh giới yêu cầu tương ứng.
+- Vật phẩm sau khi đổi được đưa vào Tu Di Giới.
