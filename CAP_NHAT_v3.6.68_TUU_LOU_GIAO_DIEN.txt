@@ -1,0 +1,11 @@
+HÀN THIÊN MÔN v3.6.68 · TỬU LÂU
+
+1. Cập nhật giao diện Tửu Lâu theo ảnh tham chiếu: không gian tửu lâu cổ phong, đèn lồng, hoạt ảnh ánh sáng/chuyển động nhẹ, tối ưu mobile.
+2. Khi bấm Tửu Lâu trên thanh menu, kích hoạt chế độ tập trung: chỉ vùng Tửu Lâu được hiển thị và cuộn, khóa cuộn trang phía sau để giảm lỗi thao tác trên iPhone.
+3. Định danh Lâu Chủ duy nhất: @kien là chủ Tửu Lâu mặc định.
+4. Toàn hệ thống chỉ duy trì một Lâu Chủ tại một thời điểm.
+5. @kien có thể nhường vị trí Tửu Lâu Chi Chủ cho một môn nhân khác. Khi nhường, @kien được khôi phục chức vị/danh hiệu trước đó; người nhận được ghi nhận là Lâu Chủ.
+6. Lời mời mua rượu có Hòm Thư riêng ngay trong giao diện Tửu Lâu. Người nhận có thể Đồng ý (trả linh thạch) hoặc Từ chối.
+7. Khi Đồng ý, người mua chọn nơi hấp thu: Tửu Lâu hoặc Tu Di Giới. Tu Di Giới dùng kho inventory hiện có; hệ thống tự tạo vật phẩm túy phẩm tương ứng trong kho.
+8. Môn nhân giữ vị trí Lâu Chủ được ghi nhận danh hiệu “Tửu Lâu Chi Chủ” trong hồ sơ và các dữ liệu hiển thị môn nhân; danh hiệu được bảo vệ khỏi việc sửa hồ sơ làm mất chức vị.
+9. Quy tắc giao dịch giữ nguyên: NPC mua sau 5 phút và Lâu Chủ nhận 80%; môn nhân mua thì Lâu Chủ nhận 90%.
