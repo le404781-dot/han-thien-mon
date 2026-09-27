@@ -1686,6 +1686,20 @@ async function initDb() {
   for (const [qname,itemName,qty] of rewardMap) {
     await query(`UPDATE sect_quests SET reward_item_id=(SELECT id FROM treasure_items WHERE name=$2), reward_quantity=$3, reward_stones=0 WHERE name=$1`,[qname,itemName,qty]);
   }
+
+  // v3.6.78: Cuu_Vi_Ho đạt Tiên Đế Nhất Tinh (ngưỡng cảnh giới theo hệ số hiện tại).
+  // Chỉ nâng tối thiểu; nếu môn nhân đã tu luyện cao hơn thì không hạ linh lực.
+  await query(`
+    UPDATE profiles p
+    SET spirit_power=GREATEST(COALESCE(p.spirit_power,0),267000000),
+        rank='Tiên Đế',
+        realm_tier=GREATEST(COALESCE(p.realm_tier,1),1),
+        position=CASE WHEN COALESCE(p.position,'') IN ('','Ngoại môn đệ tử','Nội môn đệ tử','Chấp sự','Hộ pháp','Trưởng lão','Thái thượng trưởng lão','Tông chủ')
+                      THEN 'Tiên Môn Chí Tôn' ELSE p.position END,
+        updated_at=NOW()
+    FROM users u
+    WHERE u.id=p.user_id AND LOWER(u.username)='cuu_vi_ho'
+  `);
   await ensureBeastArenaSchema();
 }
 

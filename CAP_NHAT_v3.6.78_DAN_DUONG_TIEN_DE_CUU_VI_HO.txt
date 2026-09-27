@@ -1,0 +1,19 @@
+HÀN THIÊN MÔN v3.6.78 — ĐAN ĐƯỜNG + TIÊN ĐẾ NHẤT TINH
+
+1. Đan Đường:
+- Dùng ảnh tiên cung người dùng cung cấp làm nền riêng.
+- Bố cục phong cách tiên cung: bảng tiêu đề lớn, bảng NPC/linh thạch và lưới vật phẩm phủ nền kính tối.
+- Thêm hiệu ứng nền chuyển động nhẹ, phù văn, ánh sáng, shimmer, biểu tượng vật phẩm bay nhẹ và viền phát sáng.
+- Responsive cho màn hình iPhone; tôn trọng prefers-reduced-motion.
+- Giữ nguyên luồng tải dữ liệu, điều kiện cảnh giới, nút đổi linh thạch và API hiện có.
+
+2. Môn nhân Cuu_Vi_Ho:
+- Khi server khởi động, nâng spirit_power tối thiểu lên 267.000.000, tương ứng Tiên Đế Nhất Tinh theo cấu hình ngưỡng hiện tại.
+- Không hạ linh lực nếu tài khoản đã vượt ngưỡng này.
+- Cập nhật rank Tiên Đế và chức vị Tiên Môn Chí Tôn nếu đang ở chức vị thấp hơn.
+- Hồ sơ có vòng hào quang vàng xoay quanh ảnh đại diện và vương miện động.
+- Hiệu ứng giảm chuyển động khi thiết bị bật prefers-reduced-motion.
+
+Lưu ý:
+- Migration tài khoản chỉ tác động nếu username Cuu_Vi_Ho đã tồn tại trong database.
+- Bản cập nhật giữ nguyên cấu trúc database/API còn lại.
