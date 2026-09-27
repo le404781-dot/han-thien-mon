@@ -460,13 +460,9 @@ const MANSION_SEEDS = [
   ['Tiên Đế Thiên Cung','Chí Tôn','Thiên cung tối cao, tiên khí và đại đạo cùng hội tụ.',3000000,70000,17]
 ];
 
-// Thưởng đột phá cảnh giới: từ cảnh giới thấp nhất -> cảnh giới cao nhất hiện tại.
-// Mỗi đại cảnh giới có một mốc thưởng riêng; không phụ thuộc việc Bí Cảnh tương ứng có tồn tại hay không.
-// UNIQUE(user_id, realm_index) bảo đảm không thể nhận lặp khi reload/retry/nhiều request đồng thời.
-const BREAKTHROUGH_STONE_REWARDS = [
-  0, 1200, 2500, 5000, 9000, 16000, 28000, 45000, 80000,
-  140000, 240000, 400000, 650000, 1000000, 1500000, 2200000, 3200000, 4500000
-];
+// Thưởng đột phá cảnh giới: mỗi lần bước sang một đại cảnh giới mới,
+// môn nhân nhận đúng số linh thạch tương ứng với chi phí khởi động bí cảnh của cảnh giới đó.
+// Dùng bảng unique để không thể nhận lặp do reload, retry hoặc nhiều request đồng thời.
 async function grantRealmBreakthroughRewards(client, userId, oldRealmIndex, newRealmIndex) {
   const from = Number(oldRealmIndex);
   const to = Number(newRealmIndex);
@@ -474,7 +470,8 @@ async function grantRealmBreakthroughRewards(client, userId, oldRealmIndex, newR
   const rewards = [];
   for (let ri = Math.max(1, from + 1); ri <= Math.min(to, RANKS.length - 1); ri++) {
     const realm = RANKS[ri];
-    const amount = Number(BREAKTHROUGH_STONE_REWARDS[ri] || 0);
+    const costR = await client.query('SELECT activation_cost FROM secret_realms WHERE required_realm_index=$1 LIMIT 1',[ri]);
+    const amount = Number(costR.rows[0]?.activation_cost) || 0;
     if (amount <= 0) continue;
     const ins = await client.query(`INSERT INTO realm_breakthrough_rewards(user_id,realm_index,realm_name,amount)
       VALUES($1,$2,$3,$4) ON CONFLICT(user_id,realm_index) DO NOTHING RETURNING amount`,[userId,ri,realm.name,amount]);
@@ -484,18 +481,6 @@ async function grantRealmBreakthroughRewards(client, userId, oldRealmIndex, newR
     }
   }
   return rewards;
-}
-
-async function backfillRealmBreakthroughRewards() {
-  const rows=(await query(`SELECT user_id,spirit_power FROM profiles`)).rows;
-  for(const row of rows){
-    const stage=stageFor(Number(row.spirit_power)||0);
-    if(stage.realmIndex<=0) continue;
-    const client=await pool.connect();
-    try{ await client.query('BEGIN'); await grantRealmBreakthroughRewards(client,row.user_id,0,stage.realmIndex); await client.query('COMMIT'); }
-    catch(e){ try{await client.query('ROLLBACK')}catch{} console.error('realm reward backfill:',e.message); }
-    finally{client.release();}
-  }
 }
 const POSITION_RULES = [
   {name:'Ngoại môn đệ tử', min:0, max:0},
@@ -1322,7 +1307,6 @@ async function initDb() {
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_stones INTEGER NOT NULL DEFAULT 0`);
 
   await query('INSERT INTO profiles(user_id) SELECT id FROM users ON CONFLICT (user_id) DO NOTHING');
-  await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
 
@@ -2674,21 +2658,6 @@ app.post('/api/currency/exchange',auth,async(req,res)=>{
     res.json({ok:true,rate:SPIRIT_TO_STONE_RATE,spentSpirit:spiritCost,receivedStones:stonesToBuy,spirit:Number(nr.rows[0].spirit_power),spiritStones:Number(nr.rows[0].spirit_stones)});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('currency exchange:',e);res.status(500).json({error:'Không thể trao đổi linh lực sang linh thạch.'});}
   finally{client.release();}
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// THÔNG BÁO NHẬN THƯỞNG · snapshot nhẹ cho thanh thông báo 10 giây
-// ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/reward-snapshot',auth,async(req,res)=>{
-  try{
-    const uid=req.session.user_id;
-    const p=(await query('SELECT spirit_stones FROM profiles WHERE user_id=$1',[uid])).rows[0]||{};
-    const items=(await query(`SELECT i.item_id AS id,ti.name,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0`,[uid])).rows;
-    const beasts=(await query(`SELECT o.beast_id AS id,c.name,o.quantity FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0`,[uid])).rows;
-    const roots=(await query(`SELECT o.root_id AS id,c.name,o.quantity FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.quantity>0`,[uid])).rows;
-    const tavern=(await query(`SELECT i.product_id AS id,p.name,i.quantity FROM tavern_inventory i JOIN tavern_products p ON p.id=i.product_id WHERE i.user_id=$1 AND i.quantity>0`,[uid])).rows;
-    res.json({spiritStones:Number(p.spirit_stones)||0,items,beasts,roots,tavern});
-  }catch(e){res.status(500).json({error:'Không thể kiểm tra phần thưởng mới.'});}
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

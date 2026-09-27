@@ -350,47 +350,6 @@ async function loadCultivationSafe(){
   if(!getToken())return;
   try{const d=await api('/api/profile',{headers:authHeaders()}); if(d.profile){currentProfile=d.profile;renderCultivation(currentProfile);}}catch(e){const a=$('#cultivationArea');if(a)a.innerHTML=`<div class="empty-state compact"><h3>Không thể mở Vận Công</h3><p>${esc(e.message)}</p><button class="btn small primary" id="retryCultivationBtn">↻ Mở lại Vận Công</button></div>`;$('#retryCultivationBtn')?.addEventListener('click',loadCultivationSafe);}
 }
-let rewardSnapshot=null,rewardWatchTimer=null;
-function ensureRewardToastHost(){
- const host=$('#rewardToastHost');
- if(host)return host;
- const el=document.createElement('div');el.id='rewardToastHost';el.className='reward-toast-host';document.body.appendChild(el);return el;
-}
-function showRewardToast(lines){
- if(!lines.length)return;
- const host=ensureRewardToastHost();
- const el=document.createElement('div');el.className='reward-toast';
- el.innerHTML=`<div class="reward-toast-mark">✦</div><div><b>NHẬN ĐƯỢC</b>${lines.map(x=>`<div>${esc(x)}</div>`).join('')}</div><span class="reward-toast-time">10s</span>`;
- host.appendChild(el);
- setTimeout(()=>el.remove(),10000);
-}
-function snapshotMap(rows,prefix){const m={};for(const x of (rows||[]))m[`${prefix}:${x.id}`]={name:x.name,quantity:Number(x.quantity)||0};return m;}
-async function pollRewardSnapshot(initial=false){
- if(!getToken()){rewardSnapshot=null;return;}
- try{
-  const d=await api('/api/reward-snapshot',{headers:authHeaders()});
-  const next={stones:Number(d.spiritStones)||0,...snapshotMap(d.items,'item'),...snapshotMap(d.beasts,'beast'),...snapshotMap(d.roots,'root'),...snapshotMap(d.tavern,'tavern')};
-  if(rewardSnapshot && !initial){
-   const lines=[];
-   const stoneGain=next.stones-rewardSnapshot.stones;
-   if(stoneGain>0)lines.push(`+${stoneGain.toLocaleString('vi-VN')} linh thạch`);
-   for(const [key,val] of Object.entries(next)){
-    if(key==='stones')continue;
-    const old=rewardSnapshot[key]?.quantity||0,diff=val.quantity-old;
-    if(diff>0)lines.push(`${val.name} ×${diff}`);
-   }
-   if(lines.length)showRewardToast(lines.slice(0,6));
-  }
-  rewardSnapshot=next;
- }catch{}
-}
-function startRewardWatcher(){
- if(rewardWatchTimer)clearInterval(rewardWatchTimer);
- rewardSnapshot=null;
- pollRewardSnapshot(true);
- rewardWatchTimer=setInterval(()=>pollRewardSnapshot(false),2000);
-}
-
 async function loadProfile(){
  try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();loadDisciples();loadChallenges();loadCodex();loadTienPhap();loadSpiritRankings();loadMansion();if(!Boolean(currentProfile?.mansion?.active))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadDanCac();loadBeastHouse();loadLinhPhap();loadEquipment();loadBicanh();loadProfessions();loadQuests();renderLegendEditor();}
  catch(e){if(e.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}}
@@ -1043,13 +1002,12 @@ async function loadTavern(){
   const myListings=listings.filter(x=>Number(x.owner_id)===Number(currentUser?.id));
   area.innerHTML=`
    <div class="tavern-hero tavern-scene">
-    <div class="tavern-scene-overlay"></div><div class="tavern-ambient tavern-ambient-a"></div><div class="tavern-ambient tavern-ambient-b"></div><div class="tavern-ambient tavern-ambient-c"></div>
+    <div class="tavern-scene-overlay"></div>
     <div class="tavern-hero-copy"><span class="eyebrow">🍶 TỬU YẾN · 酒樓</span><h3>Hàn Thiên Tửu Lâu</h3>
     <p>${master?`Lâu Chủ hiện tại: <b>${esc(master.display_name)}</b> · @${esc(master.username)} · <b>Tửu Lâu Chi Chủ</b>`:'Tửu Lâu đang chờ người kế nhiệm.'}</p>
     <div class="tavern-master-chip">👑 ${master?'Lâu Chủ duy nhất · '+esc(master.display_name):'Chưa định Lâu Chủ'}</div></div>
-    <div class="tavern-lantern">◆</div>
+    <div class="tavern-lantern">🥂</div>
    </div>
-   <div class="tavern-room-strip"><span>酒樓 · TỬU LÂU</span><span>TRUNG TÂM GIAO DỊCH TÚY PHẨM</span><span>PHÒNG YẾN · QUẦY RƯỢU · HÒM THƯ</span></div>
    <div class="tavern-rules">
     <span>👑 Chỉ có <b>1 Lâu Chủ</b></span><span>🤖 NPC mua sau <b>5 phút</b> · nhận <b>80%</b></span><span>☯ Môn nhân mua · nhận <b>90%</b></span><span>📦 Hấp thu tại <b>Tửu Lâu</b> hoặc <b>Tu Di Giới</b></span>
    </div>
@@ -1182,7 +1140,7 @@ if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$
 if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('color-flow');$('#colorModeBtn').textContent='✨';}
 setupTutorial();
 
-loadData();loadSect();checkSession();startRewardWatcher();
+loadData();loadSect();checkSession();
 setInterval(()=>{if(getToken()){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},15000);
 setInterval(()=>{if(getToken())sendPresenceHeartbeat();},30000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
