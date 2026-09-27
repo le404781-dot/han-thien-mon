@@ -334,10 +334,11 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
  catch(e){if(e?.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}else{console.warn('Phiên vẫn được giữ, lỗi tải dữ liệu tạm thời:',e);}}
 }
 function renderGuestAreas(){
+ $('#tavernArea').innerHTML=`<div class="empty-state compact"><h3>🥂 Tửu Lâu đang phong ấn</h3><p>Đăng nhập để ứng cử Lâu Chủ, mở bán túy phẩm và giao dịch với đạo hữu.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
  $('#profileArea').innerHTML=`<div class="empty-state"><div class="empty-seal">寒</div><h3>Đệ tử chưa nhập môn</h3><p>Đăng ký hoặc đăng nhập để mở hồ sơ, linh lực, cảnh giới và thành tích cá nhân.</p><button class="btn primary" onclick="renderAuth('register')">✦ Ghi danh</button></div>`;
  $('#cultivationArea').innerHTML=`<div class="empty-state compact"><h3>Thiên đạo chờ người hữu duyên</h3><p>Đăng nhập để bắt đầu vận công và tích lũy linh lực.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
  $('#chatArea').innerHTML=`<div class="empty-state compact"><h3>Truyền âm bị phong</h3><p>Chỉ môn nhân đã nhập môn mới có thể vào Chat tổng.</p><button class="btn primary" onclick="renderAuth('register')">Đăng ký</button></div>`; $('#sectPostsArea').innerHTML=`<div class="empty-state compact"><h3>📜 Bài Đăng đang phong ấn</h3><p>Đăng nhập để xem bài đăng của Môn Phái. Hóa Thần trở lên mới được đăng.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
@@ -949,7 +950,9 @@ async function respondMailboxAction(id, type, actionData, actionBtn){
       : actionData.action==='beast_challenge'
         ? '/api/beast-arena/online/respond'
         : actionData.action==='bicanh_invite'
-          ? '/api/bicanh/invite/respond' : '';
+          ? '/api/bicanh/invite/respond'
+          : actionData.action==='tavern_sale'
+            ? '/api/tavern/invite/respond' : '';
   if(!endpoint)return;
   let body=actionData.action==='friend'
     ? {requestId:Number(actionData.requestId),action}
@@ -957,7 +960,9 @@ async function respondMailboxAction(id, type, actionData, actionBtn){
       ? {requestId:Number(actionData.requestId),action}
       : actionData.action==='beast_challenge'
         ? {requestId:Number(actionData.requestId),action}
-        : {invitationId:Number(actionData.invitationId),action};
+        : actionData.action==='tavern_sale'
+          ? {requestId:Number(actionData.requestId),action}
+          : {invitationId:Number(actionData.invitationId),action};
   if(actionData.action==='beast_challenge' && action==='accept'){
     body.beastId=Number(document.querySelector(`.mail-beast-select[data-id="${id}"]`)?.value||0);
     body.skillId=Number(document.querySelector(`.mail-skill-select[data-id="${id}"]`)?.value||1);
@@ -978,11 +983,75 @@ async function respondMailboxAction(id, type, actionData, actionBtn){
     if(actionData.action==='beast_challenge') await loadBeastArena?.();
     if(actionData.action==='friend'){ await loadFriends?.(); await loadData?.(); }
     if(actionData.action==='bicanh_invite') await loadBicanh?.();
+    if(actionData.action==='tavern_sale'){ await loadTavern?.(); await loadProfile?.(); }
   }catch(e){
     if(actionBtn)actionBtn.removeAttribute('disabled');
     const mail=document.querySelector(`.mail-item[data-id="${id}"]`);
     const msg=mail?.querySelector('.mail-action-msg'); if(msg)msg.textContent='❌ '+e.message;
   }
+}
+
+
+async function loadTavern(){
+ const area=$('#tavernArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/tavern',{headers:authHeaders()});
+  const role=d.role?.active;
+  const badge=$('#tavernRoleBadge');
+  if(badge) badge.textContent=role?'🥂 LÂU CHỦ':'TỬU LÂU · MỞ';
+  const products=d.products||[], listings=d.listings||[], members=d.members||[], inv=d.inventory||[];
+  const myListings=listings.filter(x=>Number(x.owner_id)===Number(currentUser?.id));
+  area.innerHTML=`
+   <div class="tavern-hero">
+    <div><span class="eyebrow">🍶 TỬU YẾN</span><h3>${role?'Bạn đang giữ nghề Lâu Chủ':'Ứng cử nghề Lâu Chủ'}</h3>
+    <p>${role?'Mở bán túy phẩm. NPC tự mua sau 5 phút; bán cho môn nhân nhận 90% linh thạch.':'Môn nhân có thể ứng cử trực tiếp để nhận nghề Lâu Chủ.'}</p></div>
+    ${role?'':'<button class="btn primary" id="tavernApplyBtn">🥂 Ứng cử Lâu Chủ</button>'}
+   </div>
+   <div class="tavern-rules">
+    <span>🤖 NPC mua sau <b>5 phút</b> · Lâu Chủ nhận <b>80%</b></span>
+    <span>☯ Môn nhân mua · Lâu Chủ nhận <b>90%</b></span>
+    <span>📬 Lời mời mua rượu phản hồi tại <b>Hòm Thư</b></span>
+   </div>
+   <div class="tavern-grid">
+    <div class="tavern-panel"><div class="tavern-panel-head"><h3>🍶 Túy Phẩm</h3><small>Từ phẩm thấp đến cao</small></div>
+      <div class="tavern-products">${products.map(p=>`<article class="tavern-product">
+        <div><span class="tavern-grade">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><b>${Number(p.price).toLocaleString('vi-VN')} linh thạch</b></div>
+        ${role?`<button class="btn small ${p.listed?'ghost':'primary'} tavern-list-btn" data-product="${p.id}" ${p.listed?'disabled':''}>${p.listed?'✓ Đang bán':'Mở bán'}</button>`:''}
+      </article>`).join('')}</div>
+    </div>
+    <div class="tavern-panel"><div class="tavern-panel-head"><h3>🏮 Quầy đang mở</h3><small>${listings.length} quầy</small></div>
+      <div class="tavern-listings">${listings.map(l=>`<article class="tavern-listing">
+       <div><b>${esc(l.name)}</b><span>${esc(l.grade)} · ${Number(l.price).toLocaleString('vi-VN')} linh thạch</span><small>NPC mua kế tiếp: ${new Date(l.npc_next_buy_at).toLocaleString('vi-VN')}</small></div>
+       ${Number(l.owner_id)===Number(currentUser?.id)?`<button class="btn small ghost tavern-stop-btn" data-id="${l.id}">Đóng bán</button>`:''}
+      </article>`).join('')||'<div class="empty-state compact"><p>Chưa có quầy túy phẩm nào.</p></div>'}</div>
+    </div>
+   </div>
+   ${role?`<div class="tavern-panel tavern-invite-panel"><div class="tavern-panel-head"><h3>📬 Mời môn nhân mua rượu</h3><small>Lời mời sẽ xuất hiện trong Hòm Thư của người nhận.</small></div>
+    <form id="tavernInviteForm" class="tavern-invite-form">
+      <select id="tavernBuyer"><option value="">Chọn môn nhân</option>${members.map(m=>`<option value="${m.id}">${esc(m.display_name)} · ${esc(m.rank)}</option>`).join('')}</select>
+      <select id="tavernProduct"><option value="">Chọn túy phẩm</option>${products.filter(p=>p.listed).map(p=>`<option value="${p.id}">${esc(p.name)} · ${Number(p.price).toLocaleString('vi-VN')} linh thạch</option>`).join('')}</select>
+      <button class="btn primary" type="submit">🥂 Gửi lời mời</button>
+    </form><p id="tavernInviteMsg" class="tavern-msg"></p>
+   </div>`:''}
+   <div class="tavern-panel"><div class="tavern-panel-head"><h3>🎒 Túy Phẩm của ta</h3><small>Nhận được khi tiếp nhận lời mời</small></div>
+    <div class="tavern-inventory">${inv.map(x=>`<span>🍶 ${esc(x.name)} <b>×${x.quantity}</b></span>`).join('')||'<small>Chưa có túy phẩm.</small>'}</div>
+   </div>`;
+  $('#tavernApplyBtn')?.addEventListener('click',async()=>{
+    const b=$('#tavernApplyBtn');b.disabled=true;
+    try{const r=await api('/api/tavern/apply',{method:'POST',headers:authHeaders(),body:'{}'});alert(r.message||'Đã nhận nghề Lâu Chủ.');await loadTavern();await loadProfile();}catch(e){alert(e.message);b.disabled=false;}
+  });
+  document.querySelectorAll('.tavern-list-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+    btn.disabled=true;try{const r=await api('/api/tavern/listings',{method:'POST',headers:authHeaders(),body:JSON.stringify({productId:Number(btn.dataset.product)})});alert(r.message);await loadTavern();}catch(e){alert(e.message);btn.disabled=false;}
+  }));
+  document.querySelectorAll('.tavern-stop-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+    try{await api('/api/tavern/listings/stop',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(btn.dataset.id)})});await loadTavern();}catch(e){alert(e.message);}
+  }));
+  $('#tavernInviteForm')?.addEventListener('submit',async e=>{
+    e.preventDefault();const buyer=Number($('#tavernBuyer').value),product=Number($('#tavernProduct').value),msg=$('#tavernInviteMsg');
+    if(!buyer||!product){if(msg)msg.textContent='❌ Hãy chọn môn nhân và túy phẩm.';return;}
+    try{const r=await api('/api/tavern/invite',{method:'POST',headers:authHeaders(),body:JSON.stringify({buyerId:buyer,productId:product})});if(msg)msg.textContent='✓ '+r.message;e.target.reset();}catch(err){if(msg)msg.textContent='❌ '+err.message;}
+  });
+ }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadTavern()">↻ Mở lại</button></div>`;}
 }
 
 async function loadMailbox(){
@@ -994,7 +1063,7 @@ async function loadMailbox(){
   area.innerHTML=`<div class="mailbox-toolbar"><label><input id="mailboxToggle" type="checkbox" ${d.enabled?'checked':''}> 🔔 Nhận thông báo Hòm Thư</label><button id="mailboxReadAll" class="btn small ghost">Đánh dấu tất cả đã đọc</button><span>Chưa đọc: <b>${Number(d.unread||0)}</b></span></div><div class="mailbox-list">${(d.rows||[]).map(x=>{
     const a=x.actionData||null;
     const actionable=Boolean(a?.action && (a.requestId||a.invitationId) && !x.read_at);
-    const icon=x.type==='challenge'?'⚔️':x.type==='beast_challenge'?'🪶':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='chat_total'?'☯':'📬';
+    const icon=x.type==='challenge'?'⚔️':x.type==='beast_challenge'?'🪶':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='tavern_sale'?'🥂':x.type==='chat_total'?'☯':'📬';
     const beastChoice=actionable&&a?.action==='beast_challenge'&&a?.requestId?`<div class="mail-beast-choice"><select class="mail-beast-select" data-id="${x.id}"><option value="0">Chọn linh thú xuất chiến</option>${(d.beastsForArena||[]).map(b=>`<option value="${b.beast_id}">${esc(b.name)} · ${esc(b.beast_realm)} · ${esc(b.beast_type)}</option>`).join('')}</select><select class="mail-skill-select" data-id="${x.id}"><option value="1">Tuyệt kỹ 1</option><option value="2">Tuyệt kỹ 2</option><option value="3">Tuyệt kỹ 3</option></select></div>`:'';
     const buttons=actionable?`${beastChoice}<div class="mail-actions"><button class="btn small primary mail-accept" data-id="${x.id}">✓ Đồng ý</button><button class="btn small ghost mail-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div>`:'';
     return `<article class="mail-item ${x.read_at?'':'unread'} ${actionable?'mail-actionable':''}" data-id="${x.id}"><div class="mail-icon">${icon}</div><div class="mail-content"><b>${esc(x.title)}</b><p>${esc(x.message)}</p><small>${new Date(x.created_at).toLocaleString('vi-VN')}</small>${buttons}</div>${x.read_at?'':'<span class="mail-new">MỚI</span>'}</article>`;
