@@ -14,7 +14,10 @@ if (!DATABASE_URL) {
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 5
+  max: Number(process.env.DB_POOL_MAX || 10),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  maxLifetimeSeconds: 300
 });
 
 async function query(text, params = []) { return pool.query(text, params); }
@@ -460,9 +463,13 @@ const MANSION_SEEDS = [
   ['Tiên Đế Thiên Cung','Chí Tôn','Thiên cung tối cao, tiên khí và đại đạo cùng hội tụ.',3000000,70000,17]
 ];
 
-// Thưởng đột phá cảnh giới: mỗi lần bước sang một đại cảnh giới mới,
-// môn nhân nhận đúng số linh thạch tương ứng với chi phí khởi động bí cảnh của cảnh giới đó.
-// Dùng bảng unique để không thể nhận lặp do reload, retry hoặc nhiều request đồng thời.
+// Thưởng đột phá cảnh giới: từ cảnh giới thấp nhất -> cảnh giới cao nhất hiện tại.
+// Mỗi đại cảnh giới có một mốc thưởng riêng; không phụ thuộc việc Bí Cảnh tương ứng có tồn tại hay không.
+// UNIQUE(user_id, realm_index) bảo đảm không thể nhận lặp khi reload/retry/nhiều request đồng thời.
+const BREAKTHROUGH_STONE_REWARDS = [
+  0, 1200, 2500, 5000, 9000, 16000, 28000, 45000, 80000,
+  140000, 240000, 400000, 650000, 1000000, 1500000, 2200000, 3200000, 4500000
+];
 async function grantRealmBreakthroughRewards(client, userId, oldRealmIndex, newRealmIndex) {
   const from = Number(oldRealmIndex);
   const to = Number(newRealmIndex);
@@ -470,8 +477,7 @@ async function grantRealmBreakthroughRewards(client, userId, oldRealmIndex, newR
   const rewards = [];
   for (let ri = Math.max(1, from + 1); ri <= Math.min(to, RANKS.length - 1); ri++) {
     const realm = RANKS[ri];
-    const costR = await client.query('SELECT activation_cost FROM secret_realms WHERE required_realm_index=$1 LIMIT 1',[ri]);
-    const amount = Number(costR.rows[0]?.activation_cost) || 0;
+    const amount = Number(BREAKTHROUGH_STONE_REWARDS[ri] || 0);
     if (amount <= 0) continue;
     const ins = await client.query(`INSERT INTO realm_breakthrough_rewards(user_id,realm_index,realm_name,amount)
       VALUES($1,$2,$3,$4) ON CONFLICT(user_id,realm_index) DO NOTHING RETURNING amount`,[userId,ri,realm.name,amount]);
@@ -481,6 +487,18 @@ async function grantRealmBreakthroughRewards(client, userId, oldRealmIndex, newR
     }
   }
   return rewards;
+}
+
+async function backfillRealmBreakthroughRewards() {
+  const rows=(await query(`SELECT user_id,spirit_power FROM profiles`)).rows;
+  for(const row of rows){
+    const stage=stageFor(Number(row.spirit_power)||0);
+    if(stage.realmIndex<=0) continue;
+    const client=await pool.connect();
+    try{ await client.query('BEGIN'); await grantRealmBreakthroughRewards(client,row.user_id,0,stage.realmIndex); await client.query('COMMIT'); }
+    catch(e){ try{await client.query('ROLLBACK')}catch{} console.error('realm reward backfill:',e.message); }
+    finally{client.release();}
+  }
 }
 const POSITION_RULES = [
   {name:'Ngoại môn đệ tử', min:0, max:0},
@@ -761,6 +779,68 @@ async function initDb() {
       UNIQUE(user_id, profession_code)
     );
     CREATE INDEX IF NOT EXISTS idx_user_professions_user ON user_professions(user_id);
+    CREATE TABLE IF NOT EXISTS tavern_roles (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      role_code TEXT NOT NULL DEFAULT 'tavern_master',
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      active BOOLEAN NOT NULL DEFAULT TRUE
+    );
+    CREATE TABLE IF NOT EXISTS tavern_products (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      grade TEXT NOT NULL,
+      price INTEGER NOT NULL CHECK(price > 0),
+      description TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS tavern_listings (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE CASCADE,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      npc_next_buy_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '5 minutes'),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(owner_id, product_id)
+    );
+    CREATE TABLE IF NOT EXISTS tavern_member_invites (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      buyer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE CASCADE,
+      price INTEGER NOT NULL CHECK(price > 0),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+      notification_id BIGINT REFERENCES mailbox_notifications(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      CHECK(owner_id <> buyer_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tavern_invites_buyer_status ON tavern_member_invites(buyer_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tavern_listings_npc_due ON tavern_listings(active,npc_next_buy_at);
+    CREATE TABLE IF NOT EXISTS tavern_sales (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      buyer_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE RESTRICT,
+      buyer_type TEXT NOT NULL CHECK(buyer_type IN ('npc','member')),
+      listed_price INTEGER NOT NULL,
+      seller_received INTEGER NOT NULL,
+      commission INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS tavern_inventory (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 0 CHECK(quantity >= 0),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,product_id)
+    );
+    INSERT INTO tavern_products(name,grade,price,description) VALUES
+      ('Túy Trà Linh','Hạ Đẳng',50,'Linh trà ủ men nhẹ, vị thanh và giúp môn nhân giải lao.'),
+      ('Bách Hoa Tửu','Trung Đẳng',120,'Túy phẩm bách hoa, hương thơm dịu, linh khí ổn định.'),
+      ('Nguyệt Quang Nhưỡng','Thượng Đẳng',300,'Tửu nhưỡng ánh nguyệt, linh khí nồng đậm và quý hiếm.'),
+      ('Thiên Tiên Túy','Cực Phẩm',800,'Túy phẩm cao cấp, chỉ dành cho những buổi tửu yến trọng thể.')
+    ON CONFLICT(name) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS profiles (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       title TEXT NOT NULL DEFAULT 'Tân đệ tử',
@@ -1245,6 +1325,7 @@ async function initDb() {
   await query(`ALTER TABLE sect_quests ADD COLUMN IF NOT EXISTS reward_stones INTEGER NOT NULL DEFAULT 0`);
 
   await query('INSERT INTO profiles(user_id) SELECT id FROM users ON CONFLICT (user_id) DO NOTHING');
+  await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
 
@@ -1491,7 +1572,17 @@ async function addDailyActivity(userId, field, amount=1) {
 }
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(__dirname));
+app.use(express.static(__dirname, {
+  etag: true,
+  lastModified: true,
+  setHeaders(res, filePath) {
+    if (/\.html$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=600');
+    }
+  }
+}));
 function hashPassword(password, salt) { return crypto.scryptSync(password, salt, 64).toString('hex'); }
 function safeUser(user) { return { id:user.id, username:user.username, displayName:user.display_name, createdAt:user.created_at }; }
 
@@ -1611,8 +1702,8 @@ async function auth(req,res,next) {
     const r = await query('SELECT s.*, u.username, u.display_name, u.created_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',[token,Date.now()]);
     if (!r.rows.length) return res.status(401).json({error:'Phiên đăng nhập đã hết hạn.'});
     req.session = r.rows[0]; req.token = token;
-    // Phiên bền vững: gia hạn khi môn nhân còn hoạt động, không tự đăng xuất vì hết hạn ngắn.
-    await query('UPDATE sessions SET expires_at=$2 WHERE token=$1',[token,Date.now()+1000*60*60*24*3650]);
+    // Phiên đã có thời hạn rất dài khi đăng nhập; không ghi UPDATE ở mọi request.
+    // Điều này giảm mạnh tải ghi PostgreSQL khi nhiều môn nhân hoạt động đồng thời.
     next();
   } catch(e) { res.status(500).json({error:'Lỗi máy chủ.'}); }
 }
@@ -1651,6 +1742,320 @@ app.post('/api/legends',auth,async(req,res)=>{
     res.status(201).json({ok:true,legend:{...r.rows[0],charLimit:limit},message:'Truyền Kỳ đã được thông cáo cho toàn tông môn.'});
   }catch(e){console.error('legend save:',e);res.status(500).json({error:'Không thể lưu Truyền Kỳ.'});}
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TỬU LÂU · Lâu Chủ + túy phẩm + NPC tự mua sau 5 phút + mời môn nhân
+// ─────────────────────────────────────────────────────────────────────────────
+async function ensureTavernSchema(){
+  await query(`
+    CREATE TABLE IF NOT EXISTS tavern_roles (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      role_code TEXT NOT NULL DEFAULT 'tavern_master',
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      previous_title TEXT,
+      previous_position TEXT
+    );
+    ALTER TABLE tavern_roles ADD COLUMN IF NOT EXISTS previous_title TEXT;
+    ALTER TABLE tavern_roles ADD COLUMN IF NOT EXISTS previous_position TEXT;
+    CREATE TABLE IF NOT EXISTS tavern_products (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      grade TEXT NOT NULL,
+      price INTEGER NOT NULL CHECK(price > 0),
+      description TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL
+    );
+    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL;
+    CREATE TABLE IF NOT EXISTS tavern_listings (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE CASCADE,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      npc_next_buy_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '5 minutes'),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(owner_id, product_id)
+    );
+    CREATE TABLE IF NOT EXISTS tavern_member_invites (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      buyer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE CASCADE,
+      price INTEGER NOT NULL CHECK(price > 0),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+      notification_id BIGINT REFERENCES mailbox_notifications(id) ON DELETE SET NULL,
+      destination TEXT NOT NULL DEFAULT 'tavern' CHECK(destination IN ('tavern','sumeru')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      CHECK(owner_id <> buyer_id)
+    );
+    ALTER TABLE tavern_member_invites ADD COLUMN IF NOT EXISTS destination TEXT NOT NULL DEFAULT 'tavern';
+    CREATE INDEX IF NOT EXISTS idx_tavern_invites_buyer_status ON tavern_member_invites(buyer_id,status,created_at DESC);
+    CREATE TABLE IF NOT EXISTS tavern_sales (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      buyer_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE RESTRICT,
+      buyer_type TEXT NOT NULL CHECK(buyer_type IN ('npc','member')),
+      listed_price INTEGER NOT NULL,
+      seller_received INTEGER NOT NULL,
+      commission INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS tavern_inventory (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES tavern_products(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL DEFAULT 0 CHECK(quantity >= 0),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,product_id)
+    );
+    INSERT INTO tavern_products(name,grade,price,description) VALUES
+      ('Túy Trà Linh','Hạ Đẳng',50,'Linh trà ủ men nhẹ, vị thanh và giúp môn nhân giải lao.'),
+      ('Bách Hoa Tửu','Trung Đẳng',120,'Túy phẩm bách hoa, hương thơm dịu, linh khí ổn định.'),
+      ('Nguyệt Quang Nhưỡng','Thượng Đẳng',300,'Tửu nhưỡng ánh nguyệt, linh khí nồng đậm và quý hiếm.'),
+      ('Thiên Tiên Túy','Cực Phẩm',800,'Túy phẩm cao cấp, chỉ dành cho những buổi tửu yến trọng thể.')
+    ON CONFLICT(name) DO NOTHING;
+  `);
+
+  // Mỗi thời điểm chỉ có đúng một Lâu Chủ. @kien là người giữ quyền Lâu Chủ mặc định.
+  const kien=(await query(`SELECT id FROM users WHERE LOWER(username)='kien' LIMIT 1`)).rows[0];
+  if(kien){
+    const active=(await query(`SELECT user_id FROM tavern_roles WHERE active=true ORDER BY CASE WHEN user_id=$1 THEN 0 ELSE 1 END, applied_at ASC LIMIT 1`,[kien.id])).rows[0];
+    if(!active){
+      const pr=(await query(`SELECT title,position FROM profiles WHERE user_id=$1`,[kien.id])).rows[0]||{};
+      await query(`INSERT INTO tavern_roles(user_id,role_code,active,applied_at,previous_title,previous_position) VALUES($1,'tavern_master',true,NOW(),$2,$3)
+        ON CONFLICT(user_id) DO UPDATE SET active=true,role_code='tavern_master',applied_at=COALESCE(tavern_roles.applied_at,NOW())`,[kien.id,pr.title||null,pr.position||null]);
+    } else if(Number(active.user_id)!==Number(kien.id)) {
+      // Bản v3.6.67 cũ cho phép ứng cử tự do; từ bản này quyền Lâu Chủ mặc định thuộc @kien.
+      await query(`UPDATE tavern_listings SET active=false WHERE owner_id=$1`,[active.user_id]);
+      await query(`UPDATE tavern_member_invites SET status='rejected',responded_at=NOW() WHERE owner_id=$1 AND status='pending'`,[active.user_id]);
+      const oldRole=(await query(`SELECT previous_title,previous_position FROM tavern_roles WHERE user_id=$1`,[active.user_id])).rows[0]||{};
+      await query(`UPDATE profiles SET title=COALESCE($2,title),position=COALESCE($3,position),updated_at=NOW() WHERE user_id=$1`,[active.user_id,oldRole.previous_title,oldRole.previous_position]);
+      await query(`UPDATE tavern_roles SET active=false WHERE active=true`);
+      const pr=(await query(`SELECT title,position FROM profiles WHERE user_id=$1`,[kien.id])).rows[0]||{};
+      await query(`INSERT INTO tavern_roles(user_id,role_code,active,applied_at,previous_title,previous_position) VALUES($1,'tavern_master',true,NOW(),$2,$3)
+        ON CONFLICT(user_id) DO UPDATE SET active=true,role_code='tavern_master'`,[kien.id,pr.title||null,pr.position||null]);
+    }
+  }
+  await query(`UPDATE tavern_roles SET active=false WHERE user_id NOT IN (SELECT user_id FROM tavern_roles WHERE active=true LIMIT 1) AND active=true`);
+  const normalizedMaster=(await query(`SELECT user_id FROM tavern_roles WHERE active=true LIMIT 1`)).rows[0];
+  if(normalizedMaster){
+    const mr=(await query(`SELECT title,position FROM profiles WHERE user_id=$1`,[normalizedMaster.user_id])).rows[0]||{};
+    const tr=(await query(`SELECT previous_title,previous_position FROM tavern_roles WHERE user_id=$1`,[normalizedMaster.user_id])).rows[0]||{};
+    if(!tr.previous_title || !tr.previous_position){
+      await query(`UPDATE tavern_roles SET previous_title=COALESCE(previous_title,$2),previous_position=COALESCE(previous_position,$3) WHERE user_id=$1`,[normalizedMaster.user_id,mr.title||null,mr.position||null]);
+    }
+    await query(`UPDATE profiles SET title='Tửu Lâu Chi Chủ',position='Lâu Chủ',updated_at=NOW() WHERE user_id=$1`,[normalizedMaster.user_id]);
+  }
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tavern_single_active_master ON tavern_roles(active) WHERE active=true`);
+
+  // Đồng bộ túy phẩm sang Tu Di Giới để người mua có thể chọn nơi hấp thu.
+  const products=(await query(`SELECT id,name,grade,price,description,storage_item_id FROM tavern_products ORDER BY id`)).rows;
+  for(const x of products){
+    let itemId=Number(x.storage_item_id)||0;
+    if(!itemId){
+      const ir=(await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm)
+        VALUES($1,'Tửu Lâu · Túy Phẩm',$2,0,0,0)
+        ON CONFLICT(name) DO UPDATE SET category='Tửu Lâu · Túy Phẩm',description=EXCLUDED.description
+        RETURNING id`,[x.name,x.description])).rows[0];
+      itemId=Number(ir.id);
+      await query(`UPDATE tavern_products SET storage_item_id=$2 WHERE id=$1`,[x.id,itemId]);
+    }
+  }
+}
+
+app.get('/api/tavern',auth,async(req,res)=>{
+  try{
+    await ensureTavernSchema();
+    const uid=req.session.user_id;
+    const master=(await query(`SELECT r.user_id,r.role_code,r.applied_at,u.username,u.display_name,p.title,p.position,p.avatar
+      FROM tavern_roles r JOIN users u ON u.id=r.user_id JOIN profiles p ON p.user_id=r.user_id
+      WHERE r.active=true LIMIT 1`)).rows[0]||null;
+    const role=master&&Number(master.user_id)===Number(uid)?master:null;
+    const products=(await query(`SELECT p.id,p.name,p.grade,p.price,p.description,p.storage_item_id,
+      EXISTS(SELECT 1 FROM tavern_listings l WHERE l.owner_id=$1 AND l.product_id=p.id AND l.active) AS listed
+      FROM tavern_products p ORDER BY p.price ASC,p.id ASC`,[uid])).rows;
+    const listings=(await query(`SELECT l.id,l.owner_id,l.product_id,l.active,l.npc_next_buy_at,p.name,p.grade,p.price,p.description,u.display_name AS owner_name,u.username AS owner_username
+      FROM tavern_listings l JOIN tavern_products p ON p.id=l.product_id JOIN users u ON u.id=l.owner_id
+      WHERE l.active=true ORDER BY p.price ASC,l.id ASC`,[])).rows;
+    const members=(await query(`SELECT u.id,u.display_name,u.username,p.rank,p.title,p.position FROM users u JOIN profiles p ON p.user_id=u.id
+      WHERE u.id<>$1 ORDER BY u.display_name,u.id LIMIT 200`,[uid])).rows;
+    const inventory=(await query(`SELECT i.product_id,i.quantity,p.name,p.grade FROM tavern_inventory i JOIN tavern_products p ON p.id=i.product_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY p.price`,[uid])).rows;
+    const inbox=(await query(`SELECT i.id,i.owner_id,i.buyer_id,i.product_id,i.price,i.status,i.destination,i.created_at,
+      p.name,p.grade,p.description,u.display_name AS owner_name,u.username AS owner_username
+      FROM tavern_member_invites i JOIN tavern_products p ON p.id=i.product_id JOIN users u ON u.id=i.owner_id
+      WHERE i.buyer_id=$1 AND i.status='pending' ORDER BY i.created_at DESC LIMIT 50`,[uid])).rows;
+    const isKien=String((await query('SELECT username FROM users WHERE id=$1',[uid])).rows[0]?.username||'').toLowerCase()==='kien';
+    res.json({master,role,products,listings,members,inventory,inbox,isKien});
+  }catch(e){console.error('tavern load:',e);res.status(500).json({error:'Không thể mở Tửu Lâu.'});}
+});
+
+app.post('/api/tavern/apply',auth,async(req,res)=>{
+  try{
+    await ensureTavernSchema();
+    const uid=req.session.user_id;
+    const u=(await query('SELECT id,username FROM users WHERE id=$1',[uid])).rows[0];
+    if(String(u?.username||'').toLowerCase()!=='kien')return res.status(403).json({error:'Từ nay vị trí Lâu Chủ được định danh duy nhất cho @kien. Chỉ @kien có quyền giữ hoặc nhường vị trí này.'});
+    const active=(await query(`SELECT user_id FROM tavern_roles WHERE active=true LIMIT 1`)).rows[0];
+    if(active && Number(active.user_id)!==Number(uid))return res.status(409).json({error:'Tửu Lâu hiện đã có Lâu Chủ.'});
+    const pr=(await query('SELECT title,position FROM profiles WHERE user_id=$1',[uid])).rows[0]||{};
+    await query(`INSERT INTO tavern_roles(user_id,role_code,active,applied_at,previous_title,previous_position) VALUES($1,'tavern_master',true,NOW(),$2,$3)
+      ON CONFLICT(user_id) DO UPDATE SET active=true,role_code='tavern_master'`,[uid,pr.title||null,pr.position||null]);
+    await query(`UPDATE profiles SET title='Tửu Lâu Chi Chủ',position='Lâu Chủ',updated_at=NOW() WHERE user_id=$1`,[uid]);
+    res.json({ok:true,message:'@kien đã nhận vị trí Tửu Lâu Chi Chủ.'});
+  }catch(e){console.error('tavern apply:',e);res.status(500).json({error:'Không thể nhận vị trí Lâu Chủ.'});}
+});
+
+app.post('/api/tavern/transfer',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await ensureTavernSchema();
+    const uid=req.session.user_id,targetId=Number(req.body?.targetId);
+    const u=(await client.query('SELECT username FROM users WHERE id=$1',[uid])).rows[0];
+    if(String(u?.username||'').toLowerCase()!=='kien')return res.status(403).json({error:'Chỉ @kien có quyền nhường vị trí Tửu Lâu Chi Chủ.'});
+    if(!targetId||targetId===uid)return res.status(400).json({error:'Môn nhân nhận chức vị không hợp lệ.'});
+    await client.query('BEGIN');
+    const current=(await client.query(`SELECT r.user_id,r.previous_title,r.previous_position FROM tavern_roles r WHERE r.active=true FOR UPDATE`)).rows[0];
+    if(!current||Number(current.user_id)!==Number(uid)){await client.query('ROLLBACK');return res.status(409).json({error:'@kien hiện không phải Lâu Chủ.'});}
+    const target=(await client.query(`SELECT u.id,u.username,u.display_name,p.title,p.position FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1 FOR UPDATE`,[targetId])).rows[0];
+    if(!target){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân nhận chức vị.'});}
+    await client.query(`UPDATE profiles SET title=COALESCE($2,title),position=COALESCE($3,position),updated_at=NOW() WHERE user_id=$1`,[uid,current.previous_title,current.previous_position]);
+    await client.query(`UPDATE tavern_listings SET active=false WHERE owner_id=$1`,[uid]);
+    await client.query(`UPDATE tavern_member_invites SET status='rejected',responded_at=NOW() WHERE owner_id=$1 AND status='pending'`,[uid]);
+    await client.query(`UPDATE tavern_roles SET active=false WHERE user_id=$1`,[uid]);
+    await client.query(`INSERT INTO tavern_roles(user_id,role_code,active,applied_at,previous_title,previous_position)
+      VALUES($1,'tavern_master',true,NOW(),$2,$3)
+      ON CONFLICT(user_id) DO UPDATE SET active=true,role_code='tavern_master',applied_at=NOW(),previous_title=$2,previous_position=$3`,[targetId,target.title,target.position]);
+    await client.query(`UPDATE profiles SET title='Tửu Lâu Chi Chủ',position='Lâu Chủ',updated_at=NOW() WHERE user_id=$1`,[targetId]);
+    await client.query('COMMIT');
+    await createMailboxNotification(targetId,'tavern_sale','🥂 Tửu Lâu · Nhận vị trí Lâu Chủ','@kien đã nhường vị trí Tửu Lâu Chi Chủ cho bạn.','#tavern');
+    res.json({ok:true,message:`Đã nhường Tửu Lâu Chi Chủ cho ${target.display_name}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tavern transfer:',e);res.status(500).json({error:'Không thể nhường vị trí Lâu Chủ.'});}
+  finally{client.release();}
+});
+
+app.post('/api/tavern/listings',auth,async(req,res)=>{
+  try{
+    await ensureTavernSchema();
+    const uid=req.session.user_id;
+    const role=(await query(`SELECT active FROM tavern_roles WHERE user_id=$1`,[uid])).rows[0];
+    if(!role?.active)return res.status(403).json({error:'Chỉ Lâu Chủ mới được mở bán túy phẩm.'});
+    const productId=Number(req.body?.productId);
+    const p=(await query('SELECT id FROM tavern_products WHERE id=$1',[productId])).rows[0];
+    if(!p)return res.status(404).json({error:'Túy phẩm không tồn tại.'});
+    await query(`INSERT INTO tavern_listings(owner_id,product_id,active,npc_next_buy_at) VALUES($1,$2,true,NOW()+INTERVAL '5 minutes')
+      ON CONFLICT(owner_id,product_id) DO UPDATE SET active=true,npc_next_buy_at=CASE WHEN tavern_listings.active THEN tavern_listings.npc_next_buy_at ELSE NOW()+INTERVAL '5 minutes' END`,
+      [uid,productId]);
+    res.json({ok:true,message:'Đã mở bán túy phẩm. NPC sẽ tự mua sau 5 phút.'});
+  }catch(e){console.error('tavern listing:',e);res.status(500).json({error:'Không thể mở bán túy phẩm.'});}
+});
+
+app.post('/api/tavern/listings/stop',auth,async(req,res)=>{
+  try{
+    await ensureTavernSchema();
+    const id=Number(req.body?.id);
+    const r=await query(`UPDATE tavern_listings SET active=false WHERE id=$1 AND owner_id=$2 RETURNING id`,[id,req.session.user_id]);
+    if(!r.rowCount)return res.status(404).json({error:'Không tìm thấy quầy bán.'});
+    res.json({ok:true});
+  }catch(e){res.status(500).json({error:'Không thể đóng quầy bán.'});}
+});
+
+app.post('/api/tavern/invite',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await ensureTavernSchema();
+    const uid=req.session.user_id,buyerId=Number(req.body?.buyerId),productId=Number(req.body?.productId);
+    if(!buyerId||buyerId===uid)return res.status(400).json({error:'Môn nhân được mời không hợp lệ.'});
+    const role=(await client.query('SELECT active FROM tavern_roles WHERE user_id=$1',[uid])).rows[0];
+    if(!role?.active)return res.status(403).json({error:'Chỉ Lâu Chủ mới được mời môn nhân mua rượu.'});
+    const p=(await client.query('SELECT id,name,grade,price FROM tavern_products WHERE id=$1',[productId])).rows[0];
+    if(!p)return res.status(404).json({error:'Túy phẩm không tồn tại.'});
+    const listing=(await client.query('SELECT id FROM tavern_listings WHERE owner_id=$1 AND product_id=$2 AND active=true',[uid,productId])).rows[0];
+    if(!listing)return res.status(400).json({error:'Hãy mở bán túy phẩm trước khi mời môn nhân.'});
+    const existing=(await client.query(`SELECT id FROM tavern_member_invites WHERE owner_id=$1 AND buyer_id=$2 AND product_id=$3 AND status='pending'`,[uid,buyerId,productId])).rows[0];
+    if(existing)return res.status(409).json({error:'Đã có lời mời mua túy phẩm đang chờ môn nhân này phản hồi.'});
+    const ins=(await client.query(`INSERT INTO tavern_member_invites(owner_id,buyer_id,product_id,price) VALUES($1,$2,$3,$4) RETURNING id`,[uid,buyerId,productId,p.price])).rows[0];
+    await createMailboxNotification(buyerId,'tavern_sale','🥂 Lời mời từ Tửu Lâu',`Lâu Chủ mời bạn mua ${p.name} · ${p.grade} · ${p.price.toLocaleString('vi-VN')} linh thạch. Bạn có thể tiếp nhận hoặc từ chối trong Hòm Thư.`,'#tavern',{action:'tavern_sale',requestId:Number(ins.id)});
+    res.json({ok:true,message:'Đã gửi lời mời mua rượu vào Hòm Thư của môn nhân.'});
+  }catch(e){console.error('tavern invite:',e);res.status(500).json({error:'Không thể gửi lời mời mua rượu.'});}
+  finally{client.release();}
+});
+
+app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await ensureTavernSchema();
+    const uid=req.session.user_id,id=Number(req.body?.requestId),action=req.body?.action;
+    const destination=req.body?.destination==='sumeru'?'sumeru':'tavern';
+    if(!id||!['accept','reject'].includes(action))return res.status(400).json({error:'Phản hồi lời mời không hợp lệ.'});
+    await client.query('BEGIN');
+    const inv=(await client.query(`SELECT i.*,p.name,p.grade,p.price AS current_price,p.storage_item_id,u.display_name AS owner_name
+      FROM tavern_member_invites i JOIN tavern_products p ON p.id=i.product_id JOIN users u ON u.id=i.owner_id
+      WHERE i.id=$1 AND i.buyer_id=$2 AND i.status='pending' FOR UPDATE`,[id,uid])).rows[0];
+    if(!inv){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời không còn hiệu lực.'});}
+    if(action==='reject'){
+      await client.query(`UPDATE tavern_member_invites SET status='rejected',responded_at=NOW(),destination=$2 WHERE id=$1`,[id,destination]);
+      await client.query('COMMIT');
+      await createMailboxNotification(inv.owner_id,'tavern_sale','🥂 Lời mời mua rượu','Môn nhân đã từ chối lời mời mua túy phẩm.','#tavern');
+      return res.json({ok:true,message:'Đã từ chối lời mời.'});
+    }
+    const buyer=(await client.query('SELECT spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];
+    if(Number(buyer?.spirit_stones||0)<Number(inv.price)){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thạch không đủ để mua túy phẩm.'});}
+    const seller=(await client.query('SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[inv.owner_id])).rows[0];
+    if(!seller){await client.query('ROLLBACK');return res.status(404).json({error:'Lâu Chủ không còn tồn tại.'});}
+    const sellerReceive=Math.floor(Number(inv.price)*0.9),commission=Number(inv.price)-sellerReceive;
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,inv.price]);
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[inv.owner_id,sellerReceive]);
+    if(destination==='tavern'){
+      await client.query(`INSERT INTO tavern_inventory(user_id,product_id,quantity,updated_at) VALUES($1,$2,1,NOW())
+        ON CONFLICT(user_id,product_id) DO UPDATE SET quantity=tavern_inventory.quantity+1,updated_at=NOW()`,[uid,inv.product_id]);
+    }else{
+      const used=Number((await client.query(`SELECT COUNT(*)::int c FROM inventory WHERE user_id=$1 AND quantity>0`,[uid])).rows[0]?.c||0);
+      const owned=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,inv.storage_item_id])).rows[0]?.quantity||0);
+      const cap=Math.max(1,Number(buyer.storage_capacity)||30);
+      if(used>=cap&&owned<=0){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}). Hãy chọn hấp thu tại Tửu Lâu hoặc nâng dung lượng.`});}
+      await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW())
+        ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[uid,inv.storage_item_id]);
+    }
+    await client.query(`INSERT INTO tavern_sales(owner_id,buyer_id,product_id,buyer_type,listed_price,seller_received,commission)
+      VALUES($1,$2,$3,'member',$4,$5,$6)`,[inv.owner_id,uid,inv.product_id,inv.price,sellerReceive,commission]);
+    await client.query(`UPDATE tavern_member_invites SET status='accepted',responded_at=NOW(),destination=$2 WHERE id=$1`,[id,destination]);
+    await client.query('COMMIT');
+    const destText=destination==='tavern'?'Tửu Lâu':'Tu Di Giới';
+    await createMailboxNotification(inv.owner_id,'tavern_sale','🥂 Giao dịch thành công',`Môn nhân đã nhận ${inv.name} vào ${destText}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (90%).`,'#tavern');
+    res.json({ok:true,message:`Đã mua ${inv.name}. Túy phẩm đã được đưa vào ${destText}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tavern respond:',e);res.status(500).json({error:'Không thể hoàn tất giao dịch Tửu Lâu.'});}
+  finally{client.release();}
+});
+
+async function processTavernNpcSales(){
+  try{
+    await ensureTavernSchema();
+    const due=(await query(`SELECT l.id,l.owner_id,l.product_id,p.name,p.price
+      FROM tavern_listings l JOIN tavern_products p ON p.id=l.product_id
+      WHERE l.active=true AND l.npc_next_buy_at<=NOW() ORDER BY l.npc_next_buy_at ASC LIMIT 50`)).rows;
+    for(const row of due){
+      const client=await pool.connect();
+      try{
+        await client.query('BEGIN');
+        const locked=(await client.query(`SELECT l.id,l.owner_id,l.product_id,p.name,p.price
+          FROM tavern_listings l JOIN tavern_products p ON p.id=l.product_id
+          WHERE l.id=$1 AND l.active=true AND l.npc_next_buy_at<=NOW() FOR UPDATE`,[row.id])).rows[0];
+        if(!locked){await client.query('ROLLBACK');continue;}
+        const sellerReceive=Math.floor(Number(locked.price)*0.8),commission=Number(locked.price)-sellerReceive;
+        await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[locked.owner_id,sellerReceive]);
+        await client.query(`INSERT INTO tavern_sales(owner_id,buyer_id,product_id,buyer_type,listed_price,seller_received,commission)
+          VALUES($1,NULL,$2,'npc',$3,$4,$5)`,[locked.owner_id,locked.product_id,locked.price,sellerReceive,commission]);
+        await client.query(`UPDATE tavern_listings SET npc_next_buy_at=NOW()+INTERVAL '5 minutes' WHERE id=$1`,[locked.id]);
+        await client.query('COMMIT');
+        await createMailboxNotification(locked.owner_id,'tavern_sale','🥂 NPC đã mua túy phẩm',`NPC đã mua ${locked.name}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (80% giá bán).`,'#tavern');
+      }catch(e){try{await client.query('ROLLBACK')}catch{}}
+      finally{client.release();}
+    }
+  }catch(e){console.error('tavern npc:',e.message);}
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NGHIỆP VỤ · nghề chính + nghề phụ mở khóa theo cảnh giới
@@ -1870,11 +2275,13 @@ app.get('/api/profile',auth,async(req,res)=>{
     const onlineRate=onlineSpiritRate(stage.realmIndex);
     const onlineUnlocked=!Boolean(mansion?.active);
     const allowedPositions=positionOptionsFor(stage.realmIndex);
+    const isTavernOwner=Boolean((await query(`SELECT 1 FROM tavern_roles WHERE user_id=$1 AND active=true LIMIT 1`,[p.id])).rowCount);
+    if(isTavernOwner && !allowedPositions.includes('Lâu Chủ')) allowedPositions.unshift('Lâu Chủ');
     const activeBattle=(await query(`SELECT id,challenger_id,opponent_id,challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action,started_at FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) ORDER BY id DESC LIMIT 1`,[p.id])).rows[0]||null;
     const healthMax=challengeHealth({...p,equipment_power:equipmentPower});
     const healthCurrent=activeBattle ? (Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_hp):Number(activeBattle.opponent_hp)) : healthMax;
 
-    if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
+    if(!isTavernOwner && !allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
     const auraRank=(await sectAuraRankMap()).get(Number(p.id))||0;
     res.json({profile:{...p,auraRank,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:999999999}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
@@ -1896,7 +2303,10 @@ app.patch('/api/profile',auth,async(req,res)=>{
     const ps=stageFor(Number(pr?.spirit_power)||0);
     let chosenPosition=position?.toString().trim();
     if(chosenPosition){ const allowed=positionOptionsFor(ps.realmIndex); if(!allowed.includes(chosenPosition)) return res.status(400).json({error:`Chức vị ${chosenPosition} không phù hợp với ${ps.stage}.`}); }
-    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),safeAvatar]);
+    const tavernOwner=(await query(`SELECT user_id FROM tavern_roles WHERE active=true AND user_id=$1`,[req.session.user_id])).rows[0];
+    const protectedTavernOwner=Boolean(tavernOwner);
+    if(protectedTavernOwner){ chosenPosition='Lâu Chủ'; }
+    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,protectedTavernOwner?'Tửu Lâu Chi Chủ':title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),safeAvatar]);
     res.json({ok:true});
   } catch(e){res.status(500).json({error:'Không thể cập nhật hồ sơ.'});}
 });
@@ -2277,6 +2687,35 @@ app.post('/api/currency/exchange',auth,async(req,res)=>{
     res.json({ok:true,rate:SPIRIT_TO_STONE_RATE,spentSpirit:spiritCost,receivedStones:stonesToBuy,spirit:Number(nr.rows[0].spirit_power),spiritStones:Number(nr.rows[0].spirit_stones)});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('currency exchange:',e);res.status(500).json({error:'Không thể trao đổi linh lực sang linh thạch.'});}
   finally{client.release();}
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THÔNG BÁO NHẬN THƯỞNG · snapshot nhẹ cho thanh thông báo 10 giây
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/reward-snapshot',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id;
+    // Một round-trip PostgreSQL thay cho 5 query riêng biệt. Đây là endpoint
+    // được polling thường xuyên nên tối ưu này đặc biệt quan trọng khi có nhiều người online.
+    const r=await query(`
+      SELECT p.spirit_stones AS stones,
+        COALESCE((SELECT json_agg(json_build_object('id',i.item_id,'name',ti.name,'quantity',i.quantity) ORDER BY i.item_id)
+          FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+          WHERE i.user_id=p.user_id AND i.quantity>0),'[]'::json) AS items,
+        COALESCE((SELECT json_agg(json_build_object('id',o.beast_id,'name',c.name,'quantity',o.quantity) ORDER BY o.beast_id)
+          FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
+          WHERE o.user_id=p.user_id AND o.quantity>0),'[]'::json) AS beasts,
+        COALESCE((SELECT json_agg(json_build_object('id',o.root_id,'name',c.name,'quantity',o.quantity) ORDER BY o.root_id)
+          FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id
+          WHERE o.user_id=p.user_id AND o.quantity>0),'[]'::json) AS roots,
+        COALESCE((SELECT json_agg(json_build_object('id',i.product_id,'name',tp.name,'quantity',i.quantity) ORDER BY i.product_id)
+          FROM tavern_inventory i JOIN tavern_products tp ON tp.id=i.product_id
+          WHERE i.user_id=p.user_id AND i.quantity>0),'[]'::json) AS tavern
+      FROM profiles p WHERE p.user_id=$1`,[uid]);
+    const row=r.rows[0]||{};
+    res.setHeader('Cache-Control','no-store');
+    res.json({spiritStones:Number(row.stones)||0,items:row.items||[],beasts:row.beasts||[],roots:row.roots||[],tavern:row.tavern||[]});
+  }catch(e){res.status(500).json({error:'Không thể kiểm tra phần thưởng mới.'});}
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4579,4 +5018,34 @@ app.post('/api/beast-arena/online/turn',auth,async(req,res)=>{
 
 app.get('/api/beast-arena/spectate',auth,async(req,res)=>{try{await ensureBeastArenaSchema();const rows=(await query(`SELECT r.id,r.created_at,r.rounds,r.battle_log,r.winner_id,cu.display_name AS challenger_name,ou.display_name AS opponent_name,cb.name AS challenger_beast,ob.name AS opponent_beast,r.challenger_type,r.opponent_type,r.challenger_hp,r.opponent_hp FROM beast_arena_requests r JOIN users cu ON cu.id=r.challenger_id JOIN users ou ON ou.id=r.opponent_id JOIN spirit_beasts_catalog cb ON cb.id=r.challenger_beast_id LEFT JOIN spirit_beasts_catalog ob ON ob.id=r.opponent_beast_id WHERE r.status='completed' ORDER BY r.id DESC LIMIT 12`)).rows;res.json({rows});}catch(e){res.status(500).json({error:'Không thể tải sàn Thú Trường.'});}});
 
-initDb().then(()=>app.listen(PORT,()=>console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`))).catch(err=>{console.error('Không khởi tạo được database:',err);process.exit(1);});
+
+// Schema migrations are required only once per process. Several endpoints call
+// these guards for compatibility with old PostgreSQL databases; memoizing them
+// prevents repeated ALTER TABLE / CREATE INDEX work under concurrent traffic.
+const __schemaOnceCache = new Map();
+function __memoizeSchema(fn, key){
+  return function(){
+    if(__schemaOnceCache.has(key)) return __schemaOnceCache.get(key);
+    const promise=Promise.resolve().then(()=>fn.apply(this, arguments));
+    __schemaOnceCache.set(key, promise);
+    promise.catch(()=>__schemaOnceCache.delete(key));
+    return promise;
+  };
+}
+ensureRuntimeSchema=__memoizeSchema(ensureRuntimeSchema,'runtime');
+ensureBicanhSchema=__memoizeSchema(ensureBicanhSchema,'bicanh');
+ensureTienPhapSchema=__memoizeSchema(ensureTienPhapSchema,'tien-phap');
+ensureTienBanSchema=__memoizeSchema(ensureTienBanSchema,'tien-ban');
+ensureBeastArenaSchema=__memoizeSchema(ensureBeastArenaSchema,'beast-arena');
+ensureTavernSchema=__memoizeSchema(ensureTavernSchema,'tavern');
+ensureMailboxSchema=__memoizeSchema(ensureMailboxSchema,'mailbox');
+ensureChallengeSchema=__memoizeSchema(ensureChallengeSchema,'challenge');
+ensureEquipmentSchema=__memoizeSchema(ensureEquipmentSchema,'equipment');
+
+initDb().then(()=>{
+  app.listen(PORT,()=>{
+    console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`);
+    setInterval(()=>processTavernNpcSales(),30000);
+    processTavernNpcSales();
+  });
+}).catch(err=>{console.error('Không khởi tạo được database:',err);process.exit(1);});
