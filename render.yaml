@@ -4,6 +4,8 @@ services:
     runtime: node
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 10
     envVars:
       - key: DATABASE_URL
         fromDatabase:

@@ -1,0 +1,27 @@
+HÀN THIÊN MÔN v3.6.71 · RENDER READY + TỐI ƯU 50 NGƯỜI
+
+1. SỬA LỖI RENDER PORT SCAN
+- PORT = Number(process.env.PORT) || 10000.
+- HOST = 0.0.0.0.
+- HTTP server listen() được gọi trước initDb().
+- Không còn chờ toàn bộ PostgreSQL schema/migration mới mở port.
+
+2. HEALTH CHECK
+- GET /health.
+- 503 khi database chưa sẵn sàng.
+- 200 + SELECT 1 khi database sẵn sàng.
+- /api/health vẫn được giữ để tương thích.
+- render.yaml dùng healthCheckPath: /health.
+
+3. STARTUP/SHUTDOWN
+- Background job Tửu Lâu chỉ bắt đầu sau khi initDb() thành công.
+- SIGTERM/SIGINT đóng HTTP server và PostgreSQL pool.
+- KeepAlive 120s / Headers 125s mặc định, có thể chỉnh bằng env.
+
+4. GIỮ NGUYÊN
+- Không thay đổi luật game/chức năng giao diện của v3.6.70.
+- Giữ tối ưu polling/schema memoization/pool của v3.6.70.
+
+5. NĂNG LỰC
+- Bản này được chuẩn bị cho khoảng 50 người online đồng thời ở mức sử dụng thông thường.
+- Khả năng thực tế còn phụ thuộc CPU/RAM Render, PostgreSQL, mức realtime và tần suất truy vấn.

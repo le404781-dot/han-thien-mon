@@ -4,7 +4,12 @@ const crypto = require('crypto');
 const { Pool } = require('pg');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// Render Web Service: always bind to the injected PORT on all interfaces.
+const PORT = Number(process.env.PORT) || 10000;
+const HOST = '0.0.0.0';
+let dbReady = false;
+let dbInitError = null;
+let backgroundJobsStarted = false;
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
   console.error('Thiếu DATABASE_URL. Hãy tạo PostgreSQL và thêm biến môi trường DATABASE_URL trên Render.');
@@ -802,6 +807,22 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE(owner_id, product_id)
     );
+    -- mailbox_notifications is referenced by tavern_member_invites below.
+    -- Create the base table first so a fresh Render PostgreSQL database can initialize
+    -- successfully in one deployment, even before the later mailbox migration block.
+    CREATE TABLE IF NOT EXISTS mailbox_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      link_hash TEXT NOT NULL DEFAULT '',
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE mailbox_notifications ADD COLUMN IF NOT EXISTS action_data TEXT NOT NULL DEFAULT '';
+    CREATE INDEX IF NOT EXISTS idx_mailbox_user_unread ON mailbox_notifications(user_id,read_at,id DESC);
+
     CREATE TABLE IF NOT EXISTS tavern_member_invites (
       id BIGSERIAL PRIMARY KEY,
       owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1708,7 +1729,23 @@ async function auth(req,res,next) {
   } catch(e) { res.status(500).json({error:'Lỗi máy chủ.'}); }
 }
 
-app.get('/api/health',(req,res)=>res.json({ok:true,service:'Hàn Thiên Môn'}));
+// Render health endpoint. The HTTP listener is started before database initialization
+// so Render can detect the open port even when migrations take a while.
+app.get('/health', async (req,res)=>{
+  if(!dbReady){
+    return res.status(503).json({ok:false,service:'Hàn Thiên Môn',status:'starting',error:dbInitError||'Database đang khởi tạo.'});
+  }
+  try{
+    await pool.query('SELECT 1');
+    return res.status(200).json({ok:true,service:'Hàn Thiên Môn',status:'ready'});
+  }catch(e){
+    dbReady=false;
+    console.error('health database check:',e?.message||e);
+    return res.status(503).json({ok:false,service:'Hàn Thiên Môn',status:'degraded'});
+  }
+});
+
+app.get('/api/health',(req,res)=>res.status(dbReady?200:503).json({ok:dbReady,service:'Hàn Thiên Môn',status:dbReady?'ready':'starting'}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TRUYỀN KỲ · mỗi môn nhân có một mục truyền kỳ công khai toàn tông môn
@@ -5042,10 +5079,50 @@ ensureMailboxSchema=__memoizeSchema(ensureMailboxSchema,'mailbox');
 ensureChallengeSchema=__memoizeSchema(ensureChallengeSchema,'challenge');
 ensureEquipmentSchema=__memoizeSchema(ensureEquipmentSchema,'equipment');
 
+// IMPORTANT for Render: open the HTTP port immediately, then initialize PostgreSQL.
+// The previous v3.6.70 startup waited for all schema work before calling listen(),
+// which could make Render's port scanner time out during a cold deploy.
+const server = app.listen(PORT, HOST, ()=>{
+  console.log(`Hàn Thiên Môn đang lắng nghe tại http://${HOST}:${PORT}`);
+  console.log(`Render health endpoint: /health`);
+});
+
+server.keepAliveTimeout = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 120000);
+server.headersTimeout = Number(process.env.HEADERS_TIMEOUT_MS || 125000);
+
+function startBackgroundJobs(){
+  if(backgroundJobsStarted) return;
+  backgroundJobsStarted = true;
+  setInterval(()=>processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e)),30000);
+  processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e));
+}
+
 initDb().then(()=>{
-  app.listen(PORT,()=>{
-    console.log(`Hàn Thiên Môn đang chạy trên cổng ${PORT}`);
-    setInterval(()=>processTavernNpcSales(),30000);
-    processTavernNpcSales();
+  dbInitError = null;
+  dbReady = true;
+  console.log('PostgreSQL schema/data initialization hoàn tất.');
+  startBackgroundJobs();
+}).catch(err=>{
+  dbReady = false;
+  dbInitError = err?.message || String(err);
+  console.error('Không khởi tạo được database:',err);
+  // Keep the process alive briefly so the startup error is visible in Render logs,
+  // then exit and let Render restart the instance cleanly.
+  setTimeout(()=>process.exit(1),1000);
+});
+
+process.on('SIGTERM',async()=>{
+  console.log('Nhận SIGTERM — đang đóng Hàn Thiên Môn...');
+  server.close(async()=>{
+    try{ await pool.end(); }catch(e){ console.error('pool.end:',e); }
+    process.exit(0);
   });
-}).catch(err=>{console.error('Không khởi tạo được database:',err);process.exit(1);});
+  setTimeout(()=>process.exit(1),10000).unref();
+});
+
+process.on('SIGINT',async()=>{
+  server.close(async()=>{
+    try{ await pool.end(); }catch(e){}
+    process.exit(0);
+  });
+});

@@ -36,3 +36,14 @@ v2.8 cập nhật: Tụ Di Giới 30 ô chứa vật phẩm; đan dược/pháp 
 
 
 Bản v3.0: đổi linh lực nhận vật phẩm, Tu Di Giới, Hàn Thiên Ký Sự, Chức Vị theo cảnh giới, Tông chủ: Thiên Gia Đạo.
+
+
+=== HÀN THIÊN MÔN v3.6.71 · RENDER READY ===
+- Web server bind 0.0.0.0 và đọc PORT từ Render (mặc định 10000).
+- HTTP listener mở trước khi chạy PostgreSQL schema initialization, tránh lỗi Port scan timeout khi startup/migration lâu.
+- Thêm GET /health: 503 khi đang khởi động/chưa sẵn sàng DB; 200 khi PostgreSQL sẵn sàng.
+- render.yaml đặt healthCheckPath: /health.
+- Giữ /api/health để tương thích client cũ.
+- Thêm graceful shutdown cho SIGTERM/SIGINT và đóng PostgreSQL pool.
+- Keep-alive/header timeout được cấu hình để phù hợp web service Node.js.
+- Mục tiêu vận hành khoảng 50 người dùng đồng thời ở mức tải thông thường; không phải cam kết 50 người spam realtime/combat/chat liên tục.
