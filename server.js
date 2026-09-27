@@ -1736,7 +1736,8 @@ app.get('/api/data',async(req,res)=>{
     ]);
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
-    const accountMembers=accounts.rows.map(x=>{const realmIndex=realmIndexFor(Number(x.spirit_power)||0); const online=!!x.last_seen_at && (Date.now()-new Date(x.last_seen_at).getTime())<90000 && x.presence_status==='online'; return {...x,realmIndex,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true,online,presenceLabel:online?'Đang xuất quan':'Đã bế quan'};});
+    const aura=await sectAuraRankMap();
+    const accountMembers=accounts.rows.map(x=>{const realmIndex=realmIndexFor(Number(x.spirit_power)||0); const online=!!x.last_seen_at && (Date.now()-new Date(x.last_seen_at).getTime())<90000 && x.presence_status==='online'; return {...x,realmIndex,auraRank:aura.get(Number(x.id))||0,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true,online,presenceLabel:online?'Đang xuất quan':'Đã bế quan'};});
     res.json({members:accountMembers,memories:legends,timeline:t.rows,userCount:u.rows[0].c,memberCount:accountMembers.length});
   } catch(e) { res.status(500).json({error:'Không thể tải dữ liệu.'}); }
 });
@@ -1874,7 +1875,8 @@ app.get('/api/profile',auth,async(req,res)=>{
     const healthCurrent=activeBattle ? (Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_hp):Number(activeBattle.opponent_hp)) : healthMax;
 
     if(!allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
-    res.json({profile:{...p,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:999999999}});
+    const auraRank=(await sectAuraRankMap()).get(Number(p.id))||0;
+    res.json({profile:{...p,auraRank,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:999999999}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -3417,6 +3419,19 @@ app.post('/api/sect-posts/:id/comments',auth,async(req,res)=>{
   }catch(e){console.error('sect post comment:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint});res.status(500).json({error:'Không thể gửi Truyền Âm.'});}
 });
 
+let sectAuraCache={at:0,map:new Map()};
+async function sectAuraRankMap(){
+  const now=Date.now();
+  if(now-sectAuraCache.at<5000)return sectAuraCache.map;
+  const rows=(await query(`SELECT u.id,p.spirit_power FROM users u JOIN profiles p ON p.user_id=u.id WHERE p.sect=$1`,['Hàn Thiên Môn'])).rows;
+  rows.sort((a,b)=>{
+    const ar=stageFor(Number(a.spirit_power)||0).realmIndex, br=stageFor(Number(b.spirit_power)||0).realmIndex;
+    return br-ar || (Number(b.spirit_power)||0)-(Number(a.spirit_power)||0) || Number(a.id)-Number(b.id);
+  });
+  sectAuraCache={at:now,map:new Map(rows.slice(0,3).map((x,i)=>[Number(x.id),i+1]))};
+  return sectAuraCache.map;
+}
+
 app.get('/api/leaderboard',async(req,res)=>{
   try {
     const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
@@ -3424,7 +3439,8 @@ app.get('/api/leaderboard',async(req,res)=>{
       COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count,
       (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
       FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY achievement_score DESC, u.id ASC LIMIT 50`);
-    res.json({rows:r.rows.map((x,i)=>({...x,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
+    const aura=await sectAuraRankMap();
+    res.json({rows:r.rows.map((x,i)=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex,auraRank:aura.get(Number(x.id))||0,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
   } catch(e){res.status(500).json({error:'Không thể tải bảng thành tích.'});}
 });
 
@@ -4408,15 +4424,38 @@ async function beastArenaReward(client,minRealm=0,high=false){
   for(let i=0;i<source.length;i++){roll-=weights[i];if(roll<=0){item=source[i];break;}} return item?{id:Number(item.id),name:item.name,quantity:1,grade:item.reward_grade||'Hạ Đẳng'}:null;
 }
 function simulateBeastTurnBattle(a,b,skillA=1,skillB=1,mode='online'){
-  let ahp=a.maxHp,bhp=b.maxHp,round=0; const log=[]; const maxRounds=mode==='divine'?20:30;
-  const queueA=(Array.isArray(skillA)?skillA:[skillA]).map(Number).filter(x=>x>=1&&x<=3); const queueB=(Array.isArray(skillB)?skillB:[skillB]).map(Number).filter(x=>x>=1&&x<=3);
-  const safeA=queueA.length?queueA:[1], safeB=queueB.length?queueB:[1];
-  while(ahp>0&&bhp>0&&round<maxRounds){round++; const first=a.speed+Math.random()*a.spirit>=b.speed+Math.random()*b.spirit?'a':'b'; const order=first==='a'?['a','b']:['b','a'];
-    for(const who of order){if(ahp<=0||bhp<=0)break; const atk=who==='a'?a:b,def=who==='a'?b:a; const skillId=(who==='a'?safeA:safeB)[(round-1)%(who==='a'?safeA:safeB).length]; const sk=(who==='a'?a:b).skills?.find(x=>x.id===Number(skillId))||(who==='a'?a:b).skills?.[0]; const mult=typeMultiplier(atk.type,def.type); const crit=Math.random()<Math.min(.3,.08+atk.speed/8500); const raw=(atk.attack*.62+atk.spirit*.38)*(sk?.effect||1)*(crit?1.32:1)*(0.86+Math.random()*.28)*mult; const dmg=Math.max(1,Math.round(raw-Math.max(0,def.defense*.32))); if(who==='a')bhp-=dmg;else ahp-=dmg;
-      const adv=mult>1?' · KHẮC HỆ ×1.35':mult<1?' · BỊ KHẮC ×0.72':''; log.push({round,actor:who,actorName:atk.name,skill:sk?.name||'Ra đòn',damage:dmg,critical:crit,effectiveness:mult,text:`🪶 ${atk.name} · ${sk?.name||'Ra đòn'} ${crit?'BẠO KÍCH ':''}gây ${dmg.toLocaleString('vi-VN')} sát thương${adv}.`,hpA:Math.max(0,ahp),hpB:Math.max(0,bhp)});
+  // Không dùng biến viết tắt dễ gây lỗi ReferenceError khi deploy/minify.
+  let ahp=Number(a?.maxHp)||100, bhp=Number(b?.maxHp)||100, round=0;
+  const log=[]; const maxRounds=mode==='divine'?20:30;
+  const normalizeQueue=(value)=>{
+    const source=Array.isArray(value)?value:[value];
+    const result=source.map(Number).filter(x=>Number.isInteger(x)&&x>=1&&x<=3).slice(0,12);
+    return result.length?result:[1];
+  };
+  const skillsA=normalizeQueue(skillA), skillsB=normalizeQueue(skillB);
+  while(ahp>0&&bhp>0&&round<maxRounds){
+    round++;
+    const first=(Number(a?.speed)||0)+Math.random()*(Number(a?.spirit)||0)>=(Number(b?.speed)||0)+Math.random()*(Number(b?.spirit)||0)?'a':'b';
+    const order=first==='a'?['a','b']:['b','a'];
+    for(const who of order){
+      if(ahp<=0||bhp<=0)break;
+      const attacker=who==='a'?a:b;
+      const defender=who==='a'?b:a;
+      const queue=who==='a'?skillsA:skillsB;
+      const skillId=queue[(round-1)%queue.length];
+      const skillList=Array.isArray(attacker?.skills)?attacker.skills:[];
+      const selectedSkill=skillList.find(x=>Number(x?.id)===Number(skillId))||skillList[0]||{id:1,name:'Ra đòn',effect:1};
+      const multiplier=typeMultiplier(beastType(attacker),beastType(defender));
+      const critical=Math.random()<Math.min(.3,.08+(Number(attacker?.speed)||0)/8500);
+      const raw=((Number(attacker?.attack)||0)*.62+(Number(attacker?.spirit)||0)*.38)*(Number(selectedSkill.effect)||1)*(critical?1.32:1)*(0.86+Math.random()*.28)*multiplier;
+      const damage=Math.max(1,Math.round(raw-Math.max(0,(Number(defender?.defense)||0)*.32)));
+      if(who==='a')bhp-=damage; else ahp-=damage;
+      const advantage=multiplier>1?' · KHẮC HỆ ×1.35':multiplier<1?' · BỊ KHẮC ×0.72':'';
+      log.push({round,actor:who,actorName:attacker?.name||'Linh thú',skill:selectedSkill.name||'Ra đòn',damage,critical,effectiveness:multiplier,text:`🪶 ${attacker?.name||'Linh thú'} · ${selectedSkill.name||'Ra đòn'} ${critical?'BẠO KÍCH ':''}gây ${damage.toLocaleString('vi-VN')} sát thương${advantage}.`,hpA:Math.max(0,ahp),hpB:Math.max(0,bhp)});
     }
   }
-  const winner=ahp<=0?'b':bhp<=0?'a':ahp>=bhp?'a':'b'; return {winner,rounds:round,log,remaining:{a:Math.max(0,ahp),b:Math.max(0,bhp)},maxHp:{a:a.maxHp,b:b.maxHp},skills:{a:a.skills,b:b.skills},types:{a:a.type,b:b.type}};
+  const winner=ahp<=0?'b':bhp<=0?'a':ahp>=bhp?'a':'b';
+  return {winner,rounds:round,log,remaining:{a:Math.max(0,ahp),b:Math.max(0,bhp)},maxHp:{a:a.maxHp,b:b.maxHp},skills:{a:a.skills,b:b.skills},types:{a:a.type,b:b.type}};
 }
 
 function npcArenaStat(npc){ return {attack:npc.attack,defense:npc.defense,speed:npc.speed,spirit:npc.spirit,type:npc.type||'Linh',maxHp:beastMaxHp({attack:npc.attack,defense:npc.defense,spirit:npc.spirit,rarity:npc.rarity,realmTier:npc.realmTier}),name:npc.name,rarity:npc.rarity,realm:npc.realm,skills:beastSkills(npc)}; }

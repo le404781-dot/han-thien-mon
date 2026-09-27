@@ -362,6 +362,28 @@ body.focus-mode .focus-bar{display:flex}.focus-bar-label{max-width:220px;white-s
 .avatar-aura::before,.avatar-aura::after{content:"";position:absolute;inset:3px;border-radius:inherit;pointer-events:none;z-index:-1;}
 .avatar-aura::before{box-shadow:0 0 0 1px var(--aura,#a9823a),0 0 7px 1px var(--aura,#a9823a);opacity:.78;}
 .avatar-aura::after{inset:-4px;box-shadow:0 0 12px 2px var(--aura,#a9823a);opacity:.32;}
+
+/* HÀO QUANG 3 ĐẠI LÃO TÔNG MÔN · xếp theo cảnh giới cao nhất */
+.sect-top-aura{position:relative;display:grid;place-items:center;width:100%;height:100%;border-radius:inherit;isolation:isolate;overflow:visible;z-index:0;box-sizing:border-box}
+.sect-top-aura::before,.sect-top-aura::after{content:"";position:absolute;border-radius:inherit;pointer-events:none;z-index:-1}
+.sect-top-aura::before{inset:-5px;border:1px solid var(--top-aura);box-shadow:0 0 8px 1px var(--top-aura),0 0 18px 3px var(--top-aura);animation:sectAuraPulse 2.2s ease-in-out infinite}
+.sect-top-aura::after{inset:-9px;border:1px dashed color-mix(in srgb,var(--top-aura) 75%,transparent);box-shadow:0 0 16px 2px var(--top-aura),0 0 28px 5px var(--top-aura);opacity:.58;animation:sectAuraRotate 3.8s linear infinite}
+.sect-top-aura-1{--top-aura:#ef4444}
+.sect-top-aura-1::before{inset:-8px;box-shadow:0 0 12px 2px #ef4444,0 0 28px 6px #ef4444,0 0 48px 10px rgba(239,68,68,.58);animation:sectAuraRed 1.9s ease-in-out infinite}
+.sect-top-aura-1::after{inset:-14px;box-shadow:0 0 18px 3px #ef4444,0 0 38px 7px rgba(239,68,68,.7),0 0 62px 12px rgba(239,68,68,.38);animation:sectAuraRotate 3s linear infinite}
+.sect-top-aura-2{--top-aura:#a855f7}
+.sect-top-aura-2::before{inset:-6px;box-shadow:0 0 10px 2px #a855f7,0 0 22px 4px #a855f7,0 0 36px 7px rgba(168,85,247,.45);animation:sectAuraPurple 2.2s ease-in-out infinite}
+.sect-top-aura-2::after{inset:-11px;box-shadow:0 0 15px 2px #a855f7,0 0 30px 5px rgba(168,85,247,.62);animation:sectAuraRotate 3.4s linear infinite}
+.sect-top-aura-3{--top-aura:#eabf52}
+.sect-top-aura-3::before{inset:-5px;box-shadow:0 0 8px 1px #eabf52,0 0 17px 3px #eabf52,0 0 28px 5px rgba(234,191,82,.38);animation:sectAuraGold 2.5s ease-in-out infinite}
+.sect-top-aura-3::after{inset:-9px;box-shadow:0 0 12px 2px #eabf52,0 0 25px 4px rgba(234,191,82,.5);animation:sectAuraRotate 3.8s linear infinite}
+@keyframes sectAuraPulse{0%,100%{transform:scale(.98);opacity:.72}50%{transform:scale(1.04);opacity:1}}
+@keyframes sectAuraRed{0%,100%{transform:scale(.96);opacity:.72}50%{transform:scale(1.08);opacity:1}}
+@keyframes sectAuraPurple{0%,100%{transform:scale(.97);opacity:.7}50%{transform:scale(1.06);opacity:1}}
+@keyframes sectAuraGold{0%,100%{transform:scale(.98);opacity:.68}50%{transform:scale(1.04);opacity:1}}
+@keyframes sectAuraRotate{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.sect-top-aura::before,.sect-top-aura::after{animation:none}}
+
 .realm-aura-0{--aura:#9ca3af}.realm-aura-1{--aura:#79c7c1}.realm-aura-2{--aura:#4fb3aa}.realm-aura-3{--aura:#5f9fd6}.realm-aura-4{--aura:#6f82d8}.realm-aura-5{--aura:#7f6fc8}.realm-aura-6{--aura:#9b69c5}.realm-aura-7{--aura:#b46d9c}.realm-aura-8{--aura:#c56b62}.realm-aura-9{--aura:#d2a44f}.realm-aura-10{--aura:#e0b75d}.realm-aura-11{--aura:#73b9c9}.realm-aura-12{--aura:#6b9de0}.realm-aura-13{--aura:#8776cf}.realm-aura-14{--aura:#c99b4c}.realm-aura-15{--aura:#df735f}.realm-aura-16{--aura:#ead18a}.realm-aura-17{--aura:#f3df9a}
 .realm-aura-4::after,.realm-aura-5::after,.realm-aura-6::after,.realm-aura-7::after,.realm-aura-8::after,.realm-aura-9::after,.realm-aura-10::after,.realm-aura-11::after,.realm-aura-12::after,.realm-aura-13::after,.realm-aura-14::after,.realm-aura-15::after,.realm-aura-16::after,.realm-aura-17::after{opacity:.45;box-shadow:0 0 16px 3px var(--aura),0 0 28px 1px var(--aura)}
 .realm-aura-8::before,.realm-aura-9::before,.realm-aura-10::before,.realm-aura-14::before,.realm-aura-15::before,.realm-aura-16::before,.realm-aura-17::before{box-shadow:0 0 0 1px var(--aura),0 0 10px 2px var(--aura),inset 0 0 8px 1px var(--aura)}
