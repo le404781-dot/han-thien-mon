@@ -14,7 +14,10 @@ if (!DATABASE_URL) {
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 5
+  max: Number(process.env.DB_POOL_MAX || 10),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  maxLifetimeSeconds: 300
 });
 
 async function query(text, params = []) { return pool.query(text, params); }
@@ -1569,7 +1572,17 @@ async function addDailyActivity(userId, field, amount=1) {
 }
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(__dirname));
+app.use(express.static(__dirname, {
+  etag: true,
+  lastModified: true,
+  setHeaders(res, filePath) {
+    if (/\.html$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=600');
+    }
+  }
+}));
 function hashPassword(password, salt) { return crypto.scryptSync(password, salt, 64).toString('hex'); }
 function safeUser(user) { return { id:user.id, username:user.username, displayName:user.display_name, createdAt:user.created_at }; }
 
@@ -1689,8 +1702,8 @@ async function auth(req,res,next) {
     const r = await query('SELECT s.*, u.username, u.display_name, u.created_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at>$2',[token,Date.now()]);
     if (!r.rows.length) return res.status(401).json({error:'Phiên đăng nhập đã hết hạn.'});
     req.session = r.rows[0]; req.token = token;
-    // Phiên bền vững: gia hạn khi môn nhân còn hoạt động, không tự đăng xuất vì hết hạn ngắn.
-    await query('UPDATE sessions SET expires_at=$2 WHERE token=$1',[token,Date.now()+1000*60*60*24*3650]);
+    // Phiên đã có thời hạn rất dài khi đăng nhập; không ghi UPDATE ở mọi request.
+    // Điều này giảm mạnh tải ghi PostgreSQL khi nhiều môn nhân hoạt động đồng thời.
     next();
   } catch(e) { res.status(500).json({error:'Lỗi máy chủ.'}); }
 }
@@ -2682,12 +2695,26 @@ app.post('/api/currency/exchange',auth,async(req,res)=>{
 app.get('/api/reward-snapshot',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id;
-    const p=(await query('SELECT spirit_stones FROM profiles WHERE user_id=$1',[uid])).rows[0]||{};
-    const items=(await query(`SELECT i.item_id AS id,ti.name,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0`,[uid])).rows;
-    const beasts=(await query(`SELECT o.beast_id AS id,c.name,o.quantity FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0`,[uid])).rows;
-    const roots=(await query(`SELECT o.root_id AS id,c.name,o.quantity FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.quantity>0`,[uid])).rows;
-    const tavern=(await query(`SELECT i.product_id AS id,p.name,i.quantity FROM tavern_inventory i JOIN tavern_products p ON p.id=i.product_id WHERE i.user_id=$1 AND i.quantity>0`,[uid])).rows;
-    res.json({spiritStones:Number(p.spirit_stones)||0,items,beasts,roots,tavern});
+    // Một round-trip PostgreSQL thay cho 5 query riêng biệt. Đây là endpoint
+    // được polling thường xuyên nên tối ưu này đặc biệt quan trọng khi có nhiều người online.
+    const r=await query(`
+      SELECT p.spirit_stones AS stones,
+        COALESCE((SELECT json_agg(json_build_object('id',i.item_id,'name',ti.name,'quantity',i.quantity) ORDER BY i.item_id)
+          FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+          WHERE i.user_id=p.user_id AND i.quantity>0),'[]'::json) AS items,
+        COALESCE((SELECT json_agg(json_build_object('id',o.beast_id,'name',c.name,'quantity',o.quantity) ORDER BY o.beast_id)
+          FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
+          WHERE o.user_id=p.user_id AND o.quantity>0),'[]'::json) AS beasts,
+        COALESCE((SELECT json_agg(json_build_object('id',o.root_id,'name',c.name,'quantity',o.quantity) ORDER BY o.root_id)
+          FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id
+          WHERE o.user_id=p.user_id AND o.quantity>0),'[]'::json) AS roots,
+        COALESCE((SELECT json_agg(json_build_object('id',i.product_id,'name',tp.name,'quantity',i.quantity) ORDER BY i.product_id)
+          FROM tavern_inventory i JOIN tavern_products tp ON tp.id=i.product_id
+          WHERE i.user_id=p.user_id AND i.quantity>0),'[]'::json) AS tavern
+      FROM profiles p WHERE p.user_id=$1`,[uid]);
+    const row=r.rows[0]||{};
+    res.setHeader('Cache-Control','no-store');
+    res.json({spiritStones:Number(row.stones)||0,items:row.items||[],beasts:row.beasts||[],roots:row.roots||[],tavern:row.tavern||[]});
   }catch(e){res.status(500).json({error:'Không thể kiểm tra phần thưởng mới.'});}
 });
 
@@ -4990,6 +5017,30 @@ app.post('/api/beast-arena/online/turn',auth,async(req,res)=>{
 });
 
 app.get('/api/beast-arena/spectate',auth,async(req,res)=>{try{await ensureBeastArenaSchema();const rows=(await query(`SELECT r.id,r.created_at,r.rounds,r.battle_log,r.winner_id,cu.display_name AS challenger_name,ou.display_name AS opponent_name,cb.name AS challenger_beast,ob.name AS opponent_beast,r.challenger_type,r.opponent_type,r.challenger_hp,r.opponent_hp FROM beast_arena_requests r JOIN users cu ON cu.id=r.challenger_id JOIN users ou ON ou.id=r.opponent_id JOIN spirit_beasts_catalog cb ON cb.id=r.challenger_beast_id LEFT JOIN spirit_beasts_catalog ob ON ob.id=r.opponent_beast_id WHERE r.status='completed' ORDER BY r.id DESC LIMIT 12`)).rows;res.json({rows});}catch(e){res.status(500).json({error:'Không thể tải sàn Thú Trường.'});}});
+
+
+// Schema migrations are required only once per process. Several endpoints call
+// these guards for compatibility with old PostgreSQL databases; memoizing them
+// prevents repeated ALTER TABLE / CREATE INDEX work under concurrent traffic.
+const __schemaOnceCache = new Map();
+function __memoizeSchema(fn, key){
+  return function(){
+    if(__schemaOnceCache.has(key)) return __schemaOnceCache.get(key);
+    const promise=Promise.resolve().then(()=>fn.apply(this, arguments));
+    __schemaOnceCache.set(key, promise);
+    promise.catch(()=>__schemaOnceCache.delete(key));
+    return promise;
+  };
+}
+ensureRuntimeSchema=__memoizeSchema(ensureRuntimeSchema,'runtime');
+ensureBicanhSchema=__memoizeSchema(ensureBicanhSchema,'bicanh');
+ensureTienPhapSchema=__memoizeSchema(ensureTienPhapSchema,'tien-phap');
+ensureTienBanSchema=__memoizeSchema(ensureTienBanSchema,'tien-ban');
+ensureBeastArenaSchema=__memoizeSchema(ensureBeastArenaSchema,'beast-arena');
+ensureTavernSchema=__memoizeSchema(ensureTavernSchema,'tavern');
+ensureMailboxSchema=__memoizeSchema(ensureMailboxSchema,'mailbox');
+ensureChallengeSchema=__memoizeSchema(ensureChallengeSchema,'challenge');
+ensureEquipmentSchema=__memoizeSchema(ensureEquipmentSchema,'equipment');
 
 initDb().then(()=>{
   app.listen(PORT,()=>{

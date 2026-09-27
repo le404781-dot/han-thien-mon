@@ -1,0 +1,12 @@
+HÀN THIÊN MÔN v3.6.70 · TỐI ƯU HIỆU NĂNG 50 NGƯỜI
+
+- PostgreSQL pool mặc định tăng lên 10 kết nối, có timeout kết nối/idle/lifetime để tránh treo pool.
+- Auth không còn UPDATE sessions ở mọi request; giảm mạnh số lần ghi PostgreSQL.
+- Các schema guard (ALTER TABLE/CREATE INDEX) được memoize một lần mỗi process, tránh chạy migration lặp lại trên request.
+- /api/reward-snapshot gộp 5 query thành 1 query JSON; client polling giảm từ 2s xuống 5s và dừng khi tab bị ẩn.
+- Polling nền tổng hợp giảm từ 15s xuống 30s; heartbeat giảm từ 30s xuống 45s và dừng khi tab bị ẩn.
+- Login loại bỏ các request trùng do loadProfile đã khởi động; module còn thiếu được tải song song.
+- Static assets có ETag/Last-Modified và cache 10 phút; HTML vẫn no-cache để nhận bản cập nhật mới.
+- Không thay đổi luật game, dữ liệu nhân vật hoặc giao diện chức năng; mục tiêu là giảm DB round-trip và request thừa.
+
+Khuyến nghị production: PostgreSQL có ít nhất 50-100 connection capacity nếu nhiều tính năng realtime được dùng đồng thời; Render instance nên có đủ CPU/RAM. Bản code được tối ưu để 50 người online đồng thời ở mức tải sử dụng thông thường, không phải cam kết 50 người spam combat/chat liên tục.
