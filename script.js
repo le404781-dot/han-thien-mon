@@ -30,7 +30,7 @@ function startPresenceHeartbeat(){
  if(presenceTimer)clearInterval(presenceTimer);
  if(!getToken())return;
  sendPresenceHeartbeat();
- presenceTimer=setInterval(()=>{if(getToken()){if(!document.hidden)sendPresenceHeartbeat();}else{clearInterval(presenceTimer);presenceTimer=null;}},45000);
+ presenceTimer=setInterval(()=>{if(getToken())sendPresenceHeartbeat();else{clearInterval(presenceTimer);presenceTimer=null;}},20000);
 }
 startPresenceHeartbeat();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')sendPresenceHeartbeat();});
@@ -388,7 +388,7 @@ function startRewardWatcher(){
  if(rewardWatchTimer)clearInterval(rewardWatchTimer);
  rewardSnapshot=null;
  pollRewardSnapshot(true);
- rewardWatchTimer=setInterval(()=>{if(document.hidden)return;pollRewardSnapshot(false);},5000);
+ rewardWatchTimer=setInterval(()=>pollRewardSnapshot(false),2000);
 }
 
 async function loadProfile(){
@@ -1166,11 +1166,7 @@ function renderAuth(mode){
  const register=mode==='register';
  $('#accountContent').innerHTML=`<div class="auth-title">寒天門</div><div class="auth-sub">Ghi danh môn nhân · Dữ liệu được lưu trong PostgreSQL</div><div class="tabs"><button class="tab ${!register?'active':''}" data-mode="login">Đăng nhập</button><button class="tab ${register?'active':''}" data-mode="register">Đăng ký</button></div><form id="authForm" class="auth-form"><div class="field ${register?'':'hidden'}"><label>Danh xưng</label><input id="displayName" maxlength="40" ${register?'required':''} placeholder="Tên hiển thị"></div><div class="field"><label>Tên tài khoản</label><input id="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="tu_tien_01"></div><div class="field"><label>Mật khẩu</label><input id="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Ít nhất 6 ký tự"></div><button class="btn primary" type="submit">${register?'Ghi danh vào sơn môn':'Nhập môn'}</button><div id="authMsg" class="auth-msg"></div></form>`;
  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>renderAuth(b.dataset.mode));
- $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();
-// loadProfile đã khởi động các module hồ sơ/công pháp/động phủ/kho chính.
-// Chỉ tải các module chưa được khởi động ở đây và chạy song song để giảm thời gian đăng nhập.
-await Promise.all([loadChat(),loadMailbox(),loadSectPosts(),loadLeaderboard(),loadDuocDuong(),loadBeastFace(),loadDuongThu(),loadBeastArena(),loadTuDi(),loadMarket(),loadData(),loadArenaLive()]);
-maybeShowTutorial();}}catch(err){msg.textContent=err.message;}};
+ $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();await loadDisciples();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadEquipment();await loadTuDi();await loadMarket();await loadProfessions();await loadData();await loadSectPosts();await loadChallenges();await loadArenaLive();maybeShowTutorial();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }
 async function logout(){try{await api('/api/logout',{method:'POST',headers:authHeaders()});}catch{}finally{localStorage.removeItem(tokenKey);currentProfile=null;accountUI(null);$('#accountModal').close();renderGuestAreas();}}
@@ -1187,8 +1183,8 @@ if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('colo
 setupTutorial();
 
 loadData();loadSect();checkSession();startRewardWatcher();
-setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},30000);
-setInterval(()=>{if(getToken()&&!document.hidden)sendPresenceHeartbeat();},45000);
+setInterval(()=>{if(getToken()){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},15000);
+setInterval(()=>{if(getToken())sendPresenceHeartbeat();},30000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
 
 /* v3.6.47 · Điều hướng tập trung theo từng chức năng */
