@@ -1128,8 +1128,19 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','duoc-duong':'💊 Dược Đường','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','duoc-duong':'💊 Dược Đường','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','tavern':'🥂 Tửu Lâu','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
  };
+ // v3.6.69 · Bảo đảm Tửu Lâu luôn xuất hiện trong menu, kể cả khi HTML cũ đang được cache/deploy.
+ (function ensureTavernMenu(){
+   const nav=document.querySelector('#nav'); if(!nav) return;
+   if(!nav.querySelector('a[href="#tavern"]')){
+     const a=document.createElement('a'); a.href='#tavern'; a.className='tavern-menu-link'; a.textContent='🥂 Tửu Lâu';
+     const anchor=nav.querySelector('a[href="#beast-arena"]');
+     if(anchor && anchor.parentNode) anchor.parentNode.insertBefore(a,anchor.nextSibling); else nav.appendChild(a);
+   }
+   const tavernLink=nav.querySelector('a[href="#tavern"]');
+   if(tavernLink && !tavernLink.dataset.focusBound) tavernLink.dataset.focusBound='1';
+ })();
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
    document.body.classList.remove('focus-mode','focus-lock');document.documentElement.classList.remove('focus-lock');
