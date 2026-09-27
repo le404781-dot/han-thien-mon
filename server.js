@@ -796,8 +796,14 @@ async function initDb() {
       grade TEXT NOT NULL,
       price INTEGER NOT NULL CHECK(price > 0),
       description TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL,
+      buff_min INTEGER NOT NULL DEFAULT 0,
+      buff_max INTEGER NOT NULL DEFAULT 0
     );
+    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL;
+    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS buff_min INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS buff_max INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS tavern_listings (
       id BIGSERIAL PRIMARY KEY,
       owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -855,12 +861,12 @@ async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY(user_id,product_id)
     );
-    INSERT INTO tavern_products(name,grade,price,description) VALUES
-      ('Túy Trà Linh','Hạ Đẳng',50,'Linh trà ủ men nhẹ, vị thanh và giúp môn nhân giải lao.'),
-      ('Bách Hoa Tửu','Trung Đẳng',120,'Túy phẩm bách hoa, hương thơm dịu, linh khí ổn định.'),
-      ('Nguyệt Quang Nhưỡng','Thượng Đẳng',300,'Tửu nhưỡng ánh nguyệt, linh khí nồng đậm và quý hiếm.'),
-      ('Thiên Tiên Túy','Cực Phẩm',800,'Túy phẩm cao cấp, chỉ dành cho những buổi tửu yến trọng thể.')
-    ON CONFLICT(name) DO NOTHING;
+    INSERT INTO tavern_products(name,grade,price,description,buff_min,buff_max) VALUES
+      ('Túy Trà Linh','Hạ Đẳng',50,'Linh trà ủ men nhẹ, vị thanh và giúp môn nhân giải lao.',80,140),
+      ('Bách Hoa Tửu','Trung Đẳng',120,'Túy phẩm bách hoa, hương thơm dịu, linh khí ổn định.',220,380),
+      ('Nguyệt Quang Nhưỡng','Thượng Đẳng',300,'Tửu nhưỡng ánh nguyệt, linh khí nồng đậm và quý hiếm.',500,900),
+      ('Thiên Tiên Túy','Cực Phẩm',800,'Túy phẩm cao cấp, chỉ dành cho những buổi tửu yến trọng thể.',1200,2200)
+    ON CONFLICT(name) DO UPDATE SET grade=EXCLUDED.grade,price=EXCLUDED.price,description=EXCLUDED.description,buff_min=EXCLUDED.buff_min,buff_max=EXCLUDED.buff_max;
 
     CREATE TABLE IF NOT EXISTS profiles (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -1803,9 +1809,13 @@ async function ensureTavernSchema(){
       price INTEGER NOT NULL CHECK(price > 0),
       description TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL
+      storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL,
+      buff_min INTEGER NOT NULL DEFAULT 0,
+      buff_max INTEGER NOT NULL DEFAULT 0
     );
     ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS storage_item_id INTEGER REFERENCES treasure_items(id) ON DELETE SET NULL;
+    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS buff_min INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS buff_max INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS tavern_listings (
       id BIGSERIAL PRIMARY KEY,
       owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1911,7 +1921,7 @@ app.get('/api/tavern',auth,async(req,res)=>{
       FROM tavern_roles r JOIN users u ON u.id=r.user_id JOIN profiles p ON p.user_id=r.user_id
       WHERE r.active=true LIMIT 1`)).rows[0]||null;
     const role=master&&Number(master.user_id)===Number(uid)?master:null;
-    const products=(await query(`SELECT p.id,p.name,p.grade,p.price,p.description,p.storage_item_id,
+    const products=(await query(`SELECT p.id,p.name,p.grade,p.price,p.description,p.storage_item_id,p.buff_min,p.buff_max,
       EXISTS(SELECT 1 FROM tavern_listings l WHERE l.owner_id=$1 AND l.product_id=p.id AND l.active) AS listed
       FROM tavern_products p ORDER BY p.price ASC,p.id ASC`,[uid])).rows;
     const listings=(await query(`SELECT l.id,l.owner_id,l.product_id,l.active,l.npc_next_buy_at,p.name,p.grade,p.price,p.description,u.display_name AS owner_name,u.username AS owner_username
@@ -2042,7 +2052,7 @@ app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
     if(Number(buyer?.spirit_stones||0)<Number(inv.price)){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thạch không đủ để mua túy phẩm.'});}
     const seller=(await client.query('SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[inv.owner_id])).rows[0];
     if(!seller){await client.query('ROLLBACK');return res.status(404).json({error:'Lâu Chủ không còn tồn tại.'});}
-    const sellerReceive=Math.floor(Number(inv.price)*0.9),commission=Number(inv.price)-sellerReceive;
+    const sellerReceive=Math.floor(Number(inv.price)*0.60),commission=Number(inv.price)-sellerReceive;
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,inv.price]);
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[inv.owner_id,sellerReceive]);
     if(destination==='tavern'){
@@ -2061,9 +2071,30 @@ app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
     await client.query(`UPDATE tavern_member_invites SET status='accepted',responded_at=NOW(),destination=$2 WHERE id=$1`,[id,destination]);
     await client.query('COMMIT');
     const destText=destination==='tavern'?'Tửu Lâu':'Tu Di Giới';
-    await createMailboxNotification(inv.owner_id,'tavern_sale','🥂 Giao dịch thành công',`Môn nhân đã nhận ${inv.name} vào ${destText}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (90%).`,'#tavern');
+    await createMailboxNotification(inv.owner_id,'tavern_sale','🥂 Giao dịch thành công',`Môn nhân đã nhận ${inv.name} vào ${destText}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (60%).`,'#tavern');
     res.json({ok:true,message:`Đã mua ${inv.name}. Túy phẩm đã được đưa vào ${destText}.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tavern respond:',e);res.status(500).json({error:'Không thể hoàn tất giao dịch Tửu Lâu.'});}
+  finally{client.release();}
+});
+
+app.post('/api/tavern/consume',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await ensureTavernSchema();
+    const uid=req.session.user_id, productId=Number(req.body?.productId);
+    if(!productId)return res.status(400).json({error:'Túy phẩm không hợp lệ.'});
+    await client.query('BEGIN');
+    const row=(await client.query(`SELECT i.quantity,p.id,p.name,p.grade,p.buff_min,p.buff_max
+      FROM tavern_inventory i JOIN tavern_products p ON p.id=i.product_id
+      WHERE i.user_id=$1 AND i.product_id=$2 FOR UPDATE`,[uid,productId])).rows[0];
+    if(!row||Number(row.quantity)<1){await client.query('ROLLBACK');return res.status(400).json({error:'Không còn túy phẩm này trong Tửu Lâu.'});}
+    const min=Math.max(1,Number(row.buff_min)||0),max=Math.max(min,Number(row.buff_max)||min);
+    const gain=min+Math.floor(Math.random()*(max-min+1));
+    const nr=await client.query(`UPDATE profiles SET spirit_power=spirit_power+$2,experience=experience+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,[uid,gain]);
+    await client.query(`UPDATE tavern_inventory SET quantity=quantity-1,updated_at=NOW() WHERE user_id=$1 AND product_id=$2`,[uid,productId]);
+    await client.query('COMMIT');
+    res.json({ok:true,item:row.name,grade:row.grade,gained:gain,spirit:Number(nr.rows[0].spirit_power),message:`Đã hấp thu ${row.name} · ${row.grade}, nhận ngẫu nhiên +${gain.toLocaleString('vi-VN')} linh lực.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tavern consume:',e);res.status(500).json({error:'Không thể hấp thu túy phẩm.'});}
   finally{client.release();}
 });
 
@@ -2081,13 +2112,13 @@ async function processTavernNpcSales(){
           FROM tavern_listings l JOIN tavern_products p ON p.id=l.product_id
           WHERE l.id=$1 AND l.active=true AND l.npc_next_buy_at<=NOW() FOR UPDATE`,[row.id])).rows[0];
         if(!locked){await client.query('ROLLBACK');continue;}
-        const sellerReceive=Math.floor(Number(locked.price)*0.8),commission=Number(locked.price)-sellerReceive;
+        const sellerReceive=Math.floor(Number(locked.price)*0.31),commission=Number(locked.price)-sellerReceive;
         await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[locked.owner_id,sellerReceive]);
         await client.query(`INSERT INTO tavern_sales(owner_id,buyer_id,product_id,buyer_type,listed_price,seller_received,commission)
           VALUES($1,NULL,$2,'npc',$3,$4,$5)`,[locked.owner_id,locked.product_id,locked.price,sellerReceive,commission]);
         await client.query(`UPDATE tavern_listings SET npc_next_buy_at=NOW()+INTERVAL '5 minutes' WHERE id=$1`,[locked.id]);
         await client.query('COMMIT');
-        await createMailboxNotification(locked.owner_id,'tavern_sale','🥂 NPC đã mua túy phẩm',`NPC đã mua ${locked.name}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (80% giá bán).`,'#tavern');
+        await createMailboxNotification(locked.owner_id,'tavern_sale','🥂 NPC đã mua túy phẩm',`NPC đã mua ${locked.name}. Bạn nhận ${sellerReceive.toLocaleString('vi-VN')} linh thạch (31% giá bán).`,'#tavern');
       }catch(e){try{await client.query('ROLLBACK')}catch{}}
       finally{client.release();}
     }
@@ -2779,11 +2810,18 @@ app.post('/api/storage/use',auth,async(req,res)=>{
     const qty=Math.max(1,Math.min(99,Number(req.body?.quantity)||1));
     if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
     await client.query('BEGIN');
-    const r=await client.query(`SELECT ti.id,ti.name,ti.description,ti.spirit_gain,i.quantity
+    const r=await client.query(`SELECT ti.id,ti.name,ti.description,ti.category,ti.spirit_gain,i.quantity,
+        tp.buff_min AS tavern_buff_min,tp.buff_max AS tavern_buff_max
       FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+      LEFT JOIN tavern_products tp ON tp.storage_item_id=ti.id
       WHERE i.user_id=$1 AND ti.id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
     if(!r.rows.length||Number(r.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng vật phẩm trong Tu Di Giới không đủ.'});}
-    const item=r.rows[0], gain=Number(item.spirit_gain)||0;
+    const item=r.rows[0];
+    let gain=Number(item.spirit_gain)||0;
+    if(String(item.category||'').startsWith('Tửu Lâu · Túy Phẩm') && Number(item.tavern_buff_max)>0){
+      const min=Math.max(1,Number(item.tavern_buff_min)||0),max=Math.max(min,Number(item.tavern_buff_max)||min);
+      gain=min+Math.floor(Math.random()*(max-min+1));
+    }
     if(gain<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Vật phẩm này không thể sử dụng trực tiếp.'});}
     const nr=await client.query(`UPDATE profiles SET spirit_power=spirit_power+$2,experience=experience+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,
       [req.session.user_id,gain*qty]);

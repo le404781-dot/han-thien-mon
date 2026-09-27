@@ -924,3 +924,23 @@ main>.section{content-visibility:auto;contain-intrinsic-size:720px}
 .reward-toast-time{font-size:.62rem;color:#b8b8b8;opacity:.6;align-self:start;}
 @keyframes rewardToastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 @media(max-width:600px){.reward-toast-host{top:76px}.reward-toast{font-size:.78rem;grid-template-columns:32px 1fr auto}.reward-toast-mark{width:30px;height:30px}}
+
+/* ===== v3.6.72 · ĐAN ĐƯỜNG + TỬU LÂU BUFF ===== */
+.dan-duong-area{max-width:1120px;margin:0 auto}
+.dan-duong-head{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:22px;border:1px solid var(--gold);background:linear-gradient(120deg,rgba(169,130,58,.10),rgba(40,78,71,.08));margin-bottom:18px}
+.dan-duong-head h3{font:700 1.5rem 'Noto Serif SC';color:var(--jade)}
+.dan-duong-head p{color:var(--muted);font-size:.84rem}
+.dan-duong-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.dan-card{padding:20px;background:var(--surface);border:1px solid var(--line);box-shadow:0 10px 30px rgba(38,50,44,.07)}
+.dan-card.locked{opacity:.65}
+.dan-card-icon{font-size:2.3rem}
+.dan-card h3{font:700 1.25rem 'Noto Serif SC';color:var(--jade);margin:5px 0}
+.dan-card p{color:var(--muted);font-size:.82rem;min-height:58px}
+.dan-card small{color:var(--red);font-weight:800}
+.dan-buy-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}
+.dan-buy-row b{color:var(--gold);margin-right:auto}
+.tavern-inv-item{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 0}
+.tavern-inv-item .tavern-consume-btn{margin-left:auto}
+.tavern-products article small{display:block;color:var(--red);font-weight:800;margin-top:5px}
+@media(max-width:900px){.dan-duong-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:620px){.dan-duong-grid{grid-template-columns:1fr}.dan-duong-head{align-items:flex-start;flex-direction:column}.tavern-inv-item .tavern-consume-btn{margin-left:0;width:100%}}

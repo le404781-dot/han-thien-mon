@@ -334,7 +334,7 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDanDuong();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
  catch(e){if(e?.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}else{console.warn('Phiên vẫn được giữ, lỗi tải dữ liệu tạm thời:',e);}}
 }
 function renderGuestAreas(){
@@ -732,6 +732,18 @@ async function loadTienBan(){
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
+async function loadDanDuong(){
+ const area=$('#danDuongArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/duoc-duong',{headers:authHeaders()});
+  const items=(d.items||[]).filter(x=>String(x.category||'').includes('Đan dược'));
+  const p=d.profile||{};
+  area.innerHTML=`<div class="dan-duong-head"><div><span class="eyebrow">🧪 ĐAN SƯ · LUYỆN ĐAN</span><h3>${esc(d.npc?.name||'Đan Sư')}</h3><p>${esc(d.npc?.dialogue||'Đan hương nhập thể, linh lực tự sinh.')}</p></div><div class="duoc-wallet">💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')}</div></div><div class="dan-duong-grid">${items.map(x=>{const locked=Number(d.stage?.realmIndex||0)<Number(x.min_realm||0);return `<article class="dan-card ${locked?'locked':''}"><div class="dan-card-icon">🧪</div><span class="eyebrow">${esc(x.category.replace('Dược Đường · ','Đan Đường · '))}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>✨ +${Number(x.spirit_gain||0).toLocaleString('vi-VN')} linh lực / viên</small><div class="dan-buy-row"><b>💎 ${Number(x.price||0).toLocaleString('vi-VN')}</b><span>Kho: ${Number(x.quantity||0)}</span><button class="btn small primary dan-buy-btn" data-id="${x.id}" ${locked?'disabled':''}>${locked?'🔒 Chưa đủ cảnh giới':'Mua'}</button>${Number(x.spirit_gain||0)>0&&Number(x.quantity||0)>0?`<button class="btn small dan-use-btn" data-id="${x.id}">Dùng 1</button>`:''}</div></article>`}).join('')}</div><p id="danMsg" class="train-msg">Đan Đường: linh đan càng cao phẩm, linh lực càng dày.</p>`;
+  document.querySelectorAll('.dan-buy-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/duoc-duong/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:1})});$('#danMsg').textContent='✅ '+x.message;await Promise.all([loadProfile(),loadDanDuong(),loadDuocDuong(),loadTuDi()]);}catch(e){$('#danMsg').textContent='❌ '+e.message;b.disabled=false;}});
+  document.querySelectorAll('.dan-use-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/storage/use',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:1})});$('#danMsg').textContent=`✨ Đã dùng ${x.item}, +${Number(x.gained).toLocaleString('vi-VN')} linh lực.`;await Promise.all([loadProfile(),loadDanDuong(),loadTuDi()]);}catch(e){$('#danMsg').textContent='❌ '+e.message;}finally{b.disabled=false;}});
+ }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
+}
+
 async function loadDuocDuong(){
  const area=$('#duocDuongArea'); if(!area||!getToken())return;
  try{const d=await api('/api/duoc-duong',{headers:authHeaders()});const items=d.items||[];const p=d.profile||{};
@@ -1051,12 +1063,12 @@ async function loadTavern(){
    </div>
    <div class="tavern-room-strip"><span>酒樓 · TỬU LÂU</span><span>TRUNG TÂM GIAO DỊCH TÚY PHẨM</span><span>PHÒNG YẾN · QUẦY RƯỢU · HÒM THƯ</span></div>
    <div class="tavern-rules">
-    <span>👑 Chỉ có <b>1 Lâu Chủ</b></span><span>🤖 NPC mua sau <b>5 phút</b> · nhận <b>80%</b></span><span>☯ Môn nhân mua · nhận <b>90%</b></span><span>📦 Hấp thu tại <b>Tửu Lâu</b> hoặc <b>Tu Di Giới</b></span>
+    <span>👑 Chỉ có <b>1 Lâu Chủ</b></span><span>🤖 NPC mua sau <b>5 phút</b> · Lâu Chủ nhận <b>31%</b></span><span>☯ Môn nhân mua · Lâu Chủ nhận <b>60%</b></span><span>📦 Hấp thu tại <b>Tửu Lâu</b> hoặc <b>Tu Di Giới</b></span>
    </div>
    <div class="tavern-grid">
     <div class="tavern-panel"><div class="tavern-panel-head"><h3>🍶 Túy Phẩm</h3><small>Phẩm cấp từ thấp đến cao</small></div>
       <div class="tavern-products">${products.map(p=>`<article class="tavern-product tavern-product-${Number(p.id)}">
-        <div class="tavern-bottle"><span class="tavern-bottle-icon">🍶</span><div><span class="tavern-grade">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><b>${Number(p.price).toLocaleString('vi-VN')} linh thạch</b></div></div>
+        <div class="tavern-bottle"><span class="tavern-bottle-icon">🍶</span><div><span class="tavern-grade">${esc(p.grade)}</span><h4>${esc(p.name)}</h4><p>${esc(p.description)}</p><small>✨ Buff ngẫu nhiên: +${Number(p.buff_min||0).toLocaleString('vi-VN')} ~ +${Number(p.buff_max||0).toLocaleString('vi-VN')} linh lực</small><b>${Number(p.price).toLocaleString('vi-VN')} linh thạch</b></div></div>
         ${role?`<button class="btn small ${p.listed?'ghost':'primary'} tavern-list-btn" data-product="${p.id}" ${p.listed?'disabled':''}>${p.listed?'✓ Đang bán':'Mở bán'}</button>`:''}
       </article>`).join('')}</div>
     </div>
@@ -1080,7 +1092,7 @@ async function loadTavern(){
     ${inbox.length?`<div class="tavern-inbox-list">${inbox.map(x=>`<article class="tavern-inbox-item" data-id="${x.id}"><div class="tavern-mail-icon">🥂</div><div class="tavern-inbox-content"><b>${esc(x.owner_name)} mời bạn mua ${esc(x.name)}</b><p>${esc(x.grade)} · ${Number(x.price).toLocaleString('vi-VN')} linh thạch</p><small>Chọn nơi hấp thu túy phẩm rồi xác nhận thanh toán.</small><div class="tavern-destination"><label><input type="radio" name="tavernDest${x.id}" value="tavern" checked> 🍶 Tửu Lâu</label><label><input type="radio" name="tavernDest${x.id}" value="sumeru"> ◈ Tu Di Giới</label></div><div class="mail-actions"><button class="btn small primary tavern-invite-accept" data-id="${x.id}">✓ Đồng ý · Trả linh thạch</button><button class="btn small ghost tavern-invite-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div></div></article>`).join('')}</div>`:'<div class="empty-state compact"><p>Hòm Thư Tửu Lâu đang tĩnh lặng.</p></div>'}
    </div>
    <div class="tavern-panel"><div class="tavern-panel-head"><h3>🎒 Túy Phẩm của ta</h3><small>Kho hấp thu tại Tửu Lâu</small></div>
-    <div class="tavern-inventory">${inv.map(x=>`<span>🍶 ${esc(x.name)} <b>×${x.quantity}</b></span>`).join('')||'<small>Chưa có túy phẩm.</small>'}</div>
+    <div class="tavern-inventory">${inv.map(x=>`<span class="tavern-inv-item">🍶 ${esc(x.name)} <b>×${x.quantity}</b><button class="btn small tavern-consume-btn" data-product="${x.product_id}">Hấp thu · Buff ngẫu nhiên</button></span>`).join('')||'<small>Chưa có túy phẩm.</small>'}</div>
    </div>`;
   $('#tavernApplyBtn')?.addEventListener('click',async()=>{});
   document.querySelectorAll('.tavern-list-btn').forEach(btn=>btn.addEventListener('click',async()=>{
@@ -1108,6 +1120,9 @@ async function loadTavern(){
   document.querySelectorAll('.tavern-invite-reject').forEach(btn=>btn.addEventListener('click',async()=>{
     const id=Number(btn.dataset.id),item=btn.closest('.tavern-inbox-item'),msg=item?.querySelector('.mail-action-msg');btn.disabled=true;
     try{const r=await api('/api/tavern/invite/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:id,action:'reject'})});if(msg)msg.textContent='✓ '+r.message;await loadTavern();}catch(e){if(msg)msg.textContent='❌ '+e.message;btn.disabled=false;}
+  }));
+  document.querySelectorAll('.tavern-consume-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+    btn.disabled=true;try{const r=await api('/api/tavern/consume',{method:'POST',headers:authHeaders(),body:JSON.stringify({productId:Number(btn.dataset.product)})});alert(r.message);await Promise.all([loadTavern(),loadProfile(),loadData()]);}catch(e){alert(e.message);btn.disabled=false;}
   }));
  }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadTavern()">↻ Mở lại</button></div>`;}
 }
@@ -1169,7 +1184,7 @@ function renderAuth(mode){
  $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();
 // loadProfile đã khởi động các module hồ sơ/công pháp/động phủ/kho chính.
 // Chỉ tải các module chưa được khởi động ở đây và chạy song song để giảm thời gian đăng nhập.
-await Promise.all([loadChat(),loadMailbox(),loadSectPosts(),loadLeaderboard(),loadDuocDuong(),loadBeastFace(),loadDuongThu(),loadBeastArena(),loadTuDi(),loadMarket(),loadData(),loadArenaLive()]);
+await Promise.all([loadChat(),loadMailbox(),loadSectPosts(),loadLeaderboard(),loadDanDuong(),loadDuocDuong(),loadBeastFace(),loadDuongThu(),loadBeastArena(),loadTuDi(),loadMarket(),loadData(),loadArenaLive()]);
 maybeShowTutorial();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }

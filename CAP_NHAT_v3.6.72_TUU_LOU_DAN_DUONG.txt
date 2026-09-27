@@ -1,0 +1,22 @@
+HÀN THIÊN MÔN v3.6.72 · TỬU LÂU + ĐAN ĐƯỜNG
+
+1. Khôi phục/giữ nguyên chức năng Lâu Chủ mời môn nhân mua túy phẩm.
+   - Lời mời đi vào Hòm Thư riêng của Tửu Lâu.
+   - Có Đồng ý / Từ chối.
+   - Đồng ý chọn nơi nhận: Tửu Lâu hoặc Tu Di Giới.
+
+2. Túy phẩm Tửu Lâu có buff linh lực ngẫu nhiên theo phẩm cấp:
+   - Hạ Đẳng: +80 ~ +140 linh lực
+   - Trung Đẳng: +220 ~ +380 linh lực
+   - Thượng Đẳng: +500 ~ +900 linh lực
+   - Cực Phẩm: +1.200 ~ +2.200 linh lực
+   - Túy phẩm nhận vào Tửu Lâu có nút Hấp thu để nhận buff ngẫu nhiên.
+   - Túy phẩm chuyển vào Tu Di Giới cũng dùng được qua hệ thống sử dụng vật phẩm và sinh buff ngẫu nhiên.
+
+3. Điều chỉnh tỷ lệ linh thạch Lâu Chủ nhận:
+   - NPC mua: 31% giá bán.
+   - Môn nhân mua: 60% giá bán.
+
+4. Thêm mục Đan Đường vào thanh menu.
+   - Hiển thị riêng các đan dược của Dược Đường.
+   - Mua và dùng linh đan ngay trong Đan Đường.
