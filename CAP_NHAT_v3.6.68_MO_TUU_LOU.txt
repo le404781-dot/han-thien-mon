@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.6.68
+
+- Gắn Tửu Lâu vào bảng menu với mục 🥂 Tửu Lâu có hiệu ứng nhận diện.
+- Kích hoạt/giữ section #tavern và tự tải dữ liệu Tửu Lâu sau đăng nhập.
+- Thêm nút 🚪 Rời Tửu Lâu cho mọi môn nhân đang ở bàn.
+- Rời bàn sẽ tắt voice, xóa thành viên và tín hiệu voice đang chờ.
+- Nếu Lâu Chủ rời bàn mà còn người, quyền chủ bàn chuyển cho bằng hữu còn lại; nếu không còn ai, bàn tự đóng.
+- Chỉ chủ bàn còn nút Đóng bàn.
