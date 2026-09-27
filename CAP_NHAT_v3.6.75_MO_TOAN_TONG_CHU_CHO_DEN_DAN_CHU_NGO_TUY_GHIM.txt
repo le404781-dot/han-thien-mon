@@ -1,0 +1,37 @@
+CẬP NHẬT v3.6.75
+
+1. TỐI ƯU DATABASE
+- Giảm DB pool mặc định từ 10 xuống 5 kết nối, idle timeout 15 giây.
+- Thêm partial index cho inventory/linh căn/linh thú đang có số lượng > 0.
+- Thêm index lịch sử Chợ Đen.
+- Dọn định kỳ: session hết hạn, mailbox đã đọc quá 30 ngày, kho có quantity <= 0, quầy Tửu Lâu đã đóng quá 14 ngày, lời mời đã phản hồi quá 30 ngày, lịch sử Chợ Đen quá 90 ngày.
+- Không xóa dữ liệu gameplay đang hoạt động.
+
+2. MỞ KHÓA TOÀN BỘ MÔN NHÂN
+- Tửu Lâu, Đan Đường, Chợ Đen mở cho mọi môn nhân đã đăng nhập.
+
+3. TỬU LÂU · NGỘ TÚY
+- Đổi giao diện nút hấp thu thành “Ngộ Túy · Nhập tửu”.
+- Môn nhân có thể nhận túy phẩm từ lời mời của Lâu Chủ, trả đúng giá hoặc từ chối.
+- Cơ chế lời mời và Hòm Thư Tửu Lâu giữ nguyên, hoạt động với toàn bộ môn nhân.
+
+4. CHỢ ĐEN CHI CHỦ
+- Tạo chức vị duy nhất trong bảng venue_roles.
+- Môn nhân ứng chức nhanh nhất là người giữ chức.
+- Có API nhường vị cho môn nhân khác.
+- Chủ Chợ Đen nhận 20% giá trị linh thạch cho mỗi lần thu mua thành công.
+- Aura động hắc sắc ở thẻ chức vị.
+
+5. ĐAN CHỦ
+- Tạo chức vị duy nhất trong venue_roles.
+- Môn nhân ứng chức nhanh nhất là người giữ chức.
+- Có API nhường vị.
+- Đan Chủ nhận 20% giá trị linh thạch cho mỗi giao dịch Đan Đường thành công.
+- Đan Chủ có thể gửi lời mời mua vật phẩm cho môn nhân khác.
+- Môn nhân nhận lời mời có thể đồng ý/trả linh thạch hoặc từ chối trong Hòm Thư Đan Đường.
+- Aura động bạch sắc ở thẻ chức vị.
+
+6. GHIM NHANH
+- Thêm nút 📌 Ghim cho Chợ Đen, Dược Đường, Tửu Lâu.
+- Thanh “📌 Ghim nhanh” lưu bằng localStorage, không tốn database.
+- Có thể mở trực tiếp các vị trí từ thanh ghim.

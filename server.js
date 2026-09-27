@@ -19,8 +19,8 @@ if (!DATABASE_URL) {
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: Number(process.env.DB_POOL_MAX || 10),
-  idleTimeoutMillis: 30000,
+  max: Number(process.env.DB_POOL_MAX || 5),
+  idleTimeoutMillis: 15000,
   connectionTimeoutMillis: 5000,
   maxLifetimeSeconds: 300
 });
@@ -720,6 +720,49 @@ async function ensureBeastArenaSchema(){
       WHEN name ILIKE '%Thổ%' THEN 'Thổ'
       ELSE beast_type END;
   `);
+}
+
+async function ensureVenueRoleSchema(){
+  await query(`
+    CREATE TABLE IF NOT EXISTS venue_roles (
+      venue_code TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      previous_title TEXT,
+      previous_position TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_venue_roles_user ON venue_roles(user_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_user_positive ON inventory(user_id) WHERE quantity>0;
+    CREATE INDEX IF NOT EXISTS idx_owned_roots_user_positive ON owned_spirit_roots(user_id) WHERE quantity>0;
+    CREATE INDEX IF NOT EXISTS idx_owned_beasts_user_positive ON owned_spirit_beasts(user_id) WHERE quantity>0;
+    CREATE INDEX IF NOT EXISTS idx_black_market_sales_created ON black_market_sales(created_at DESC);
+    CREATE TABLE IF NOT EXISTS dan_duong_member_invites (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      buyer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
+      price INTEGER NOT NULL CHECK(price>0),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+      notification_id BIGINT REFERENCES mailbox_notifications(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      CHECK(owner_id<>buyer_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dan_invites_buyer_status ON dan_duong_member_invites(buyer_id,status,created_at DESC);
+  `);
+}
+
+async function runDatabaseMaintenance(){
+  // Keep the database lean without deleting active gameplay data.
+  try{
+    await query(`DELETE FROM sessions WHERE expires_at < (EXTRACT(EPOCH FROM NOW())*1000)::BIGINT`);
+    await query(`DELETE FROM mailbox_notifications WHERE read_at IS NOT NULL AND created_at < NOW()-INTERVAL '30 days'`);
+    await query(`DELETE FROM inventory WHERE quantity<=0`);
+    await query(`DELETE FROM tavern_inventory WHERE quantity<=0`);
+    await query(`DELETE FROM tavern_listings WHERE active=false AND created_at < NOW()-INTERVAL '14 days'`);
+    await query(`DELETE FROM tavern_member_invites WHERE status<>'pending' AND responded_at < NOW()-INTERVAL '30 days'`);
+    await query(`DELETE FROM black_market_sales WHERE created_at < NOW()-INTERVAL '90 days'`);
+  }catch(e){ console.error('database maintenance:',e.message); }
 }
 
 async function initDb() {
@@ -1958,19 +2001,76 @@ async function ensureTavernSchema(){
 }
 
 async function regionAccessFor(userId, region){
-  const u=(await query('SELECT username FROM users WHERE id=$1',[userId])).rows[0];
-  const username=String(u?.username||'').toLowerCase();
-  // Mở khóa riêng cho môn nhân thienha_666; @kien vẫn được giữ quyền vận hành Tửu Lâu.
-  if(region==='tavern') return username==='thienha_666' || username==='kien';
-  if(region==='dan-duong' || region==='black-market') return username==='thienha_666';
-  return false;
+  // v3.6.75: Tửu Lâu, Đan Đường và Chợ Đen đều mở cho toàn bộ môn nhân đã đăng nhập.
+  // Quyền sở hữu/nhận chức được kiểm soát riêng bằng venue_roles.
+  const r=await query('SELECT id FROM users WHERE id=$1',[userId]);
+  return Boolean(r.rows.length) && ['tavern','dan-duong','black-market'].includes(region);
 }
 function regionLockMessage(region){
-  if(region==='tavern') return 'Khu vực Tửu Lâu đang phong ấn. Chỉ môn nhân được cấp quyền mới có thể tiến vào.';
-  if(region==='dan-duong') return 'Đan Đường đang phong ấn. Môn nhân thienha_666 đã được mở khóa vùng này.';
-  if(region==='black-market') return 'Chợ Đen đang phong ấn. Môn nhân thienha_666 đã được mở khóa vùng này.';
+  if(region==='tavern') return 'Tửu Lâu đã mở cho toàn bộ môn nhân.';
+  if(region==='dan-duong') return 'Đan Đường đã mở cho toàn bộ môn nhân.';
+  if(region==='black-market') return 'Chợ Đen đã mở cho toàn bộ môn nhân.';
   return 'Khu vực đang phong ấn.';
 }
+
+const VENUE_META={
+  'black-market':{roleCode:'black_market_master',roleName:'Chợ Đen Chi Chủ',title:'Chợ Đen Chi Chủ',position:'Chủ Chợ Đen',icon:'🕶️',aura:'black'},
+  'dan-duong':{roleCode:'alchemy_master',roleName:'Đan Chủ',title:'Đan Chủ',position:'Đan Chủ',icon:'⚗️',aura:'white'}
+};
+function venueMeta(code){return VENUE_META[code]||null;}
+
+app.get('/api/venue-role/:venue',auth,async(req,res)=>{
+  const meta=venueMeta(req.params.venue); if(!meta)return res.status(404).json({error:'Chức vị không hợp lệ.'});
+  try{
+    await ensureVenueRoleSchema();
+    const row=(await query(`SELECT r.venue_code,r.user_id,r.applied_at,u.username,u.display_name,p.title,p.position
+      FROM venue_roles r JOIN users u ON u.id=r.user_id JOIN profiles p ON p.user_id=r.user_id WHERE r.venue_code=$1`,[req.params.venue])).rows[0]||null;
+    res.json({venue:req.params.venue,meta,owner:row,me:row&&Number(row.user_id)===Number(req.session.user_id),canApply:!row,canTransfer:Boolean(row&&Number(row.user_id)===Number(req.session.user_id))});
+  }catch(e){console.error('venue role:',e);res.status(500).json({error:'Không thể tải chức vị.'});}
+});
+
+app.post('/api/venue-role/:venue/apply',auth,async(req,res)=>{
+  const meta=venueMeta(req.params.venue); if(!meta)return res.status(404).json({error:'Chức vị không hợp lệ.'});
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const uid=req.session.user_id;
+    const u=(await client.query('SELECT id,username,display_name FROM users WHERE id=$1 FOR UPDATE',[uid])).rows[0];
+    const pr=(await client.query('SELECT title,position FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0]||{};
+    if(!u){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân.'});}
+    const ins=await client.query(`INSERT INTO venue_roles(venue_code,user_id,applied_at,previous_title,previous_position)
+      SELECT $1,$2,NOW(),$3,$4 WHERE NOT EXISTS(SELECT 1 FROM venue_roles WHERE venue_code=$1) RETURNING user_id,applied_at`,[req.params.venue,uid,pr.title||null,pr.position||null]);
+    if(!ins.rowCount){
+      const current=(await client.query(`SELECT u.display_name FROM venue_roles r JOIN users u ON u.id=r.user_id WHERE r.venue_code=$1`,[req.params.venue])).rows[0];
+      await client.query('ROLLBACK');
+      return res.status(409).json({error:`${meta.roleName} đã thuộc về ${current?.display_name||'môn nhân khác'}. Người ứng chức sớm nhất giữ vị trí.`});
+    }
+    await client.query(`UPDATE profiles SET title=$2,position=$3,updated_at=NOW() WHERE user_id=$1`,[uid,meta.title,meta.position]);
+    await client.query('COMMIT');
+    res.json({ok:true,message:`Chúc mừng ${u.display_name}! Bạn đã trở thành ${meta.roleName}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('venue apply:',e);res.status(500).json({error:'Không thể nhận chức vị.'});}
+  finally{client.release();}
+});
+
+app.post('/api/venue-role/:venue/transfer',auth,async(req,res)=>{
+  const meta=venueMeta(req.params.venue); if(!meta)return res.status(404).json({error:'Chức vị không hợp lệ.'});
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN'); const uid=req.session.user_id,targetId=Number(req.body?.targetId);
+    if(!targetId||targetId===uid){await client.query('ROLLBACK');return res.status(400).json({error:'Môn nhân nhận chức vị không hợp lệ.'});}
+    const current=(await client.query(`SELECT r.user_id,r.previous_title,r.previous_position FROM venue_roles r WHERE r.venue_code=$1 FOR UPDATE`,[req.params.venue])).rows[0];
+    if(!current||Number(current.user_id)!==Number(uid)){await client.query('ROLLBACK');return res.status(403).json({error:`Chỉ ${meta.roleName} hiện tại mới được nhường vị.`});}
+    const target=(await client.query(`SELECT u.id,u.display_name,p.title,p.position FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1 FOR UPDATE`,[targetId])).rows[0];
+    if(!target){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân nhận chức vị.'});}
+    await client.query(`UPDATE profiles SET title=COALESCE($2,title),position=COALESCE($3,position),updated_at=NOW() WHERE user_id=$1`,[uid,current.previous_title,current.previous_position]);
+    await client.query(`UPDATE venue_roles SET user_id=$2,applied_at=NOW(),previous_title=$3,previous_position=$4 WHERE venue_code=$1`,[req.params.venue,targetId,target.title,target.position]);
+    await client.query(`UPDATE profiles SET title=$2,position=$3,updated_at=NOW() WHERE user_id=$1`,[targetId,meta.title,meta.position]);
+    await client.query('COMMIT');
+    await createMailboxNotification(targetId,'venue_role_transfer',`${meta.icon} ${meta.roleName}`,'Bạn đã được nhường vị trí chức chủ của môn đường.','#'+req.params.venue,{action:'venue_role'});
+    res.json({ok:true,message:`Đã nhường ${meta.roleName} cho ${target.display_name}.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('venue transfer:',e);res.status(500).json({error:'Không thể nhường vị trí.'});}
+  finally{client.release();}
+});
 
 app.get('/api/tavern',auth,async(req,res)=>{
   try{
@@ -2996,12 +3096,16 @@ app.post('/api/black-market/sell',auth,async(req,res)=>{
     if(!row||Number(row.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng trong kho không đủ.'});}
     const unit=Math.max(50,Math.floor(Number(row.price_stones||0)*0.60 + Number(row.power_bonus||0)*2));
     const total=unit*qty;
+    const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='black-market' FOR SHARE`)).rows[0]?.user_id||null;
+    const ownerBonus=owner&&Number(owner)!==uid?Math.floor(total*0.20):0;
+    const sellerTotal=total;
     if(type==='root') await client.query(`UPDATE owned_spirit_roots SET quantity=quantity-$3 WHERE user_id=$1 AND root_id=$2`,[uid,id,qty]);
     else await client.query(`UPDATE owned_spirit_beasts SET quantity=quantity-$3 WHERE user_id=$1 AND beast_id=$2`,[uid,id,qty]);
-    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[uid,total]);
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[uid,sellerTotal]);
+    if(ownerBonus) await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
     await client.query(`INSERT INTO black_market_sales(seller_id,asset_type,asset_id,asset_name,quantity,unit_price,total_price) VALUES($1,$2,$3,$4,$5,$6,$7)`,[uid,type,id,row.name,qty,unit,total]);
     await client.query('COMMIT');
-    res.json({ok:true,item:row.name,quantity:qty,unitPrice:unit,totalPrice:total,message:`Chợ Đen thu mua ${row.name} ×${qty}, nhận ${total.toLocaleString('vi-VN')} linh thạch.`});
+    res.json({ok:true,item:row.name,quantity:qty,unitPrice:unit,totalPrice:total,ownerBonus,message:`Chợ Đen thu mua ${row.name} ×${qty}, bạn nhận ${total.toLocaleString('vi-VN')} linh thạch${ownerBonus?`. Chợ Đen Chi Chủ nhận thêm ${ownerBonus.toLocaleString('vi-VN')} linh thạch (20%).`:'.'}`});
   }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('black market sell:',e);res.status(500).json({error:'Không thể bán cho Chợ Đen.'});}
   finally{client.release();}
 });
@@ -3319,10 +3423,72 @@ app.get('/api/dan-duong',auth,async(req,res)=>{
     const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.min_realm,COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
       WHERE ti.category LIKE 'Đan Đường%' ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
+    const owner=(await query(`SELECT r.user_id,u.display_name,u.username FROM venue_roles r JOIN users u ON u.id=r.user_id WHERE r.venue_code='dan-duong'`)).rows[0]||null;
+    const members=owner&&Number(owner.user_id)===Number(req.session.user_id)?(await query(`SELECT u.id,u.display_name,u.username,p.rank FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name,u.id LIMIT 200`,[req.session.user_id])).rows:[];
+    const inbox=(await query(`SELECT i.id,i.owner_id,i.buyer_id,i.item_id,i.price,i.status,i.created_at,ti.name,ti.category,ti.description,u.display_name AS owner_name,u.username AS owner_username
+      FROM dan_duong_member_invites i JOIN treasure_items ti ON ti.id=i.item_id JOIN users u ON u.id=i.owner_id
+      WHERE i.buyer_id=$1 AND i.status='pending' ORDER BY i.created_at DESC LIMIT 50`,[req.session.user_id])).rows;
     const stage=stageFor(Number(p?.spirit_power)||0);
-    res.json({items,profile:p||{},stage,npc:{name:'Đan Đường · Huyền Lô',dialogue:'Linh thạch đổi linh tài, đan lô phân phẩm. Chọn đúng phẩm cấp rồi mới luyện được đại đan.'}});
+    res.json({items,profile:p||{},stage,owner,members,inbox,npc:{name:'Đan Đường · Huyền Lô',dialogue:'Linh thạch đổi linh tài, đan lô phân phẩm. Chọn đúng phẩm cấp rồi mới luyện được đại đan.'}});
   }catch(e){console.error('dan duong:',e);res.status(500).json({error:'Không thể mở Đan Đường.'});}
 });
+app.post('/api/dan-duong/invite',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,buyerId=Number(req.body?.buyerId),itemId=Number(req.body?.itemId);
+    if(!buyerId||buyerId===uid)return res.status(400).json({error:'Môn nhân được mời không hợp lệ.'});
+    const role=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' AND user_id=$1`,[uid])).rows[0];
+    if(!role)return res.status(403).json({error:'Chỉ Đan Chủ mới được gửi lời mời.'});
+    const item=(await client.query(`SELECT id,name,category,price,min_realm FROM treasure_items WHERE id=$1 AND category LIKE 'Đan Đường%'`,[itemId])).rows[0];
+    if(!item)return res.status(404).json({error:'Vật phẩm Đan Đường không tồn tại.'});
+    const existing=(await client.query(`SELECT id FROM dan_duong_member_invites WHERE owner_id=$1 AND buyer_id=$2 AND item_id=$3 AND status='pending'`,[uid,buyerId,itemId])).rows[0];
+    if(existing)return res.status(409).json({error:'Đã có lời mời vật phẩm đang chờ môn nhân này phản hồi.'});
+    const ins=(await client.query(`INSERT INTO dan_duong_member_invites(owner_id,buyer_id,item_id,price) VALUES($1,$2,$3,$4) RETURNING id`,[uid,buyerId,itemId,item.price])).rows[0];
+    await createMailboxNotification(buyerId,'dan_duong_sale','⚗️ Lời mời từ Đan Đường',`Đan Chủ mời bạn mua ${item.name} · ${Number(item.price).toLocaleString('vi-VN')} linh thạch. Bạn có thể đồng ý hoặc từ chối trong Hòm Thư.`,'#dan-duong',{action:'dan_duong_sale',requestId:Number(ins.id)});
+    res.json({ok:true,message:'Đã gửi lời mời mua vật phẩm vào Hòm Thư.'});
+  }catch(e){console.error('dan invite:',e);res.status(500).json({error:'Không thể gửi lời mời Đan Đường.'});}
+  finally{client.release();}
+});
+
+app.post('/api/dan-duong/invite/respond',auth,async(req,res)=>{
+  if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id,id=Number(req.body?.requestId),action=req.body?.action;
+    if(!id||!['accept','reject'].includes(action))return res.status(400).json({error:'Phản hồi lời mời không hợp lệ.'});
+    await client.query('BEGIN');
+    const inv=(await client.query(`SELECT i.*,ti.name,ti.category,ti.description,ti.min_realm,u.display_name AS owner_name
+      FROM dan_duong_member_invites i JOIN treasure_items ti ON ti.id=i.item_id JOIN users u ON u.id=i.owner_id
+      WHERE i.id=$1 AND i.buyer_id=$2 AND i.status='pending' FOR UPDATE`,[id,uid])).rows[0];
+    if(!inv){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời không còn hiệu lực.'});}
+    if(action==='reject'){
+      await client.query(`UPDATE dan_duong_member_invites SET status='rejected',responded_at=NOW() WHERE id=$1`,[id]);
+      await client.query('COMMIT');
+      await createMailboxNotification(inv.owner_id,'dan_duong_sale','⚗️ Lời mời Đan Đường','Môn nhân đã từ chối lời mời mua vật phẩm.','#dan-duong');
+      return res.json({ok:true,message:'Đã từ chối lời mời.'});
+    }
+    const buyer=(await client.query(`SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    if(!buyer||Number(buyer.spirit_stones)<Number(inv.price)){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thạch không đủ để mua vật phẩm.'});}
+    const stage=stageFor(Number(buyer.spirit_power)||0);
+    if(stage.realmIndex<Number(inv.min_realm||0)){await client.query('ROLLBACK');return res.status(403).json({error:`${inv.name} yêu cầu ${RANKS[Number(inv.min_realm)]?.name||'cảnh giới cao hơn'}.`});}
+    const used=Number((await client.query(`SELECT COUNT(*)::int AS c FROM inventory WHERE user_id=$1 AND quantity>0`,[uid])).rows[0]?.c||0);
+    const owned=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,inv.item_id])).rows[0]?.quantity||0);
+    const cap=Math.max(1,Number(buyer.storage_capacity)||30);
+    if(used>=cap&&owned<=0){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}).`});}
+    const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' FOR SHARE`)).rows[0]?.user_id||null;
+    const ownerBonus=owner&&Number(owner)!==uid?Math.floor(Number(inv.price)*0.20):0;
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,inv.price]);
+    if(ownerBonus)await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
+    const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW() RETURNING quantity`,[uid,inv.item_id]);
+    await client.query(`UPDATE dan_duong_member_invites SET status='accepted',responded_at=NOW() WHERE id=$1`,[id]);
+    await client.query('COMMIT');
+    await createMailboxNotification(inv.owner_id,'dan_duong_sale','⚗️ Giao dịch Đan Đường thành công',`Môn nhân đã mua ${inv.name}. Đan Chủ nhận ${ownerBonus.toLocaleString('vi-VN')} linh thạch (20%).`,'#dan-duong');
+    res.json({ok:true,message:`Đã mua ${inv.name}. Vật phẩm đã chuyển vào Tu Di Giới.`,totalQuantity:Number(ir.rows[0].quantity),ownerBonus});
+  }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('dan invite respond:',e);res.status(500).json({error:'Không thể hoàn tất giao dịch Đan Đường.'});}
+  finally{client.release();}
+});
+
 app.post('/api/dan-duong/exchange',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
@@ -3340,10 +3506,13 @@ app.post('/api/dan-duong/exchange',auth,async(req,res)=>{
     const owned=Number((await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[req.session.user_id,id])).rows[0]?.quantity||0);
     const cap=Math.max(1,Number(p.storage_capacity)||30);
     if(used>=cap&&owned<=0){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới đã đầy (${used}/${cap}).`});}
+    const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' FOR SHARE`)).rows[0]?.user_id||null;
+    const ownerBonus=owner&&Number(owner)!==Number(req.session.user_id)?Math.floor(total*0.20):0;
     await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,total]);
+    if(ownerBonus) await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
     const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW() RETURNING quantity`,[req.session.user_id,id,qty]);
     await client.query('COMMIT');
-    res.json({ok:true,item:item.name,grade:item.category.split('·').pop().trim(),quantity:qty,totalQuantity:Number(ir.rows[0].quantity),spent:total,message:`Đã đổi ${total.toLocaleString('vi-VN')} linh thạch lấy ${item.name} ×${qty}.`});
+    res.json({ok:true,item:item.name,grade:item.category.split('·').pop().trim(),quantity:qty,totalQuantity:Number(ir.rows[0].quantity),spent:total,ownerBonus,message:`Đã đổi ${total.toLocaleString('vi-VN')} linh thạch lấy ${item.name} ×${qty}.${ownerBonus?` Đan Chủ nhận ${ownerBonus.toLocaleString('vi-VN')} linh thạch (20%).`:''}`});
   }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('dan duong exchange:',e);res.status(500).json({error:'Đổi linh tài thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}
 });
 
@@ -5261,6 +5430,7 @@ ensureTienPhapSchema=__memoizeSchema(ensureTienPhapSchema,'tien-phap');
 ensureTienBanSchema=__memoizeSchema(ensureTienBanSchema,'tien-ban');
 ensureBeastArenaSchema=__memoizeSchema(ensureBeastArenaSchema,'beast-arena');
 ensureTavernSchema=__memoizeSchema(ensureTavernSchema,'tavern');
+ensureVenueRoleSchema=__memoizeSchema(ensureVenueRoleSchema,'venue-roles');
 // Chợ Đen dùng bảng đã được tạo trong initDb; route vẫn an toàn khi gọi sau deploy.
 
 ensureMailboxSchema=__memoizeSchema(ensureMailboxSchema,'mailbox');
@@ -5285,11 +5455,14 @@ function startBackgroundJobs(){
   processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e));
 }
 
-initDb().then(()=>{
+initDb().then(async()=>{
+  await ensureVenueRoleSchema();
+  await runDatabaseMaintenance();
   dbInitError = null;
   dbReady = true;
   console.log('PostgreSQL schema/data initialization hoàn tất.');
   startBackgroundJobs();
+  setInterval(runDatabaseMaintenance, 30*60*1000);
 }).catch(err=>{
   dbReady = false;
   dbInitError = err?.message || String(err);

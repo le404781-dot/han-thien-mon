@@ -47,3 +47,12 @@ Bản v3.0: đổi linh lực nhận vật phẩm, Tu Di Giới, Hàn Thiên Ký
 - Thêm graceful shutdown cho SIGTERM/SIGINT và đóng PostgreSQL pool.
 - Keep-alive/header timeout được cấu hình để phù hợp web service Node.js.
 - Mục tiêu vận hành khoảng 50 người dùng đồng thời ở mức tải thông thường; không phải cam kết 50 người spam realtime/combat/chat liên tục.
+
+
+=== v3.6.75 · MỞ TOÀN TÔNG + CHỨC CHỦ + TỐI ƯU DB ===
+- Mở Tửu Lâu, Đan Đường, Chợ Đen cho toàn bộ môn nhân đã đăng nhập.
+- Ngộ Túy tại Tửu Lâu: nhận túy phẩm và dùng Ngộ Túy để tăng linh lực theo khoảng buff.
+- Chợ Đen Chi Chủ: ứng chức nhanh nhất, duy nhất, có cơ chế nhường vị; nhận 20% giá trị mỗi lần thu mua thành công; aura hắc sắc động.
+- Đan Chủ: ứng chức nhanh nhất, duy nhất, có cơ chế nhường vị; nhận 20% giá trị mỗi lần đổi thành công tại Đan Đường; aura bạch sắc động.
+- Ghim nhanh Chợ Đen, Dược Đường, Tửu Lâu bằng nút 📌 và thanh ghim lưu trong trình duyệt.
+- Tối ưu PostgreSQL: giảm pool mặc định, thêm partial index cho kho đang có vật phẩm, dọn session/mailbox/kho 0 định kỳ, giới hạn lưu lịch sử Chợ Đen 90 ngày.
