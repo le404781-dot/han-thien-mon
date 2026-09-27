@@ -972,3 +972,334 @@ main>.section{content-visibility:auto;contain-intrinsic-size:720px}
 @keyframes blackMasterAura{0%,100%{transform:scale(.96);opacity:.7}50%{transform:scale(1.04);opacity:1}}
 @keyframes blackMasterGlow{0%,100%{transform:scale(1);text-shadow:0 0 4px #000}50%{transform:scale(1.08);text-shadow:0 0 16px #000,0 0 28px #111}}
 @media(max-width:700px){.venue-role-panel{align-items:flex-start;flex-wrap:wrap}.venue-role-emblem{width:42px;height:42px}.venue-role-main{min-width:calc(100% - 60px)}.venue-role-panel>.btn{width:100%}.venue-transfer-box{width:100%;justify-content:stretch}.venue-transfer-box select,.venue-transfer-box button{flex:1;min-width:0}.venue-role-msg{width:100%}}
+
+
+/* =====================================================================
+   v3.6.77 · CHỢ ĐEN + DƯỢC ĐƯỜNG — visual skin
+   Reference art supplied by the user. Presentation-only layer.
+   ===================================================================== */
+
+.black-market-section,
+.duoc-duong-section{
+  isolation:isolate;
+  overflow:hidden;
+  position:relative;
+}
+
+.black-market-section::before,
+.duoc-duong-section::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-3;
+  background-position:center;
+  background-size:cover;
+  background-repeat:no-repeat;
+  transform:scale(1.035);
+  animation:venueBgDrift 18s ease-in-out infinite alternate;
+}
+
+.black-market-section::after,
+.duoc-duong-section::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-2;
+  pointer-events:none;
+}
+
+.black-market-section::before{
+  background-image:
+    linear-gradient(180deg,rgba(5,7,13,.70),rgba(8,8,13,.83)),
+    url("assets/images/choden-night.jpg");
+}
+.black-market-section::after{
+  background:
+    radial-gradient(circle at 20% 18%,rgba(170,40,38,.20),transparent 26%),
+    radial-gradient(circle at 78% 24%,rgba(255,184,90,.10),transparent 24%),
+    linear-gradient(180deg,rgba(2,4,9,.16),rgba(2,3,8,.58));
+}
+
+.duoc-duong-section::before{
+  background-image:
+    linear-gradient(180deg,rgba(225,231,221,.20),rgba(13,28,24,.67)),
+    url("assets/images/duoc-duong-palace.png");
+}
+.duoc-duong-section::after{
+  background:
+    radial-gradient(circle at 50% 18%,rgba(255,248,205,.22),transparent 27%),
+    linear-gradient(180deg,rgba(238,242,231,.06),rgba(7,21,18,.52));
+}
+
+/* Mist / firefly particles without JS */
+.black-market-section .section-head,
+.duoc-duong-section .section-head,
+.black-market-section .market-area,
+.duoc-duong-section .duoc-duong-area{
+  position:relative;
+  z-index:1;
+}
+
+.black-market-section .section-head h2,
+.black-market-section .section-head .section-lead,
+.duoc-duong-section .section-head h2,
+.duoc-duong-section .section-head .section-lead{
+  text-shadow:0 3px 18px rgba(0,0,0,.65);
+}
+.black-market-section .section-head h2,
+.black-market-section .section-head .section-lead,
+.black-market-section .section-head .eyebrow{
+  color:#f4eee0;
+}
+.duoc-duong-section .section-head h2{
+  color:#eef4eb;
+}
+.duoc-duong-section .section-head .section-lead,
+.duoc-duong-section .section-head .eyebrow{
+  color:#e0e9de;
+}
+
+.black-market-section .live-pill,
+.duoc-duong-section .live-pill{
+  position:relative;
+  overflow:hidden;
+  backdrop-filter:blur(8px);
+  background:rgba(4,8,12,.52);
+  border-color:rgba(210,174,92,.52);
+  box-shadow:0 0 24px rgba(210,174,92,.12);
+}
+.duoc-duong-section .live-pill{
+  background:rgba(9,35,29,.48);
+}
+
+.black-market-section .market-area,
+.duoc-duong-section .duoc-duong-area{
+  padding:18px;
+  border:1px solid rgba(219,188,111,.24);
+  background:rgba(5,8,12,.36);
+  backdrop-filter:blur(4px);
+  box-shadow:0 24px 80px rgba(0,0,0,.28);
+}
+
+.duoc-duong-section .duoc-duong-area{
+  background:rgba(228,235,225,.16);
+  border-color:rgba(238,225,177,.35);
+}
+
+.black-market-section .market-card,
+.black-market-section .stone-exchange,
+.black-market-section .venue-role-panel{
+  background:linear-gradient(135deg,rgba(8,10,15,.86),rgba(34,18,20,.72));
+  border-color:rgba(190,154,79,.42);
+  box-shadow:0 14px 38px rgba(0,0,0,.34),inset 0 0 28px rgba(142,38,35,.06);
+  backdrop-filter:blur(8px);
+  color:#eee8dc;
+}
+
+.black-market-section .market-card{
+  position:relative;
+  overflow:hidden;
+  transition:transform .28s ease,box-shadow .28s ease,border-color .28s ease;
+}
+.black-market-section .market-card::before{
+  content:"";
+  position:absolute;
+  inset:-40%;
+  background:linear-gradient(110deg,transparent 42%,rgba(255,210,128,.10) 50%,transparent 58%);
+  transform:translateX(-60%) rotate(8deg);
+  animation:marketShimmer 7s linear infinite;
+  pointer-events:none;
+}
+.black-market-section .market-card:hover{
+  transform:translateY(-5px);
+  border-color:rgba(227,190,105,.76);
+  box-shadow:0 18px 48px rgba(0,0,0,.48),0 0 24px rgba(161,54,44,.13);
+}
+.black-market-section .market-card h3,
+.black-market-section .stone-exchange h3,
+.black-market-section .venue-role-panel h3{
+  color:#f1d99d;
+}
+.black-market-section .market-card p,
+.black-market-section .market-card small,
+.black-market-section .stone-exchange p,
+.black-market-section .venue-role-panel p{
+  color:#c9c1b3;
+}
+.black-market-section .market-section > .section-head h3{
+  color:#f0dfb6;
+  text-shadow:0 2px 14px rgba(0,0,0,.6);
+}
+
+.black-market-section .black-qty{
+  background:rgba(0,0,0,.48);
+  border-color:rgba(204,170,92,.40);
+  color:#f4ead7;
+}
+.black-market-section .btn.primary{
+  background:linear-gradient(135deg,#7d2625,#a94735);
+  border-color:#d09355;
+  box-shadow:0 0 18px rgba(171,61,44,.22);
+}
+.black-market-section .btn.primary:hover{
+  box-shadow:0 0 28px rgba(211,111,69,.30);
+}
+
+.duoc-duong-section .duoc-npc{
+  position:relative;
+  overflow:hidden;
+  background:linear-gradient(135deg,rgba(10,39,31,.78),rgba(30,54,43,.60));
+  border-color:rgba(226,211,157,.52);
+  box-shadow:0 18px 50px rgba(0,0,0,.28),inset 0 0 35px rgba(222,210,155,.08);
+  backdrop-filter:blur(8px);
+}
+.duoc-duong-section .duoc-npc::after{
+  content:"";
+  position:absolute;
+  width:180px;
+  height:180px;
+  right:-60px;
+  top:-80px;
+  border:1px solid rgba(241,226,169,.38);
+  border-radius:50%;
+  box-shadow:0 0 0 12px rgba(241,226,169,.05),0 0 0 28px rgba(241,226,169,.025);
+  animation:sealPulse 5s ease-in-out infinite;
+  pointer-events:none;
+}
+.duoc-duong-section .duoc-npc-seal{
+  background:radial-gradient(circle,rgba(247,239,199,.22),rgba(24,62,50,.72));
+  border-color:rgba(231,215,163,.65);
+  box-shadow:0 0 28px rgba(235,220,164,.15);
+  animation:sealFloat 4s ease-in-out infinite;
+}
+.duoc-duong-section .duoc-npc h3,
+.duoc-duong-section .duoc-wallet{
+  color:#f0dfb0;
+}
+.duoc-duong-section .duoc-npc p{
+  color:#d3ded4;
+}
+
+.duoc-duong-section .duoc-card{
+  position:relative;
+  overflow:hidden;
+  background:linear-gradient(145deg,rgba(18,45,37,.86),rgba(35,58,47,.70));
+  border-color:rgba(219,207,160,.34);
+  box-shadow:0 14px 38px rgba(0,0,0,.25),inset 0 0 25px rgba(255,236,180,.035);
+  backdrop-filter:blur(7px);
+  transition:transform .28s ease,box-shadow .28s ease,border-color .28s ease;
+}
+.duoc-duong-section .duoc-card::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  border:1px solid transparent;
+  background:linear-gradient(115deg,rgba(255,232,167,.22),transparent 30%,transparent 70%,rgba(134,203,173,.18)) border-box;
+  -webkit-mask:linear-gradient(#000 0 0) padding-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;
+  mask-composite:exclude;
+  pointer-events:none;
+  animation:cardBorderGlow 4.5s ease-in-out infinite;
+}
+.duoc-duong-section .duoc-card:hover{
+  transform:translateY(-6px) scale(1.012);
+  border-color:rgba(238,221,165,.70);
+  box-shadow:0 22px 52px rgba(0,0,0,.34),0 0 28px rgba(188,220,175,.10);
+}
+.duoc-duong-section .duoc-card.locked{
+  filter:saturate(.65);
+}
+.duoc-duong-section .duoc-card h3{
+  color:#e9e3c7;
+}
+.duoc-duong-section .duoc-card p,
+.duoc-duong-section .duoc-card small{
+  color:#c8d4ca;
+}
+.duoc-duong-section .duoc-icon{
+  width:54px;
+  height:54px;
+  display:grid;
+  place-items:center;
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(244,229,173,.18),rgba(79,123,99,.08));
+  border:1px solid rgba(231,215,163,.38);
+  box-shadow:0 0 22px rgba(230,215,164,.10);
+  animation:iconBreath 3.8s ease-in-out infinite;
+}
+.duoc-duong-section .duoc-buy input{
+  background:rgba(0,0,0,.22);
+  border-color:rgba(219,207,160,.32);
+  color:#f4eedc;
+}
+.duoc-duong-section .btn.primary{
+  background:linear-gradient(135deg,#315e4b,#5e836b);
+  border-color:#cbbd83;
+  box-shadow:0 0 18px rgba(90,150,119,.18);
+}
+.duoc-duong-section .btn.primary:hover{
+  box-shadow:0 0 30px rgba(130,194,154,.28);
+}
+.duoc-duong-section .train-msg,
+.black-market-section .train-msg{
+  padding:11px 14px;
+  border-left:2px solid var(--gold);
+  background:rgba(0,0,0,.22);
+  color:#e4dccb;
+}
+
+@keyframes venueBgDrift{
+  0%{transform:scale(1.035) translate3d(-1%,0,0)}
+  100%{transform:scale(1.07) translate3d(1%,1%,0)}
+}
+@keyframes marketShimmer{
+  0%{transform:translateX(-70%) rotate(8deg)}
+  100%{transform:translateX(70%) rotate(8deg)}
+}
+@keyframes sealFloat{
+  0%,100%{transform:translateY(0) rotate(0deg)}
+  50%{transform:translateY(-5px) rotate(2deg)}
+}
+@keyframes sealPulse{
+  0%,100%{opacity:.45;transform:scale(.92) rotate(0deg)}
+  50%{opacity:.85;transform:scale(1.06) rotate(18deg)}
+}
+@keyframes iconBreath{
+  0%,100%{transform:translateY(0);box-shadow:0 0 18px rgba(230,215,164,.08)}
+  50%{transform:translateY(-3px);box-shadow:0 0 28px rgba(230,215,164,.20)}
+}
+@keyframes cardBorderGlow{
+  0%,100%{opacity:.55}
+  50%{opacity:1}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .black-market-section::before,
+  .duoc-duong-section::before,
+  .black-market-section .market-card::before,
+  .duoc-duong-section .duoc-card::before,
+  .duoc-duong-section .duoc-icon,
+  .duoc-duong-section .duoc-npc-seal,
+  .duoc-duong-section .duoc-npc::after{
+    animation:none!important;
+  }
+}
+
+@media(max-width:700px){
+  .black-market-section .market-area,
+  .duoc-duong-section .duoc-duong-area{
+    padding:11px;
+  }
+  .black-market-section .market-card{
+    grid-template-columns:1fr;
+  }
+  .black-market-section .market-card .market-black-actions{
+    grid-template-columns:1fr 1fr;
+  }
+  .black-market-section .market-card .market-black-actions .black-qty{
+    min-width:0;
+  }
+  .duoc-duong-section .duoc-npc{
+    padding:15px;
+  }
+}

@@ -1,0 +1,15 @@
+HÀN THIÊN MÔN v3.6.77 — GIAO DIỆN CHỢ ĐEN + DƯỢC ĐƯỜNG
+
+- Giữ nguyên API, database và logic mua/bán/ứng chức/lời mời hiện có.
+- Chợ Đen: dùng ảnh đêm làm nền, phủ tối, hiệu ứng ánh sáng đỏ/vàng, shimmer, hover card, viền phát sáng.
+- Dược Đường: dùng ảnh tiên cung làm nền, hiệu ứng sương/ánh sáng, huy hiệu dao động, viền động, hover card.
+- Thêm 2 ảnh tham chiếu vào assets/images/.
+- Chuẩn hóa tiêu đề hiển thị thành “Dược Đường”.
+- Giữ nguyên cơ chế focus-lock hiện tại: khi mở mục từ thanh menu, vùng cuộn vẫn tập trung trong section đó.
+- Có hỗ trợ prefers-reduced-motion để giảm hoạt ảnh nếu thiết bị yêu cầu.
+
+File chính đã chỉnh:
+  index.html
+  style.css
+  assets/images/choden-night.jpg
+  assets/images/duoc-duong-palace.png
