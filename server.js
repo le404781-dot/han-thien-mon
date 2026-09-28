@@ -51,7 +51,9 @@ async function ensureRuntimeSchemaImpl(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hobby TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ALTER COLUMN spirit_stones TYPE BIGINT USING COALESCE(spirit_stones,0)::BIGINT;
+    ALTER TABLE profiles ALTER COLUMN spirit_stones SET DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS storage_capacity INTEGER NOT NULL DEFAULT 30;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gacha_claimed BOOLEAN NOT NULL DEFAULT FALSE;
@@ -162,7 +164,9 @@ async function ensureRuntimeSchemaImpl(){
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar TEXT;
-    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ALTER COLUMN buyback_price TYPE BIGINT USING COALESCE(buyback_price,0)::BIGINT;
+    ALTER TABLE treasure_items ALTER COLUMN buyback_price SET DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_food_gain INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_joy_gain INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_gear_slot TEXT;
@@ -370,7 +374,7 @@ async function ensureBicanhSchemaImpl(){
     CREATE INDEX IF NOT EXISTS idx_secret_realm_invites_invitee_status ON secret_realm_invitations(invitee_id,status,created_at DESC);
     CREATE UNIQUE INDEX IF NOT EXISTS uq_secret_realm_invitations_key ON secret_realm_invitations(realm_id,inviter_id,invitee_id);
 
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS secret_realm_debuff_percent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -1274,7 +1278,7 @@ async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root TEXT;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_beast TEXT;
@@ -1307,11 +1311,13 @@ async function initDb() {
       name TEXT NOT NULL UNIQUE,
       category TEXT NOT NULL,
       description TEXT NOT NULL,
-      price INTEGER NOT NULL CHECK(price >= 0),
+      price BIGINT NOT NULL CHECK(price >= 0),
       spirit_gain INTEGER NOT NULL DEFAULT 0,
       min_realm INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE treasure_items ALTER COLUMN price TYPE BIGINT USING COALESCE(price,0)::BIGINT;
+    ALTER TABLE treasure_items ALTER COLUMN price SET DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS spirit_roots_catalog (
@@ -2606,7 +2612,7 @@ app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
     if(!seller){await client.query('ROLLBACK');return res.status(404).json({error:'Lâu Chủ không còn tồn tại.'});}
     const sellerReceive=Math.floor(Number(inv.price)*0.60),commission=Number(inv.price)-sellerReceive;
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,inv.price]);
-    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[inv.owner_id,sellerReceive]);
+    await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[inv.owner_id,sellerReceive]);
     if(destination==='tavern'){
       await client.query(`INSERT INTO tavern_inventory(user_id,product_id,quantity,updated_at) VALUES($1,$2,1,NOW())
         ON CONFLICT(user_id,product_id) DO UPDATE SET quantity=tavern_inventory.quantity+1,updated_at=NOW()`,[uid,inv.product_id]);
@@ -2666,7 +2672,7 @@ async function processTavernNpcSales(){
           WHERE l.id=$1 AND l.active=true AND l.npc_next_buy_at<=NOW() FOR UPDATE`,[row.id])).rows[0];
         if(!locked){await client.query('ROLLBACK');continue;}
         const sellerReceive=Math.floor(Number(locked.price)*0.31),commission=Number(locked.price)-sellerReceive;
-        await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[locked.owner_id,sellerReceive]);
+        await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[locked.owner_id,sellerReceive]);
         await client.query(`INSERT INTO tavern_sales(owner_id,buyer_id,product_id,buyer_type,listed_price,seller_received,commission)
           VALUES($1,NULL,$2,'npc',$3,$4,$5)`,[locked.owner_id,locked.product_id,locked.price,sellerReceive,commission]);
         await client.query(`UPDATE tavern_listings SET npc_next_buy_at=NOW()+INTERVAL '5 minutes' WHERE id=$1`,[locked.id]);
@@ -2714,7 +2720,7 @@ app.post('/api/professions/learn',auth,async(req,res)=>{
     if(existing.length>=slots){await client.query('ROLLBACK');return res.status(400).json({error:`${st.stage} chỉ mở ${slots} ô nghề. Cần đạt thêm cảnh giới để học nghề phụ.`});}
     const reward=professionReward(def,st.realmIndex);
     await client.query(`INSERT INTO user_professions(user_id,profession_code,learned_realm_index) VALUES($1,$2,$3)`,[req.session.user_id,code,st.realmIndex]);
-    const nr=await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[req.session.user_id,reward]);
+    const nr=await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[req.session.user_id,reward]);
     await client.query('COMMIT');
     res.status(201).json({ok:true,profession:def.name,reward,spiritStones:Number(nr.rows[0].spirit_stones),message:`Tiếp nhận ${def.name} thành công. Nhận ${reward.toLocaleString('vi-VN')} linh thạch nhập nghiệp.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('profession learn:',e);res.status(500).json({error:'Không thể tiếp nhận nghề nghiệp.'});}
@@ -2737,7 +2743,7 @@ app.post('/api/professions/claim',auth,async(req,res)=>{
       const dayCheck=(await client.query(`SELECT (($1::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date) AS claimed_today`,[own.last_claim_at])).rows[0];
       if(dayCheck?.claimed_today){await client.query('ROLLBACK');return res.status(400).json({error:'Nghiệp vụ này đã nhận thù lao hôm nay. Hãy quay lại ngày mai.'});}
     }
-    const nr=await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[req.session.user_id,reward]);
+    const nr=await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[req.session.user_id,reward]);
     await client.query(`UPDATE user_professions SET last_claim_at=NOW() WHERE id=$1`,[own.id]);
     await client.query('COMMIT');
     res.json({ok:true,profession:def.name,reward,spiritStones:Number(nr.rows[0].spirit_stones),message:`Nghiệp vụ hoàn thành. Nhận ${reward.toLocaleString('vi-VN')} linh thạch.`});
@@ -3452,7 +3458,7 @@ app.post('/api/dan-cac/sell',auth,async(req,res)=>{
     const unit=Math.max(1,Number(row.buyback_price)||Math.round((Number(row.price)||0)*0.45));
     const total=unit*quantity;
     await client.query('UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[req.session.user_id,itemId,quantity]);
-    const stoneUpdate=await client.query('UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones',[req.session.user_id,total]);
+    const stoneUpdate=await client.query('UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones',[req.session.user_id,total]);
     const spiritStones=Number(stoneUpdate.rows[0]?.spirit_stones||0);
     await client.query('COMMIT');
     res.json({ok:true,item:row.name,quantity,unitPrice:unit,total,spiritStones,message:`Đan Các đã thu mua ${row.name} ×${quantity}, nhận ${total.toLocaleString('vi-VN')} linh thạch.`});
@@ -3512,7 +3518,7 @@ app.post('/api/tien-thai/liquidate',auth,async(req,res)=>{
     const total=unit*qty;
     if(Number(row.quantity)===qty) await client.query('DELETE FROM inventory WHERE user_id=$1 AND item_id=$2',[uid,itemId]);
     else await client.query('UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[uid,itemId,qty]);
-    const st=(await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[uid,total])).rows[0];
+    const st=(await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[uid,total])).rows[0];
     await client.query('COMMIT');
     res.json({ok:true,item:row.name,quantity:qty,unitPrice:unit,total,spiritStones:Number(st?.spirit_stones||0),message:`Tiên Thải đã thanh lý ${row.name} ×${qty}, nhận ${total.toLocaleString('vi-VN')} linh thạch (31% giá trị ban đầu).`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien thai liquidate:',e);res.status(500).json({error:'Không thể thanh lý Tiên Khí. Giao dịch đã được hoàn tác.'});}
@@ -3582,8 +3588,8 @@ app.post('/api/black-market/sell',auth,async(req,res)=>{
         else await client.query(`DELETE FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2`,[uid,id]);
       } else await client.query(`UPDATE owned_spirit_beasts SET quantity=quantity-$3, unbound_quantity=LEAST(unbound_quantity, GREATEST(0, quantity-$3)) WHERE user_id=$1 AND beast_id=$2`,[uid,id,qty]);
     }
-    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[uid,sellerTotal]);
-    if(ownerBonus) await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
+    await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[uid,sellerTotal]);
+    if(ownerBonus) await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
     await client.query(`INSERT INTO black_market_sales(seller_id,asset_type,asset_id,asset_name,quantity,unit_price,total_price) VALUES($1,$2,$3,$4,$5,$6,$7)`,[uid,type,id,row.name,qty,unit,total]);
     await client.query('COMMIT');
     res.json({ok:true,item:row.name,quantity:qty,unitPrice:unit,totalPrice:total,ownerBonus,message:`Chợ Đen thu mua ${row.name} ×${qty}, bạn nhận ${total.toLocaleString('vi-VN')} linh thạch${ownerBonus?`. Chợ Đen Chi Chủ nhận thêm ${ownerBonus.toLocaleString('vi-VN')} linh thạch (20%).`:'.'}`});
@@ -3647,7 +3653,7 @@ app.post('/api/market/buy',auth,async(req,res)=>{
     const capR=await client.query(`SELECT storage_capacity,COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used,COALESCE((SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2),0)::int AS owned FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id,l.item_id]);
     if(Number(capR.rows[0].used)>=Number(capR.rows[0].storage_capacity)&&Number(capR.rows[0].owned)<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Tu Di Giới của người mua đã đầy.'});}
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,price]);
-    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[l.seller_id,price]);
+    await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[l.seller_id,price]);
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[req.session.user_id,l.item_id,l.quantity]);
     await client.query('DELETE FROM market_listings WHERE id=$1',[listingId]);
     await client.query('COMMIT');
@@ -3812,11 +3818,11 @@ app.post('/api/dan-phap/order',auth,async(req,res)=>{const client=await pool.con
 
 app.post('/api/dan-phap/order/respond',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();const uid=req.session.user_id,id=Number(req.body?.requestId),action=req.body?.action==='accept'?'accept':'reject';await client.query('BEGIN');const o=(await client.query(`SELECT o.*,r.name AS recipe_name,ar.expires_at,ar.manager_user_id FROM alchemy_orders o JOIN alchemy_recipes r ON r.id=o.recipe_id JOIN alchemy_rooms ar ON ar.user_id=o.room_owner_id WHERE o.id=$1 AND (o.room_owner_id=$2 OR ar.manager_user_id=$2) FOR UPDATE`,[id,uid])).rows[0];if(!o){await client.query('ROLLBACK');return res.status(404).json({error:'Đơn luyện đan không tồn tại.'});}if(o.status!=='pending'){await client.query('ROLLBACK');return res.status(409).json({error:'Đơn này đã được xử lý.'});}if(action==='reject'){await client.query(`UPDATE alchemy_orders SET status='rejected',responded_at=NOW() WHERE id=$1`,[id]);await client.query('COMMIT');if(o.requester_id)await createMailboxNotification(o.requester_id,'alchemy_order','⚗️ Đơn luyện đan bị từ chối',`Đơn ${o.recipe_name} ×${o.quantity} đã bị từ chối.`,'#dan-phap');return res.json({ok:true,message:'Đã từ chối đơn luyện đan.'});}if(new Date(o.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(400).json({error:'Đan Phòng đã hết thời gian thuê.'});}await client.query(`UPDATE alchemy_orders SET status='accepted',accepted_by=$2,accepted_at=NOW(),responded_at=NOW() WHERE id=$1`,[id,uid]);await client.query('COMMIT');res.json({ok:true,message:`Đã nhận đơn ${o.recipe_name} ×${o.quantity}. Hãy đưa linh dược vào lò luyện.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy respond:',e);res.status(500).json({error:'Không thể xử lý đơn luyện đan.'});}finally{client.release();}});
 
-app.post('/api/dan-phap/brew',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,orderId=Number(req.body?.orderId),recipeId=Number(req.body?.recipeId),furnaceId=Number(req.body?.furnaceId)||0;const o=(await client.query(`SELECT o.*,r.name AS recipe_name,r.success_rate,r.output_item_id,r.min_realm,ar.expires_at,ar.manager_user_id,ar.room_grade FROM alchemy_orders o JOIN alchemy_recipes r ON r.id=o.recipe_id JOIN alchemy_rooms ar ON ar.user_id=o.room_owner_id WHERE o.id=$1 AND o.accepted_by=$2 AND o.status='accepted' FOR UPDATE`,[orderId,uid])).rows[0];if(!o||Number(o.recipe_id)!==recipeId){await client.query('ROLLBACK');return res.status(404).json({error:'Đơn luyện đan không hợp lệ.'});}if(new Date(o.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(400).json({error:'Đan Phòng đã hết hạn.'});}const furnace=(await client.query(`SELECT ti.id,ti.name,ti.category FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category LIKE '%Lò Luyện Đan%' FOR UPDATE`,[uid,furnaceId])).rows[0];if(!furnace){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa chọn hoặc không sở hữu Lò Luyện Đan.'});}const known=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,o.recipe_id])).rows[0];if(!known){await client.query('ROLLBACK');return res.status(403).json({error:'Người luyện phải sở hữu Đan Pháp này.'});}const outputCapacity=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,o.output_item_id])).rows[0];const expectedOutput=Number(o.quantity)*10;if(Number(outputCapacity?.quantity||0)+expectedOutput>150){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới chỉ chứa tối đa 150 viên mỗi loại. Cần còn trống ${expectedOutput} viên đan để nhận đơn.`});}const inv=(await client.query(`SELECT i.item_id,i.quantity,ri.quantity AS need,ti.name FROM alchemy_recipe_ingredients ri JOIN treasure_items ti ON ti.id=ri.item_id LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ri.item_id WHERE ri.recipe_id=$2 FOR UPDATE`,[uid,o.recipe_id])).rows;for(const x of inv)if(Number(x.quantity||0)<Number(x.need)*Number(o.quantity)){await client.query('ROLLBACK');return res.status(400).json({error:`Thiếu ${x.name} ×${Number(x.need)*Number(o.quantity)}.`});}for(const x of inv)await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,x.item_id,Number(x.need)*Number(o.quantity)]);const furnaceGrade=alchemyFurnaceGrade(furnace),successRate=Math.min(100,Number(o.success_rate)+alchemyFurnaceBonus(furnaceGrade)),success=crypto.randomInt(1,101)<=successRate;let reward=0;if(success){reward=Number(o.quantity)*10;await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[uid,o.output_item_id,reward]);}const payout=Number(o.payout),ingredientValue=Number(o.ingredient_value),profit=Math.max(0,payout-ingredientValue),ownerShare=Math.floor(profit*.10),managerShare=Math.floor(profit*.01),workerShare=Math.max(0,profit-ownerShare-managerShare);if(success){if(o.source_type==='member'){const requester=(await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[o.requester_id])).rows[0];if(!requester||Number(requester.spirit_stones)<payout){await client.query('ROLLBACK');return res.status(400).json({error:'Môn nhân đặt đơn không đủ linh thạch để thanh toán.'});}await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2 WHERE user_id=$1`,[o.requester_id,payout]);}const manager=Number(o.manager_user_id||0);const worker=Number(o.accepted_by||uid);await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[worker,ingredientValue+workerShare+(worker===Number(o.room_owner_id)?ownerShare:0)+(manager&&worker===manager?managerShare:0)]);if(worker!==Number(o.room_owner_id))await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[o.room_owner_id,ownerShare]);if(manager&&manager!==worker&&manager!==Number(o.room_owner_id))await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[manager,managerShare]);}else{if(o.source_type==='member'){/* thất bại: linh dược đã tiêu hao, không thu tiền */} }await client.query(`UPDATE alchemy_orders SET status=$2,completed_at=NOW(),responded_at=COALESCE(responded_at,NOW()) WHERE id=$1`,[orderId,success?'completed':'failed']);await client.query('COMMIT');if(o.requester_id)await createMailboxNotification(o.requester_id,'alchemy_order',success?'⚗️ Đơn luyện đan hoàn thành':'⚗️ Luyện đan thất bại',success?`Đơn ${o.recipe_name} ×${o.quantity} đã hoàn thành.`:`Đơn ${o.recipe_name} ×${o.quantity} luyện thất bại, không thu tiền.`,'#dan-phap');res.json({ok:true,success,outputQuantity:reward,payout:success?payout:0,profit,ownerShare,managerShare,workerShare,message:success?`Luyện thành công ${o.recipe_name} ×${reward}.`:`Hỏa hầu lệch nhịp, luyện đan thất bại.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy brew:',e);res.status(500).json({error:'Luyện đan thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}});
+app.post('/api/dan-phap/brew',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,orderId=Number(req.body?.orderId),recipeId=Number(req.body?.recipeId),furnaceId=Number(req.body?.furnaceId)||0;const o=(await client.query(`SELECT o.*,r.name AS recipe_name,r.success_rate,r.output_item_id,r.min_realm,ar.expires_at,ar.manager_user_id,ar.room_grade FROM alchemy_orders o JOIN alchemy_recipes r ON r.id=o.recipe_id JOIN alchemy_rooms ar ON ar.user_id=o.room_owner_id WHERE o.id=$1 AND o.accepted_by=$2 AND o.status='accepted' FOR UPDATE`,[orderId,uid])).rows[0];if(!o||Number(o.recipe_id)!==recipeId){await client.query('ROLLBACK');return res.status(404).json({error:'Đơn luyện đan không hợp lệ.'});}if(new Date(o.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(400).json({error:'Đan Phòng đã hết hạn.'});}const furnace=(await client.query(`SELECT ti.id,ti.name,ti.category FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category LIKE '%Lò Luyện Đan%' FOR UPDATE`,[uid,furnaceId])).rows[0];if(!furnace){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa chọn hoặc không sở hữu Lò Luyện Đan.'});}const known=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,o.recipe_id])).rows[0];if(!known){await client.query('ROLLBACK');return res.status(403).json({error:'Người luyện phải sở hữu Đan Pháp này.'});}const outputCapacity=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,o.output_item_id])).rows[0];const expectedOutput=Number(o.quantity)*10;if(Number(outputCapacity?.quantity||0)+expectedOutput>150){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới chỉ chứa tối đa 150 viên mỗi loại. Cần còn trống ${expectedOutput} viên đan để nhận đơn.`});}const inv=(await client.query(`SELECT i.item_id,i.quantity,ri.quantity AS need,ti.name FROM alchemy_recipe_ingredients ri JOIN treasure_items ti ON ti.id=ri.item_id LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ri.item_id WHERE ri.recipe_id=$2 FOR UPDATE`,[uid,o.recipe_id])).rows;for(const x of inv)if(Number(x.quantity||0)<Number(x.need)*Number(o.quantity)){await client.query('ROLLBACK');return res.status(400).json({error:`Thiếu ${x.name} ×${Number(x.need)*Number(o.quantity)}.`});}for(const x of inv)await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,x.item_id,Number(x.need)*Number(o.quantity)]);const furnaceGrade=alchemyFurnaceGrade(furnace),successRate=Math.min(100,Number(o.success_rate)+alchemyFurnaceBonus(furnaceGrade)),success=crypto.randomInt(1,101)<=successRate;let reward=0;if(success){reward=Number(o.quantity)*10;await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[uid,o.output_item_id,reward]);}const payout=Number(o.payout),ingredientValue=Number(o.ingredient_value),profit=Math.max(0,payout-ingredientValue),ownerShare=Math.floor(profit*.10),managerShare=Math.floor(profit*.01),workerShare=Math.max(0,profit-ownerShare-managerShare);if(success){if(o.source_type==='member'){const requester=(await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[o.requester_id])).rows[0];if(!requester||Number(requester.spirit_stones)<payout){await client.query('ROLLBACK');return res.status(400).json({error:'Môn nhân đặt đơn không đủ linh thạch để thanh toán.'});}await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2 WHERE user_id=$1`,[o.requester_id,payout]);}const manager=Number(o.manager_user_id||0);const worker=Number(o.accepted_by||uid);await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[worker,ingredientValue+workerShare+(worker===Number(o.room_owner_id)?ownerShare:0)+(manager&&worker===manager?managerShare:0)]);if(worker!==Number(o.room_owner_id))await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[o.room_owner_id,ownerShare]);if(manager&&manager!==worker&&manager!==Number(o.room_owner_id))await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[manager,managerShare]);}else{if(o.source_type==='member'){/* thất bại: linh dược đã tiêu hao, không thu tiền */} }await client.query(`UPDATE alchemy_orders SET status=$2,completed_at=NOW(),responded_at=COALESCE(responded_at,NOW()) WHERE id=$1`,[orderId,success?'completed':'failed']);await client.query('COMMIT');if(o.requester_id)await createMailboxNotification(o.requester_id,'alchemy_order',success?'⚗️ Đơn luyện đan hoàn thành':'⚗️ Luyện đan thất bại',success?`Đơn ${o.recipe_name} ×${o.quantity} đã hoàn thành.`:`Đơn ${o.recipe_name} ×${o.quantity} luyện thất bại, không thu tiền.`,'#dan-phap');res.json({ok:true,success,outputQuantity:reward,payout:success?payout:0,profit,ownerShare,managerShare,workerShare,message:success?`Luyện thành công ${o.recipe_name} ×${reward}.`:`Hỏa hầu lệch nhịp, luyện đan thất bại.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy brew:',e);res.status(500).json({error:'Luyện đan thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}});
 
 app.post('/api/dan-phap/brew-direct',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,recipeId=Number(req.body?.recipeId),furnaceId=Number(req.body?.furnaceId)||0;const o=(await client.query(`SELECT r.*,ar.expires_at,ar.room_grade FROM alchemy_recipes r JOIN alchemy_rooms ar ON ar.user_id=$1 WHERE r.id=$2 AND r.active=true AND ar.expires_at>NOW()`,[uid,recipeId])).rows[0];if(!o){await client.query('ROLLBACK');return res.status(400).json({error:'Cần thuê Đan Phòng còn hiệu lực và chọn đúng Đan Pháp.'});}const known=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,recipeId])).rows[0];if(!known){await client.query('ROLLBACK');return res.status(403).json({error:'Bạn chưa sở hữu Đan Pháp này. Hãy dùng linh thạch để trao đổi Đan Pháp.'});}const furnace=(await client.query(`SELECT ti.id,ti.name,ti.category FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category LIKE '%Lò Luyện Đan%' FOR UPDATE`,[uid,furnaceId])).rows[0];if(!furnace){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa chọn hoặc không sở hữu Lò Luyện Đan.'});}const inv=(await client.query(`SELECT i.item_id,i.quantity,ri.quantity AS need,ti.name FROM alchemy_recipe_ingredients ri JOIN treasure_items ti ON ti.id=ri.item_id LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ri.item_id WHERE ri.recipe_id=$2 FOR UPDATE`,[uid,recipeId])).rows;for(const x of inv)if(Number(x.quantity||0)<Number(x.need)){await client.query('ROLLBACK');return res.status(400).json({error:`Thiếu ${x.name} ×${Number(x.need)}.`});}for(const x of inv)await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,x.item_id,Number(x.need)]);const fg=alchemyFurnaceGrade(furnace),successRate=Math.min(100,Number(o.success_rate)+alchemyFurnaceBonus(fg)),success=crypto.randomInt(1,101)<=successRate;if(success)await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,10,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+10,updated_at=NOW()`,[uid,o.output_item_id]);await client.query('COMMIT');res.json({ok:true,success,recipe:o.name,furnace:furnace.name,furnaceGrade:fg,successRate,message:success?`🔥 ${furnace.name} luyện thành công ${o.name.replace(' Pháp','')} · nhận 10 đan.`:`🔥 Hỏa hầu nghịch hành · luyện đan thất bại, linh dược đã tiêu hao.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy brew direct:',e);res.status(500).json({error:'Luyện đan thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}});
 
-app.post('/api/dan-phap/exchange',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,id=Number(req.body?.itemId),qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));const item=(await client.query(`SELECT ti.id,ti.name,ti.price FROM treasure_items ti JOIN alchemy_recipes ar ON ar.output_item_id=ti.id WHERE ti.id=$1 AND ar.active=true FOR UPDATE`,[id])).rows[0];const inv=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,id])).rows[0];if(!item||!inv||Number(inv.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Đan dược không đủ để trao đổi.'});}const total=Number(item.price)*qty;await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,id,qty]);await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[uid,total]);await client.query('COMMIT');res.json({ok:true,total,message:`Đã trao đổi ${item.name} ×${qty}, nhận ${total.toLocaleString('vi-VN')} linh thạch.`});}catch(e){try{await client.query('ROLLBACK')}catch{}res.status(500).json({error:'Trao đổi đan dược thất bại.'});}finally{client.release();}});
+app.post('/api/dan-phap/exchange',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,id=Number(req.body?.itemId),qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));const item=(await client.query(`SELECT ti.id,ti.name,ti.price FROM treasure_items ti JOIN alchemy_recipes ar ON ar.output_item_id=ti.id WHERE ti.id=$1 AND ar.active=true FOR UPDATE`,[id])).rows[0];const inv=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,id])).rows[0];if(!item||!inv||Number(inv.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Đan dược không đủ để trao đổi.'});}const total=Number(item.price)*qty;await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,id,qty]);await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[uid,total]);await client.query('COMMIT');res.json({ok:true,total,message:`Đã trao đổi ${item.name} ×${qty}, nhận ${total.toLocaleString('vi-VN')} linh thạch.`});}catch(e){try{await client.query('ROLLBACK')}catch{}res.status(500).json({error:'Trao đổi đan dược thất bại.'});}finally{client.release();}});
 
 app.get('/api/inventory',auth,async(req,res)=>{
   try{const r=await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.power_bonus,ti.ability,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC`,[req.session.user_id]);res.json({rows:r.rows});}
@@ -4073,7 +4079,7 @@ app.post('/api/dan-duong/invite/respond',auth,async(req,res)=>{
     const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' FOR SHARE`)).rows[0]?.user_id||null;
     const ownerBonus=owner&&Number(owner)!==uid?Math.floor(Number(inv.price)*0.20):0;
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,inv.price]);
-    if(ownerBonus)await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
+    if(ownerBonus)await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
     const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW() RETURNING quantity`,[uid,inv.item_id]);
     await client.query(`UPDATE dan_duong_member_invites SET status='accepted',responded_at=NOW() WHERE id=$1`,[id]);
     await client.query('COMMIT');
@@ -4103,7 +4109,7 @@ app.post('/api/dan-duong/exchange',auth,async(req,res)=>{
     const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' FOR SHARE`)).rows[0]?.user_id||null;
     const ownerBonus=owner&&Number(owner)!==Number(req.session.user_id)?Math.floor(total*0.20):0;
     await client.query('UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1',[req.session.user_id,total]);
-    if(ownerBonus) await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
+    if(ownerBonus) await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
     const ir=await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW() RETURNING quantity`,[req.session.user_id,id,qty]);
     await client.query('COMMIT');
     res.json({ok:true,item:item.name,grade:item.category.split('·').pop().trim(),quantity:qty,totalQuantity:Number(ir.rows[0].quantity),spent:total,ownerBonus,message:`Đã đổi ${total.toLocaleString('vi-VN')} linh thạch lấy ${item.name} ×${qty}.${ownerBonus?` Đan Chủ nhận ${ownerBonus.toLocaleString('vi-VN')} linh thạch (20%).`:''}`});
@@ -4285,7 +4291,9 @@ async function ensureEquipmentSchemaImpl(){
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
-    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE treasure_items ALTER COLUMN buyback_price TYPE BIGINT USING COALESCE(buyback_price,0)::BIGINT;
+    ALTER TABLE treasure_items ALTER COLUMN buyback_price SET DEFAULT 0;
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
     ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
@@ -4534,7 +4542,7 @@ async function secretRealmLoot(client,userId,realm){
   const roll=crypto.randomInt(1,101);
   if(roll<=18){
     const stones=Math.max(30,Math.floor((tier+1)*crypto.randomInt(40,91)));
-    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[userId,stones]);
+    await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[userId,stones]);
     return {type:'stones',stones,quantity:0};
   }
   if(roll<=42){
@@ -5120,7 +5128,7 @@ async function settleChallengeBets(client,challengeId,winnerId){
   if(!winning.length){
     for(const b of bets){
       const refund=Math.max(0,Number(b.amount)||0);
-      await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,refund]);
+      await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,refund]);
       const message=`Lôi đài #${challengeId} đã kết thúc. Không có người thắng phù hợp với cửa bạn đặt, ${refund.toLocaleString('vi-VN')} linh thạch đã được hoàn lại.`;
       await client.query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data) VALUES($1,$2,$3,$4,$5,$6)`,[b.bettor_id,'challenge_bet','💎 Hoàn linh thạch cược',message,'#challenge',JSON.stringify({action:'challenge_bet_result',challengeId:Number(challengeId),payout:refund,result:'refunded'})]);
       notices.push({bettorId:Number(b.bettor_id),result:'refunded',payout:refund});
@@ -5134,7 +5142,7 @@ async function settleChallengeBets(client,challengeId,winnerId){
     if(Number(b.bet_on_user_id)!==Number(winnerId))continue;
     const payout=Math.max(1,Math.round(amount*1.5));
     payoutTotal+=payout;
-    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,payout]);
+    await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,payout]);
     const message=`🎉 Bạn đã đặt cược thắng tại Lôi đài #${challengeId} và nhận ${payout.toLocaleString('vi-VN')} linh thạch (150% tiền cược).`;
     await client.query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data) VALUES($1,$2,$3,$4,$5,$6)`,[b.bettor_id,'challenge_bet','🏆 Cược thắng · Nhận linh thạch',message,'#challenge',JSON.stringify({action:'challenge_bet_result',challengeId:Number(challengeId),payout,result:'won'})]);
     notices.push({bettorId:Number(b.bettor_id),result:'won',payout});
@@ -5414,7 +5422,7 @@ app.post('/api/disciples/gift',auth,async(req,res)=>{
     if(giftType==='stones'){
       if(Number(sender.spirit_stones)<qty){await client.query('ROLLBACK');return res.status(400).json({error:`Sư phụ không đủ linh thạch. Hiện có ${Number(sender.spirit_stones).toLocaleString('vi-VN')}.`});}
       await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,qty]);
-      await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[target,qty]);
+      await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[target,qty]);
       await client.query('COMMIT');
       return res.json({ok:true,giftType,quantity:qty,message:`Đã ban tặng 💎 ${qty.toLocaleString('vi-VN')} linh thạch cho đệ tử.`});
     }
