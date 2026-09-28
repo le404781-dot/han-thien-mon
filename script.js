@@ -841,7 +841,8 @@ async function loadDuongThu(){
 async function loadBeastArena(){
  const area=$('#beastArenaArea'); if(!area||!getToken())return;
  try{
-  const d=await api('/api/beast-arena',{headers:authHeaders()}); const beasts=d.beasts||[],members=d.members||[],npcs=d.npcs||[],pending=d.pending||[],history=d.history||[],activeBattle=d.activeBattle||null;
+  const d=await api('/api/beast-arena',{headers:authHeaders()}); const beasts=d.beasts||[],members=d.members||[],npcs=d.npcs||[],pending=d.pending||[],history=d.history||[],activeBattle=d.activeBattle||null,usage=d.usage||{used:0,limit:5,remaining:5,windowHours:24};
+  const beastLimitReached=Number(usage.remaining)<=0;
   const typeOf=b=>b.beast_type||b.type||'Linh';
   const skillsFor=b=>{const t=typeOf(b);const pools={Kim:['Kim Cương · Phá Giáp','Thiên Kim · Kiếm Vũ'],Mộc:['Thanh Mộc · Sinh Trưởng','Mộc Linh · Quấn Thân'],Thủy:['Thủy Nguyệt · Triều Dâng','Hàn Thủy · Băng Kích'],Hỏa:['Xích Viêm · Phần Thiên','Hỏa Vũ · Liệt Bạo'],Thổ:['Hậu Thổ · Sơn Nhạc','Địa Trấn · Phong Ấn'],Phong:['Thanh Phong · Loạn Vũ','Phong Nhận · Thiên Trảm'],Lôi:['Tử Lôi · Thiên Phạt','Lôi Động · Bạo Kích'],Băng:['Hàn Nguyệt · Băng Phong','Băng Phách · Tuyệt Sát'],Ảo:['Huyễn Cảnh · Mê Tâm','Ảo Ảnh · Phân Thân'],Long:['Long Uy · Chấn Thiên','Long Viêm · Phần Giới'],Linh:['Linh Quang · Trấn Áp','Linh Khí · Hộ Thể']}[t]||['Tuyệt Kỹ · Liệt Kích','Tuyệt Kỹ · Phá Hồn'];return [b.skill||'Thiên Phú Linh Thú',pools[0],pools[1]]};
   const rarityMultClient=r=>String(r||'').includes('Thần Thoại')?1.35:String(r||'').includes('Cực Phẩm')?1.2:String(r||'').includes('Thượng Phẩm')?1.1:1;
