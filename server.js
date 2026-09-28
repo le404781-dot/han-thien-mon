@@ -3491,17 +3491,21 @@ app.post('/api/black-market/sell',auth,async(req,res)=>{
     let row;
     if(type==='immortal-artifact'){
       row=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.price AS price_stones,ti.power_bonus,ti.reward_grade,ti.category,
-        (p.equipped_immortal_artifact_id=ti.id) AS equipped
-        FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id
+        (p.equipped_immortal_artifact_id=ti.id) AS equipped,
+        CASE WHEN p.equipped_immortal_artifact_id=ti.id THEN 1 ELSE 0 END AS equipped_quantity
+        FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+        LEFT JOIN profiles p ON p.user_id=i.user_id
         WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' FOR UPDATE`,[uid,id])).rows[0];
     } else if(type==='root'){
       row=(await client.query(`SELECT o.root_id AS id,o.quantity,o.non_sellable_quantity,c.name,c.price_stones,c.power_bonus FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.root_id=$2 FOR UPDATE`,[uid,id])).rows[0];
     }else{
       row=(await client.query(`SELECT o.beast_id AS id,o.quantity,o.non_sellable_quantity,c.name,c.price_stones,c.power_bonus FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 FOR UPDATE`,[uid,id])).rows[0];
     }
-    const sellable=type==='immortal-artifact'?Number(row?.quantity||0):Math.max(0,Number(row?.quantity||0)-Number(row?.non_sellable_quantity||0));
+    const sellable=type==='immortal-artifact'
+      ?Math.max(0,Number(row?.quantity||0)-Number(row?.equipped_quantity||0))
+      :Math.max(0,Number(row?.quantity||0)-Number(row?.non_sellable_quantity||0));
     if(!row||sellable<qty){await client.query('ROLLBACK');return res.status(400).json({error:row&&type!=='immortal-artifact'&&Number(row.non_sellable_quantity||0)>0?`Có ${Number(row.non_sellable_quantity)} linh thú/linh căn từ Gieo Duyên đang bị khóa bán. Chỉ có thể bán phần còn lại.`:'Số lượng có thể bán trong kho không đủ.'});}
-    if(type==='immortal-artifact' && row.equipped){await client.query('ROLLBACK');return res.status(400).json({error:'Tiên Khí đang trang bị. Hãy tháo Tiên Khí trước khi bán.'});}
+    if(type==='immortal-artifact' && row.equipped && qty>sellable){await client.query('ROLLBACK');return res.status(400).json({error:'Tiên Khí đang trang bị 1 bản. Chỉ có thể bán phần Tiên Khí chưa trang bị; hãy tháo Tiên Khí nếu muốn bán toàn bộ.'});}
     const unit=type==='immortal-artifact'?Math.max(1,Math.floor(Number(row.price_stones||0))):Math.max(50,Math.floor(Number(row.price_stones||0)*0.60 + Number(row.power_bonus||0)*2));
     const total=unit*qty;
     const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='black-market' FOR SHARE`)).rows[0]?.user_id||null;

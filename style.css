@@ -1782,3 +1782,21 @@ body.function-only-focus main{display:block!important;height:calc(100dvh - 72px)
 .member-immortal-artifact-badge,.member-immortal-artifact-detail{margin-top:8px;padding:8px 10px;border:1px solid rgba(220,184,82,.42);background:linear-gradient(90deg,rgba(180,135,38,.08),rgba(255,255,255,.02),rgba(180,135,38,.08));box-shadow:0 0 14px rgba(205,164,63,.08);border-radius:9px;color:var(--muted);font-size:.7rem}
 .member-immortal-artifact-badge{position:relative;overflow:hidden}.member-immortal-artifact-badge span{color:var(--gold);font-size:.9rem}.member-immortal-artifact-detail h3{margin:4px 0;color:var(--jade)}.member-immortal-artifact-detail p{margin:0;color:var(--muted);font-size:.75rem;line-height:1.5}
 @media(prefers-reduced-motion:reduce){.immortal-artifact-wing-slot::before,.immortal-artifact-wing-slot::after,.immortal-artifact-wing-slot .slot-avatar{animation:none!important}}
+
+/* v3.7.10 · Tiên Khí: đôi cánh vỗ nhẹ quanh ảnh đại diện */
+.immortal-artifact-avatar-winged{position:relative;display:inline-grid;place-items:center;width:72px;height:72px;isolation:isolate}
+.immortal-artifact-avatar-winged>.avatar-img,.immortal-artifact-avatar-winged>.immortal-artifact-glyph{position:relative;z-index:3;width:52px;height:52px;display:grid;place-items:center;object-fit:cover;border:1px solid rgba(239,211,137,.85);border-radius:50%;background:rgba(8,20,18,.88);box-shadow:0 0 10px rgba(239,211,137,.3),inset 0 0 12px rgba(239,211,137,.08)}
+.immortal-artifact-avatar-winged>.immortal-artifact-glyph{font-size:1.65rem}
+.immortal-wing{position:absolute;z-index:1;top:16px;width:28px;height:40px;opacity:.78;transform-origin:center bottom;filter:drop-shadow(0 0 5px rgba(239,211,137,.38));background:linear-gradient(135deg,rgba(255,244,194,.88),rgba(190,143,48,.32));clip-path:polygon(100% 0,72% 12%,55% 34%,38% 25%,18% 47%,0 43%,24% 68%,11% 83%,45% 76%,61% 100%,72% 72%,100% 58%,78% 39%);}
+.immortal-wing-left{left:-1px;transform:scaleX(-1) rotate(-8deg);animation:immortalWingLeft 2.7s ease-in-out infinite}
+.immortal-wing-right{right:-1px;transform:rotate(-8deg);animation:immortalWingRight 2.7s ease-in-out infinite}
+@keyframes immortalWingLeft{0%,100%{transform:scaleX(-1) rotate(-8deg) translateY(1px)}50%{transform:scaleX(-1) rotate(-19deg) translateY(-2px) scaleY(.94)}}
+@keyframes immortalWingRight{0%,100%{transform:rotate(-8deg) translateY(1px)}50%{transform:rotate(-19deg) translateY(-2px) scaleY(.94)}}
+.immortal-artifact-wing-slot .slot-avatar{width:76px!important;height:76px!important;overflow:visible!important;border:0!important;background:transparent!important;box-shadow:none!important}
+.immortal-artifact-item-avatar{overflow:visible!important;border:0!important;background:transparent!important;box-shadow:none!important;width:76px!important;height:76px!important;flex-basis:76px!important}
+.member-immortal-artifact-badge{display:flex;align-items:center;gap:7px;overflow:visible}
+.member-immortal-artifact-visual{display:inline-grid;flex:0 0 68px;width:68px;height:68px;place-items:center}
+.member-immortal-artifact-info{min-width:0;line-height:1.45}
+.member-immortal-artifact-detail-avatar{display:flex;justify-content:center;margin:8px 0 4px}
+@media(max-width:620px){.immortal-artifact-avatar-winged{width:62px;height:62px}.immortal-artifact-avatar-winged>.avatar-img,.immortal-artifact-avatar-winged>.immortal-artifact-glyph{width:44px;height:44px}.immortal-wing{width:24px;height:34px;top:14px}.immortal-artifact-item-avatar{width:66px!important;height:66px!important;flex-basis:66px!important}.member-immortal-artifact-visual{flex-basis:60px;width:60px;height:60px}}
+@media(prefers-reduced-motion:reduce){.immortal-wing-left,.immortal-wing-right{animation:none}}
