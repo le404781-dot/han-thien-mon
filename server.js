@@ -1972,7 +1972,7 @@ async function initDb() {
   await query(`UPDATE profiles p SET equipped_immortal_artifact_id=NULL
       WHERE p.user_id=$1 AND p.equipped_immortal_artifact_id IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
-        WHERE i.user_id=p.user_id AND i.item_id=p.equipped_immortal_artifact_id AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%')`,[userId]);
+        WHERE i.user_id=p.user_id AND i.item_id=p.equipped_immortal_artifact_id AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%')`,[userId]);
     await query(`UPDATE profiles p SET equipped_artifact_id=NULL WHERE equipped_artifact_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM inventory i WHERE i.user_id=p.user_id AND i.item_id=p.equipped_artifact_id AND i.quantity>0)`);
 
   const qCount = await query('SELECT COUNT(*)::int AS c FROM sect_quests');
@@ -2061,14 +2061,13 @@ async function addDailyActivity(userId, field, amount=1) {
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(__dirname, {
   maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
-  setHeaders(res, filePath) {
-    if (/\.(?:js|css|png|jpe?g|webp|svg|ico)$/i.test(filePath)) res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=604800, stale-while-revalidate=86400' : 'no-cache');
-  },
   etag: true,
   lastModified: true,
   setHeaders(res, filePath) {
     if (/\.html$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache');
+    } else if (/\.(?:js|css|png|jpe?g|webp|svg|ico)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=604800, stale-while-revalidate=86400' : 'no-cache');
     } else {
       res.setHeader('Cache-Control', 'public, max-age=600');
     }
@@ -2749,6 +2748,7 @@ app.post('/api/professions/claim',auth,async(req,res)=>{
 let __dataCache=null;
 let __dataCacheAt=0;
 app.get('/api/data',async(req,res)=>{
+  res.setHeader('Cache-Control','private, max-age=5, stale-while-revalidate=5');
   if(__dataCache && Date.now()-__dataCacheAt<5000) return res.json(__dataCache);
   try {
     const [m,t,u] = await Promise.all([
@@ -3474,7 +3474,7 @@ app.get('/api/black-market',auth,async(req,res)=>{
       query(`SELECT o.beast_id AS id,o.quantity,o.non_sellable_quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.price_stones,c.power_bonus,c.ability
              FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.price_stones DESC,c.id`,[uid]),
       query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.reward_grade AS rarity,ti.description,ti.price AS price_stones,ti.power_bonus,ti.ability
-             FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%' ORDER BY ti.price DESC,ti.id`,[uid])
+             FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' ORDER BY ti.price DESC,ti.id`,[uid])
     ]);
     const calc=(price,bonus)=>Math.max(50,Math.floor(Number(price||0)*0.60 + Number(bonus||0)*2));
     res.json({roots:roots.rows.map(x=>({...x,sellable_quantity:Math.max(0,Number(x.quantity)-Number(x.non_sellable_quantity||0)),sell_price:calc(x.price_stones,x.power_bonus)})),beasts:beasts.rows.map(x=>({...x,sellable_quantity:Math.max(0,Number(x.quantity)-Number(x.non_sellable_quantity||0)),sell_price:calc(x.price_stones,x.power_bonus)})),immortalArtifacts:immortalArtifacts.rows.map(x=>({...x,sellable_quantity:Number(x.quantity||0),sell_price:Number(x.price_stones||0)}))});
@@ -3490,7 +3490,10 @@ app.post('/api/black-market/sell',auth,async(req,res)=>{
     await client.query('BEGIN');
     let row;
     if(type==='immortal-artifact'){
-      row=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.price AS price_stones,ti.power_bonus,ti.reward_grade FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%' FOR UPDATE`,[uid,id])).rows[0];
+      row=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.price AS price_stones,ti.power_bonus,ti.reward_grade,ti.category,
+        (p.equipped_immortal_artifact_id=ti.id) AS equipped
+        FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id
+        WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' FOR UPDATE`,[uid,id])).rows[0];
     } else if(type==='root'){
       row=(await client.query(`SELECT o.root_id AS id,o.quantity,o.non_sellable_quantity,c.name,c.price_stones,c.power_bonus FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.root_id=$2 FOR UPDATE`,[uid,id])).rows[0];
     }else{
@@ -3498,7 +3501,8 @@ app.post('/api/black-market/sell',auth,async(req,res)=>{
     }
     const sellable=type==='immortal-artifact'?Number(row?.quantity||0):Math.max(0,Number(row?.quantity||0)-Number(row?.non_sellable_quantity||0));
     if(!row||sellable<qty){await client.query('ROLLBACK');return res.status(400).json({error:row&&type!=='immortal-artifact'&&Number(row.non_sellable_quantity||0)>0?`Có ${Number(row.non_sellable_quantity)} linh thú/linh căn từ Gieo Duyên đang bị khóa bán. Chỉ có thể bán phần còn lại.`:'Số lượng có thể bán trong kho không đủ.'});}
-    const unit=type==='immortal-artifact'?Math.max(1,Number(row.price_stones||0)):Math.max(50,Math.floor(Number(row.price_stones||0)*0.60 + Number(row.power_bonus||0)*2));
+    if(type==='immortal-artifact' && row.equipped){await client.query('ROLLBACK');return res.status(400).json({error:'Tiên Khí đang trang bị. Hãy tháo Tiên Khí trước khi bán.'});}
+    const unit=type==='immortal-artifact'?Math.max(1,Math.floor(Number(row.price_stones||0))):Math.max(50,Math.floor(Number(row.price_stones||0)*0.60 + Number(row.power_bonus||0)*2));
     const total=unit*qty;
     const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='black-market' FOR SHARE`)).rows[0]?.user_id||null;
     const ownerBonus=owner&&Number(owner)!==uid?Math.floor(total*0.20):0;
@@ -4298,7 +4302,7 @@ app.get('/api/equipment',auth,async(req,res)=>{
     await query(`UPDATE profiles p SET equipped_immortal_artifact_id=NULL
       WHERE p.user_id=$1 AND p.equipped_immortal_artifact_id IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
-        WHERE i.user_id=p.user_id AND i.item_id=p.equipped_immortal_artifact_id AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%')`,[userId]);
+        WHERE i.user_id=p.user_id AND i.item_id=p.equipped_immortal_artifact_id AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%')`,[userId]);
     await query(`UPDATE profiles p SET equipped_artifact_id=NULL
       WHERE p.user_id=$1 AND p.equipped_artifact_id IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
@@ -4321,7 +4325,7 @@ app.get('/api/equipment',auth,async(req,res)=>{
         WHERE i.user_id=$1 AND i.quantity>0
           AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
         ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
-      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.ability,COALESCE(i.avatar,ti.avatar) AS avatar,(p.equipped_immortal_artifact_id=ti.id) AS equipped FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id WHERE i.user_id=$1 AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%' ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.ability,COALESCE(i.avatar,ti.avatar) AS avatar,(p.equipped_immortal_artifact_id=ti.id) AS equipped FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id WHERE i.user_id=$1 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
       query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,ut.avatar,(p.equipped_technique_id=ct.id) AS equipped
         FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id
         WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[userId]),
@@ -4348,7 +4352,7 @@ app.patch('/api/equipment/avatar',auth,async(req,res)=>{
     let r;
     if(type==='beast') r=await query('UPDATE owned_spirit_beasts SET avatar=$3 WHERE user_id=$1 AND beast_id=$2 AND quantity>0 RETURNING avatar',[uid,id,avatar]);
     else if(type==='artifact') r=await query(`UPDATE inventory i SET avatar=$3 FROM treasure_items ti WHERE i.user_id=$1 AND i.item_id=$2 AND i.item_id=ti.id AND i.quantity>0 AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí') RETURNING i.avatar`,[uid,id,avatar]);
-    else if(type==='immortal-artifact') r=await query(`UPDATE inventory i SET avatar=$3 FROM treasure_items ti WHERE i.user_id=$1 AND i.item_id=$2 AND i.item_id=ti.id AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%' RETURNING i.avatar`,[uid,id,avatar]);
+    else if(type==='immortal-artifact') r=await query(`UPDATE inventory i SET avatar=$3 FROM treasure_items ti WHERE i.user_id=$1 AND i.item_id=$2 AND i.item_id=ti.id AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' RETURNING i.avatar`,[uid,id,avatar]);
     else r=await query('UPDATE user_techniques SET avatar=$3 WHERE user_id=$1 AND technique_id=$2 RETURNING avatar',[uid,id,avatar]);
     if(!r.rowCount)return res.status(404).json({error:'Không tìm thấy vật phẩm/công pháp thuộc về bạn.'});
     res.json({ok:true,avatar:r.rows[0].avatar,message:'Đã đổi ảnh đại diện.'});
@@ -4374,7 +4378,7 @@ app.post('/api/equipment/equip',auth,async(req,res)=>{
       if(ri<Number(x.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`Linh căn yêu cầu ${RANKS[Number(x.min_realm)]?.name||'cảnh giới cao hơn'}.`});}
       name=x.name;power=Number(x.power_bonus)||0;ability=x.ability||'';col='equipped_root_id';
     } else if(type==='immortal-artifact') {
-      const x=(await client.query(`SELECT ti.* FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%' FOR UPDATE`,[req.session.user_id,id])).rows[0];
+      const x=(await client.query(`SELECT ti.* FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' FOR UPDATE`,[req.session.user_id,id])).rows[0];
       if(!x){await client.query('ROLLBACK');return res.status(404).json({error:'Tiên Khí này không nằm trong Tu Di Giới của bạn.'});}
       if(ri<Number(x.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`Tiên Khí yêu cầu ${RANKS[Number(x.min_realm)]?.name||'cảnh giới cao hơn'}.`});}
       name=x.name;power=Number(x.power_bonus)||0;ability=x.ability||'';artifactGrade=x.reward_grade||'';artifactSpiritGain=Number(x.spirit_gain)||0;col='equipped_immortal_artifact_id';

@@ -13,12 +13,20 @@ const fmtDate=v=>v?new Date(v).toLocaleDateString('vi-VN'):'—';
 const REALM_NAMES=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao'];
 const realmIndexOf=name=>Math.max(0,REALM_NAMES.indexOf(String(name||'')));
 
+const __inflightGets=new Map();
 async function api(url,opts={}){
- const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...(opts.body&&typeof opts.body==='string'?{'Content-Type':'application/json'}:{})}});
- let d={}; try{d=await r.json();}catch{}
- if(!r.ok){const e=new Error(d.error||'Có lỗi xảy ra.');e.status=r.status;throw e;}
- if(d&&typeof d==='object')d._status=r.status;
- return d;
+ const method=String(opts.method||'GET').toUpperCase();
+ const key=method==='GET'?`${url}|${getToken()||''}`:null;
+ if(key&&__inflightGets.has(key))return __inflightGets.get(key);
+ const run=(async()=>{
+  const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...(opts.body&&typeof opts.body==='string'?{'Content-Type':'application/json'}:{})}});
+  let d={}; try{d=await r.json();}catch{}
+  if(!r.ok){const e=new Error(d.error||'Có lỗi xảy ra.');e.status=r.status;throw e;}
+  if(d&&typeof d==='object')d._status=r.status;
+  return d;
+ })();
+ if(key){__inflightGets.set(key,run);try{return await run;}finally{if(__inflightGets.get(key)===run)__inflightGets.delete(key);}}
+ return run;
 }
 
 async function sendPresenceHeartbeat(){
@@ -399,7 +407,7 @@ function startRewardWatcher(){
  if(rewardWatchTimer)clearInterval(rewardWatchTimer);
  rewardSnapshot=null;
  pollRewardSnapshot(true);
- rewardWatchTimer=setInterval(()=>{if(document.hidden)return;pollRewardSnapshot(false);},5000);
+ rewardWatchTimer=setInterval(()=>{if(document.hidden)return;pollRewardSnapshot(false);},15000);
 }
 
 async function loadProfile(){
@@ -452,8 +460,8 @@ async function onlineCultivationTick(){
       const msg=$('#trainMsg'); if(msg)msg.textContent=d.message||`☁ Online: +${gain.toLocaleString('vi-VN')} linh lực · ${Number(d.rate||0).toLocaleString('vi-VN')}/phút.`;
       renderProfile(currentProfile);
       renderCultivation(currentProfile);
-      await loadProfile();
-      await loadLeaderboard();
+      // Không reload toàn bộ hồ sơ mỗi 5 giây: loadProfile kéo theo hàng loạt API.
+      // Chỉ cập nhật giao diện cục bộ; leaderboard được làm mới theo chu kỳ chung.
     }
   }catch(e){
     const status=$('#onlineStatus');
@@ -586,7 +594,7 @@ async function loadEquipment(){
   const beastCards=(d.beasts||[]).map(x=>`<article class="equipment-item item-avatar-picker"><div class="equipment-item-head"><div class="item-avatar">${beastAvatarHtml(x.avatar||x.default_avatar,x.beast_realm_tier,'',x.name)}</div><div><span class="eyebrow">🐉 ${esc(x.rarity)} · ${esc(x.beast_realm)} ${x.beast_realm_tier}</span></div></div><label class="item-avatar-upload">🖼 Đổi ảnh<input class="item-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-type="beast" data-id="${x.beast_id}"></label><h3>${esc(x.name)} ×${x.quantity}</h3><p>⚔ ${x.attack} · 🛡 ${x.defense} · 💨 ${x.speed} · ☯ ${x.spirit}</p><span class="equip-meta">Chiến lực +${Number(x.power_bonus||0).toLocaleString('vi-VN')}</span><p>${esc(x.ability||x.skill||'—')}</p><div class="equipment-actions"><button class="btn small primary" data-equip-type="beast" data-equip-id="${x.beast_id}">Trang bị</button></div></article>`).join('');
   const rootCards=(d.roots||[]).map(x=>`<article class="equipment-item"><span class="eyebrow">🌿 ${esc(x.rarity)}</span><h3>${esc(x.name)} ×${x.quantity}</h3><p>${esc(x.support)}</p><span class="equip-meta">Chiến lực +${Number(x.power_bonus||0).toLocaleString('vi-VN')}</span><p>${esc(x.ability||'—')}</p><div class="equipment-actions"><button class="btn small primary" data-equip-type="root" data-equip-id="${x.root_id}">Trang bị</button></div></article>`).join('');
   const artifactCards=(d.artifacts||[]).map(x=>`<article class="equipment-item item-avatar-picker"><div class="equipment-item-head"><div class="item-avatar">${avatarHtml(x.avatar||x.default_avatar)}</div><div><span class="eyebrow">⚔ ${esc(x.category)} · ×${x.quantity}</span></div></div><label class="item-avatar-upload">🖼 Đổi ảnh<input class="item-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-type="artifact" data-id="${x.id}"></label><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><span class="equip-meta">Chiến lực +${Number(x.power_bonus||0).toLocaleString('vi-VN')}</span><p>${esc(x.ability||'Không có công năng riêng.')}</p><div class="equipment-actions"><button class="btn small primary" data-equip-type="artifact" data-equip-id="${x.id}">Trang bị</button></div></article>`).join('');
-  const immortalArtifactCards=(immortalArtifacts||[]).map(x=>`<article class="equipment-item item-avatar-picker"><div class="equipment-item-head"><div class="item-avatar">${avatarHtml(x.avatar||x.default_avatar)}</div><div><span class="eyebrow">⚜️ TIÊN KHÍ · ×${x.quantity}</span></div></div><label class="item-avatar-upload">🖼 Đổi ảnh<input class="item-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-type="immortal-artifact" data-id="${x.id}"></label><h3>${esc(x.name)}</h3><p>${esc(x.description||'')}</p><span class="equip-meta">${esc(x.reward_grade||'Tiên Khí')} · Chiến lực +${Number(x.power_bonus||0).toLocaleString('vi-VN')} · Linh lực +${Number(x.spirit_gain||0).toLocaleString('vi-VN')}</span><p>${esc(x.ability||'Không có công năng riêng.')}</p><div class="equipment-actions"><button class="btn small primary" data-equip-type="immortal-artifact" data-equip-id="${x.id}">Trang bị</button></div></article>`).join('');
+  const immortalArtifactCards=(immortalArtifacts||[]).map(x=>`<article class="equipment-item item-avatar-picker"><div class="equipment-item-head"><div class="item-avatar">${avatarHtml(x.avatar||x.default_avatar)}</div><div><span class="eyebrow">⚜️ TIÊN KHÍ · ×${x.quantity}</span></div></div><div class="item-avatar-actions"><label class="item-avatar-upload">🖼 Đổi ảnh<input class="item-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-type="immortal-artifact" data-id="${x.id}"></label><button type="button" class="item-avatar-reset" data-avatar-reset="immortal-artifact" data-id="${x.id}">↺ Ảnh mặc định</button></div><h3>${esc(x.name)}</h3><p>${esc(x.description||'')}</p><span class="equip-meta">${esc(x.reward_grade||'Tiên Khí')} · Chiến lực +${Number(x.power_bonus||0).toLocaleString('vi-VN')} · Linh lực +${Number(x.spirit_gain||0).toLocaleString('vi-VN')}</span><p>${esc(x.ability||'Không có công năng riêng.')}</p><div class="equipment-actions"><button class="btn small primary" data-equip-type="immortal-artifact" data-equip-id="${x.id}">Trang bị</button></div></article>`).join('');
   const equippedImmortalArtifact=immortalArtifacts.find(x=>Boolean(x.equipped)||Number(x.id)===Number(e.equipped_immortal_artifact_id));
   const power=Number(e.equipment_power||0);
   const combat=Number(currentProfile?.attributes?.combatPower||0);
@@ -600,6 +608,15 @@ async function loadEquipment(){
   const et=$('#equipTechniqueBtn'); if(et)et.onclick=async()=>{const id=Number($('#equippedTechniqueSelect')?.value||0);if(!id){$('#equipmentMsg').textContent='❌ Hãy chọn công pháp.';return;}et.disabled=true;try{const x=await api('/api/techniques/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({techniqueId:id})});$('#equipmentMsg').textContent='✅ '+x.message;await loadProfile();await loadEquipment();}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;et.disabled=false;}};
   const ut=$('#unequipTechniqueBtn'); if(ut)ut.onclick=async()=>{ut.disabled=true;try{const x=await api('/api/techniques/unequip',{method:'POST',headers:authHeaders(),body:'{}'});$('#equipmentMsg').textContent='✅ '+x.message;await loadProfile();await loadEquipment();}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;ut.disabled=false;}};
   bindItemAvatarPickers(loadEquipment);
+  document.querySelectorAll('[data-avatar-reset]').forEach(btn=>btn.onclick=async()=>{
+   btn.disabled=true;
+   try{
+    const type=btn.dataset.avatarReset,id=Number(btn.dataset.id);
+    const r=await api('/api/equipment/avatar',{method:'PATCH',headers:authHeaders(),body:JSON.stringify({type,id,avatar:null})});
+    $('#equipmentMsg').textContent='↺ '+(r.message||'Đã khôi phục ảnh mặc định.');
+    await loadEquipment();
+   }catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;btn.disabled=false;}
+  });
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>Không thể mở Trang Bị</h3><p>${esc(e.message)}</p><button class="btn small primary" id="retryEquipmentBtn">↻ Thử lại</button></div>`;$('#retryEquipmentBtn').onclick=loadEquipment;}
 }
 
@@ -1373,9 +1390,8 @@ if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('colo
 setupTutorial();
 
 loadData();loadSect();checkSession();startRewardWatcher();
-setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},30000);
-setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},5000);
-setInterval(()=>{if(getToken()&&!document.hidden)sendPresenceHeartbeat();},45000);
+setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},60000);
+setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},10000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
 
 /* v3.6.47 · Điều hướng tập trung theo từng chức năng */
