@@ -1,0 +1,9 @@
+HÀN THIÊN MÔN v3.7.04
+
+- Tiên Khí: bổ sung nhiều tên gọi và phẩm cấp Hạ/Trung/Thượng/Cực/Tiên/Chí Tôn/Chí Cao.
+- Mỗi phẩm cấp có chiến lực và buff server-side cố định; buff được áp dụng vào sức mạnh, HP/phòng thủ và sát thương lôi đài.
+- Reytheon: tối thiểu Tiên Đế Nhất Tinh.
+- Cuu_Vi_Ho: tối thiểu Tiên Đế Nhất Tinh.
+- kien: tối thiểu Địa Tiên Nhất Tầng.
+- ho_linh_15: tối thiểu Kim Tiên Nhất Tầng.
+- Không hạ cảnh giới nếu tài khoản đã cao hơn.
