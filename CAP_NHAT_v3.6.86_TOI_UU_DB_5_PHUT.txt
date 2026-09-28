@@ -1,0 +1,13 @@
+HÀN THIÊN MÔN v3.6.86 — TỐI ƯU DATABASE / DỌN DỮ LIỆU 5 PHÚT
+
+- Đơn Đan Pháp đã rejected/completed/failed: dọn sau 5 phút.
+- Lịch sử Chợ Đen, Tửu Lâu, Tiên Bàn, Bí Cảnh, Khiêu Chiến, Thú Trường: dọn sau 5 phút.
+- Thông báo đã đọc, lời mời/giao dịch đã xử lý, activity log: dọn sau 5 phút.
+- Chat chung: dọn sau 5 phút.
+- Tin nhắn riêng đã đọc: dọn sau 5 phút; tin chưa đọc giữ nguyên.
+- Kho quantity <= 0: xóa dòng rỗng, gồm inventory/tavern_inventory/owned_spirit_beasts/owned_spirit_roots.
+- Battle log JSONB cũ được xóa payload trước/đồng thời với việc dọn record để giảm dung lượng.
+- Maintenance chạy mỗi 5 phút thay vì 30 phút.
+- Thêm index phục vụ cleanup để DELETE theo thời gian/trạng thái không phải quét toàn bảng.
+- Không xóa dữ liệu quan trọng: users, profiles, linh lực/linh thạch, vật phẩm còn số lượng, linh thú/linh căn còn số lượng, công pháp, bằng hữu, bài viết, tiến trình hiện tại, Đan Phòng đang thuê.
+- Không DROP bảng/cột cũ để tránh phá API production; chỉ dọn record tạm và tối ưu đường truy vấn.

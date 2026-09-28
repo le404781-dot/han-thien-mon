@@ -947,9 +947,8 @@ async function ensureAlchemySchemaImpl(){
     await query('DELETE FROM alchemy_recipe_ingredients WHERE recipe_id=$1',[r.id]);
     for(const [ingName,qty] of ings){const ing=(await query('SELECT id FROM treasure_items WHERE name=$1',[ingName])).rows[0]; if(ing) await query('INSERT INTO alchemy_recipe_ingredients(recipe_id,item_id,quantity) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[r.id,ing.id,qty]);}
   }
-}
-
   await query(`UPDATE alchemy_rooms SET room_grade=CASE WHEN realm_index>=12 THEN 'Tiên Phẩm' WHEN realm_index>=9 THEN 'Cực Phẩm' WHEN realm_index>=6 THEN 'Thượng Phẩm' WHEN realm_index>=3 THEN 'Trung Phẩm' ELSE 'Hạ Phẩm' END WHERE room_grade='Hạ Phẩm' OR room_grade IS NULL`);
+}
 
 const ALCHEMY_ROOM_GRADES=[
   {grade:'Hạ Phẩm',price:10000,minRealm:0,furnaceBonus:0},
@@ -4818,22 +4817,30 @@ async function settleChallengeBets(client,challengeId,winnerId){
   if(!bets.length)return {pool:0,payout:0,winners:0};
   const pool=bets.reduce((n,b)=>n+Number(b.amount||0),0);
   const winning=bets.filter(b=>Number(b.bet_on_user_id)===Number(winnerId));
+  // Không có ai cược đúng người thắng: hoàn lại toàn bộ tiền cược.
   if(!winning.length){
-    for(const b of bets){await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,Number(b.amount)]);await client.query(`UPDATE challenge_bets SET status='refunded',payout=$2,settled_at=NOW() WHERE id=$1`,[b.id,Number(b.amount)]);}
-    return {pool,payout:pool,winners:0,refunded:true};
+    for(const b of bets){
+      const refund=Math.max(0,Number(b.amount)||0);
+      await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,refund]);
+      await client.query(`UPDATE challenge_bets SET status='refunded',payout=$2,settled_at=NOW() WHERE id=$1`,[b.id,refund]);
+    }
+    return {pool,payout:pool,winners:0,refunded:true,multiplier:1.5};
   }
-  const winTotal=winning.reduce((n,b)=>n+Number(b.amount||0),0);
-  let distributed=0;
+  // Luật mới: người cược đúng nhận tổng cộng 150% tiền đã đặt (tiền gốc + 50% thưởng).
+  // Dùng Math.round vì linh thạch là số nguyên; ví dụ 100 -> 150.
+  let payoutTotal=0;
   for(const b of bets){
-    if(Number(b.bet_on_user_id)!==Number(winnerId)){await client.query(`UPDATE challenge_bets SET status='lost',payout=0,settled_at=NOW() WHERE id=$1`,[b.id]);continue;}
-    const payout=Math.floor(pool*Number(b.amount)/winTotal);
-    distributed+=payout;
+    const amount=Math.max(0,Number(b.amount)||0);
+    if(Number(b.bet_on_user_id)!==Number(winnerId)){
+      await client.query(`UPDATE challenge_bets SET status='lost',payout=0,settled_at=NOW() WHERE id=$1`,[b.id]);
+      continue;
+    }
+    const payout=Math.max(1,Math.round(amount*1.5));
+    payoutTotal+=payout;
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,payout]);
     await client.query(`UPDATE challenge_bets SET status='won',payout=$2,settled_at=NOW() WHERE id=$1`,[b.id,payout]);
   }
-  const remainder=pool-distributed;
-  if(remainder>0){const first=winning[0];await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[first.bettor_id,remainder]);await client.query(`UPDATE challenge_bets SET payout=payout+$2 WHERE id=$1`,[first.id,remainder]);}
-  return {pool,payout:pool,winners:winning.length};
+  return {pool,payout:payoutTotal,winners:winning.length,multiplier:1.5};
 }
 
 async function randomChallengeReward(client,userId,mode,qualityMode='normal'){
@@ -5913,44 +5920,3 @@ process.on('SIGINT',async()=>{
     process.exit(0);
   });
 });
-/* v3.6.76 · Venue roles: quyền chức vị dùng chung cho Chợ Đen/Đan Đường */
-async function loadVenueRole(venue){
-  return api('/api/venue-role/'+encodeURIComponent(venue),{headers:authHeaders()});
-}
-function venueRolePanel(role){
-  if(!role) return '';
-  const meta=role.meta||{};
-  const owner=role.owner;
-  const isBlack=role.venue==='black-market';
-  if(!owner){
-    return `<div class="venue-role-panel venue-role-open ${isBlack?'venue-black-aura':''}">
-      <div class="venue-role-emblem">${meta.icon||'◈'}</div>
-      <div><span class="eyebrow">${esc(meta.roleName||'Chức vị')}</span><h3>Chưa có người giữ chức</h3>
-      <p>Môn nhân ứng chức sớm nhất sẽ nhận vị trí duy nhất này.</p></div>
-      <button class="btn primary venue-apply-btn" data-venue="${esc(role.venue)}">⚜️ Ứng chức</button>
-      <span class="venue-role-msg" data-venue-msg="${esc(role.venue)}"></span>
-    </div>`;
-  }
-  const members=role.members||[];
-  return `<div class="venue-role-panel ${isBlack?'venue-black-aura':''}">
-    <div class="venue-role-emblem">${meta.icon||'◈'}</div>
-    <div class="venue-role-main">
-      <span class="eyebrow">${esc(meta.roleName||'Chức vị')}</span>
-      <h3>${isBlack?'<span class="black-master-aura">🕶️</span>':''}${esc(owner.display_name)} <small>@${esc(owner.username)}</small></h3>
-      <p>${isBlack?'Chủ Chợ Đen · nhận 20% giá trị linh thạch mỗi lần thu mua thành công.':'Chức vị duy nhất của Đan Đường.'}</p>
-    </div>
-    ${role.me?`<div class="venue-transfer-box">
-      <select class="venue-transfer-target" data-venue="${esc(role.venue)}">
-        <option value="">Chọn môn nhân để nhường vị</option>
-        ${members.map(m=>`<option value="${m.id}">${esc(m.display_name)} · @${esc(m.username)}</option>`).join('')}
-      </select>
-      <button class="btn small ghost venue-transfer-btn" data-venue="${esc(role.venue)}">Nhường vị</button>
-      <span class="venue-role-msg" data-venue-msg="${esc(role.venue)}"></span>
-    </div>`:''}
-  </div>`;
-}
-async function fillVenueTransferTargets(){
-  /* Target lists are rendered from the role response; kept as a compatibility hook. */
-}
-
-
