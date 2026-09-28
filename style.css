@@ -1608,3 +1608,41 @@ main>.section{content-visibility:auto;contain-intrinsic-size:720px}
 @media(max-width:700px){.tien-batch-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.challenge-limit-banner,.beast-limit-banner{font-size:.9rem}.tien-ban-action{display:grid;grid-template-columns:1fr}.tien-ban-action .btn{width:100%}}@media(prefers-reduced-motion:reduce){.active-battle,.battle-fighter.turn,.battle-fighter.turn .challenge-avatar,.battle-vs,.battle-last-action,.beast-arena-area .beast-battle-view,.tien-batch-casting,.tien-batch-reward,.tien-batch-reveal{animation:none!important}}
 
 .combat-result-flash{animation:impactFlash .55s ease-out}.combat-result-win{box-shadow:0 0 24px rgba(218,190,96,.18);border-color:rgba(218,190,96,.4)}.combat-result-loss{box-shadow:0 0 24px rgba(160,72,72,.16);border-color:rgba(160,72,72,.35)}
+
+/* v3.6.85 · Đan Pháp + Luyện Đan Phòng */
+.dan-phap-section{background:radial-gradient(circle at 50% 0%,rgba(211,188,111,.12),transparent 35%),linear-gradient(180deg,#102a28,#071817);color:#eef1e6;overflow:hidden;position:relative;isolation:isolate}
+.dan-phap-section::before{content:'☯';position:absolute;z-index:-1;right:4%;top:2%;font-size:18rem;line-height:1;color:rgba(224,211,158,.035);animation:alchemySeal 9s linear infinite}
+.dan-phap-area{max-width:1220px;margin:0 auto;padding:14px;display:grid;gap:18px}
+.alchemy-hero,.alchemy-room-panel,.alchemy-order-panel,.alchemy-orders{border:1px solid rgba(222,212,161,.34);background:linear-gradient(135deg,rgba(10,32,31,.92),rgba(31,61,51,.78));box-shadow:0 18px 50px rgba(0,0,0,.28),inset 0 0 30px rgba(226,214,160,.035);backdrop-filter:blur(7px);border-radius:20px}
+.alchemy-hero{display:flex;justify-content:space-between;gap:18px;padding:24px;position:relative;overflow:hidden}
+.alchemy-hero::after{content:'🔥';position:absolute;right:8%;bottom:-18px;font-size:8rem;opacity:.08;filter:blur(.3px);animation:alchemyFireFloat 3.2s ease-in-out infinite}
+.alchemy-hero h3,.alchemy-room-panel h3,.alchemy-order-panel h3,.alchemy-orders h3{color:#f0e3b2;margin:.25rem 0 .55rem}
+.alchemy-hero p,.alchemy-room-panel p,.alchemy-order-panel p{color:#cdd9d0}
+.alchemy-wallet{min-width:180px;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;font-size:1.25rem;font-weight:800;color:#f1d98d;text-shadow:0 0 18px rgba(241,217,141,.18)}
+.alchemy-wallet small{font-size:.78rem;color:#b9cbc0;margin-top:7px;font-weight:500}
+.alchemy-room-panel{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:20px}
+.alchemy-rent,.alchemy-manager{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.alchemy-rent select,.alchemy-manager select,.alchemy-order-form select,.alchemy-order-form input{min-height:42px;border:1px solid rgba(222,212,161,.35);background:rgba(3,16,16,.62);color:#edf1e6;border-radius:12px;padding:8px 12px}
+.alchemy-manager label{color:#d9dfd4;font-size:.85rem}
+.alchemy-recipe-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.alchemy-recipe-card{position:relative;overflow:hidden;border:1px solid rgba(221,211,162,.30);border-radius:18px;padding:18px;background:linear-gradient(145deg,rgba(9,30,29,.94),rgba(27,55,47,.84));box-shadow:0 12px 30px rgba(0,0,0,.22);transition:.28s transform,.28s box-shadow,.28s border-color}
+.alchemy-recipe-card::before{content:'';position:absolute;inset:-70%;background:linear-gradient(110deg,transparent 44%,rgba(240,226,169,.09) 50%,transparent 56%);transform:rotate(8deg) translateX(-45%);animation:alchemyShimmer 8s linear infinite;pointer-events:none}
+.alchemy-recipe-card:hover{transform:translateY(-5px);border-color:rgba(239,222,165,.68);box-shadow:0 18px 38px rgba(0,0,0,.34),0 0 24px rgba(219,198,128,.08)}
+.alchemy-recipe-card.locked{opacity:.62;filter:saturate(.7)}
+.alchemy-recipe-top,.alchemy-meta{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.alchemy-grade{padding:5px 9px;border:1px solid rgba(236,221,169,.34);border-radius:999px;color:#f0db9c;font-size:.75rem}
+.alchemy-recipe-card h3{color:#f0e2b3;margin:.8rem 0 .3rem}
+.alchemy-recipe-card p{color:#c7d5cb;min-height:54px}
+.alchemy-ingredients{display:grid;gap:5px;margin:12px 0;padding:10px;border-radius:12px;background:rgba(0,0,0,.18);color:#cbd9ce;font-size:.86rem}
+.alchemy-ingredients b{color:#d9e4c9}.alchemy-meta{font-size:.78rem;color:#e1d38e;margin-bottom:12px}
+.alchemy-order-form{display:grid;grid-template-columns:1.5fr 1.2fr .5fr auto;gap:10px;padding:16px}
+.alchemy-order-card{display:flex;justify-content:space-between;gap:15px;align-items:center;padding:14px 16px;border-top:1px solid rgba(222,212,161,.14);background:rgba(0,0,0,.12)}
+.alchemy-order-card p{margin:.35rem 0 0;color:#bfcfc4;font-size:.86rem}.alchemy-order-card strong{color:#f0d78c}
+.alchemy-furnace-active{animation:alchemyFurnacePulse 1s ease-in-out infinite}.alchemy-furnace-active .alchemy-recipe-card{border-color:rgba(255,194,83,.65);box-shadow:0 0 25px rgba(255,130,42,.16)}
+@keyframes alchemySeal{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes alchemyShimmer{0%{transform:translateX(-55%) rotate(8deg)}100%{transform:translateX(55%) rotate(8deg)}}
+@keyframes alchemyFireFloat{0%,100%{transform:translateY(0) scale(.96);opacity:.07}50%{transform:translateY(-8px) scale(1.05);opacity:.14}}
+@keyframes alchemyFurnacePulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.16) saturate(1.18)}}
+@media(max-width:900px){.alchemy-recipe-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.alchemy-room-panel,.alchemy-hero{align-items:flex-start;flex-direction:column}.alchemy-wallet{align-items:flex-start}}
+@media(max-width:640px){.dan-phap-area{padding:10px}.alchemy-recipe-grid{grid-template-columns:1fr}.alchemy-order-form{grid-template-columns:1fr}.alchemy-order-card{align-items:flex-start;flex-direction:column}.alchemy-hero{padding:18px}.alchemy-room-panel{padding:16px}}
+@media(prefers-reduced-motion:reduce){.dan-phap-section::before,.alchemy-recipe-card::before,.alchemy-hero::after,.alchemy-furnace-active{animation:none!important}}
