@@ -1,0 +1,20 @@
+HÀN THIÊN MÔN v3.6.84 — FIX THÚ TRƯỜNG
+
+1. Sửa lỗi JavaScript cũ `bestLimitReached`:
+- Xóa hoàn toàn tham chiếu sai.
+- Thú Trường dùng `beastLimitReached` được tính từ usage.remaining.
+- Cache-bust script.js bằng ?v=3.6.84 để iPhone không tiếp tục dùng JavaScript cũ.
+
+2. Sửa HTML:
+- Trước đó index.html có `<script src="script.js"><style>...</style></script>` sai cấu trúc.
+- Tách CSS ra ngoài script và đóng script đúng chuẩn.
+
+3. Sửa server:
+- GET /api/beast-arena tự đảm bảo Equipment schema trước Beast Arena schema.
+- Giảm khả năng lỗi trên PostgreSQL cũ sau nhiều lần migration.
+- Lỗi server được trả về rõ hơn trong development nhưng không lộ SQL khi production.
+
+4. Giữ nguyên:
+- Giới hạn 5 lượt Thú Trường / 24 giờ.
+- Online, Offline, Thần Thú.
+- Lời mời, phản hồi, lượt đánh, phần thưởng và spectator.

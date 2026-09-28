@@ -5501,7 +5501,11 @@ async function loadUserBattleBeasts(uid){
 
 app.get('/api/beast-arena',auth,async(req,res)=>{
   try{
-    await ensureBeastArenaSchema(); const uid=req.session.user_id;
+    // v3.6.84: Thú Trường phải tự đảm bảo toàn bộ schema phụ thuộc trước khi SELECT.
+    // Điều này đặc biệt quan trọng với PostgreSQL cũ đã chạy các migration trước đây.
+    await ensureEquipmentSchema();
+    await ensureBeastArenaSchema();
+    const uid=req.session.user_id;
     const [beasts,members,pending,history,activeBattle]=await Promise.all([
       loadUserBattleBeasts(uid),
       query(`SELECT u.id,u.display_name,p.avatar,p.rank,p.spirit_power,(SELECT COUNT(*) FROM owned_spirit_beasts o WHERE o.user_id=u.id AND o.quantity>0)::int AS beast_count FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name,u.id`,[uid]),
@@ -5511,7 +5515,10 @@ app.get('/api/beast-arena',auth,async(req,res)=>{
     ]);
     const usage=Number((await query(`SELECT COUNT(*)::int AS c FROM beast_arena_usage WHERE user_id=$1 AND created_at>=NOW()-INTERVAL '24 hours'`,[uid])).rows[0]?.c||0);
     res.json({beasts,members:members.rows,pending:pending.rows,history:history.rows,npcs:BEAST_ARENA_NPCS,activeBattle:activeBattle.rows[0]||null,me:{userId:uid},usage:{used:usage,limit:BEAST_ARENA_LIMIT_24H,remaining:Math.max(0,BEAST_ARENA_LIMIT_24H-usage),windowHours:24}});
-  }catch(e){console.error('beast arena load:',e);res.status(500).json({error:'Không thể mở Thú Trường.'});}
+  }catch(e){
+    console.error('beast arena load:',e);
+    res.status(500).json({error:process.env.NODE_ENV==='production'?'Không thể mở Thú Trường. Máy chủ chưa sẵn sàng, hãy thử lại.':'Không thể mở Thú Trường: '+e.message});
+  }
 });
 
 app.post('/api/beast-arena/offline',auth,async(req,res)=>{
