@@ -1810,3 +1810,36 @@ body.function-only-focus main{display:block!important;height:calc(100dvh - 72px)
 .tien-thai-avatar .immortal-artifact-avatar-winged{width:76px;height:76px}
 .tien-thai-avatar .immortal-artifact-avatar-winged>.avatar-img,.tien-thai-avatar .immortal-artifact-avatar-winged>.immortal-artifact-glyph{width:52px;height:52px}
 @media(max-width:620px){.tien-thai-card-main{align-items:flex-start}.tien-thai-avatar{width:68px;height:68px;flex-basis:68px}.tien-thai-avatar .immortal-artifact-avatar-winged{width:66px;height:66px}.tien-thai-avatar .immortal-artifact-avatar-winged>.avatar-img,.tien-thai-avatar .immortal-artifact-avatar-winged>.immortal-artifact-glyph{width:46px;height:46px}}
+
+/* v3.7.13 · Tiên Thải focus lock hardening + Cường Hóa Tiên Khí */
+body.function-only-focus .tien-thai-section.focus-active,
+body.function-only-focus .tien-khi-enhance-section.focus-active{
+  position:fixed!important;inset:72px 0 0 0!important;width:100%!important;height:calc(100dvh - 72px)!important;
+  max-height:none!important;overflow-y:auto!important;overflow-x:hidden!important;
+  overscroll-behavior:contain!important;touch-action:pan-y!important;-webkit-overflow-scrolling:touch!important;
+  contain:layout paint style!important;z-index:45!important;
+}
+@media(max-width:700px){body.function-only-focus .tien-thai-section.focus-active,body.function-only-focus .tien-khi-enhance-section.focus-active{inset:64px 0 0 0!important;height:calc(100dvh - 64px)!important}}
+.tien-khi-enhance-section .section-head{margin-bottom:16px}
+.enhance-panel{border:1px solid rgba(214,179,82,.45);background:linear-gradient(145deg,rgba(169,130,58,.09),rgba(40,78,71,.06));padding:18px;border-radius:14px;box-shadow:0 16px 42px rgba(40,40,20,.08);position:relative;overflow:hidden}
+.enhance-panel:after{content:'';position:absolute;inset:-30%;background:radial-gradient(circle,rgba(239,211,137,.13),transparent 55%);pointer-events:none;opacity:.7}
+.enhance-header,.enhance-form-grid{position:relative;z-index:1}
+.enhance-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.enhance-header h3{font:800 1.35rem 'Noto Serif SC';color:var(--jade)}
+.enhance-form-grid{display:grid;grid-template-columns:1.2fr 1.2fr .55fr auto;gap:10px;align-items:end}
+.enhance-form-grid label{display:grid;gap:5px;font-size:.72rem;font-weight:800;color:var(--muted)}
+.enhance-form-grid select,.enhance-form-grid input{width:100%;min-height:42px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);padding:9px 11px;outline:none}
+.enhance-rate{position:relative;z-index:1;margin-top:12px;padding:10px 12px;border:1px dashed rgba(169,130,58,.5);border-radius:9px;color:var(--gold);font-size:.75rem;font-weight:800;background:rgba(169,130,58,.05)}
+.enhance-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:14px}
+.enhance-artifact-card{display:flex;gap:12px;align-items:center;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:12px;transition:.2s;position:relative;overflow:hidden}
+.enhance-artifact-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.enhance-artifact-visual{width:78px;height:78px;flex:0 0 78px;display:grid;place-items:center;overflow:visible}
+.enhance-artifact-visual .immortal-artifact-avatar-winged{width:76px;height:76px}
+.enhance-artifact-info{min-width:0}.enhance-artifact-info h3{font:800 1rem 'Noto Serif SC';color:var(--jade);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.enhance-artifact-info h3 b{color:var(--gold)}.enhance-artifact-info p{font-size:.7rem;color:var(--muted);line-height:1.45;margin-top:3px}
+.tien-khi-enhance-area.enhancing .enhance-panel{animation:enhancePulse .75s ease-in-out infinite alternate}
+.tien-khi-enhance-area.enhance-success .enhance-panel{box-shadow:0 0 0 1px rgba(239,211,137,.7),0 0 35px rgba(239,211,137,.38),0 18px 60px rgba(169,130,58,.2)}
+.tien-khi-enhance-area.enhance-burst:after{content:'✨ 仙器 CƯỜNG HÓA THÀNH CÔNG ✨';position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.7);z-index:100;color:#ffe8a3;font:900 1.25rem 'Noto Serif SC';text-shadow:0 0 12px #a9823a,0 0 28px #fff;animation:enhanceSuccessBurst 1.15s ease-out forwards;pointer-events:none;white-space:nowrap}
+@keyframes enhancePulse{from{box-shadow:0 0 12px rgba(169,130,58,.12)}to{box-shadow:0 0 28px rgba(239,211,137,.42)}}
+@keyframes enhanceSuccessBurst{0%{opacity:0;transform:translate(-50%,-50%) scale(.7)}18%{opacity:1;transform:translate(-50%,-50%) scale(1.05)}75%{opacity:1;transform:translate(-50%,-58%) scale(1)}100%{opacity:0;transform:translate(-50%,-70%) scale(1.08)}}
+@media(max-width:760px){.enhance-form-grid{grid-template-columns:1fr 1fr}.enhance-form-grid label:nth-child(3){grid-column:1}.enhance-form-grid button{grid-column:2}.enhance-header{align-items:flex-start}.enhance-header .tag{white-space:nowrap}.enhance-grid{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.tien-khi-enhance-area.enhancing .enhance-panel,.tien-khi-enhance-area.enhance-burst:after{animation:none!important}.tien-khi-enhance-area.enhance-burst:after{display:none}}

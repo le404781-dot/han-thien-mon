@@ -1,0 +1,6 @@
+Hàn Thiên Môn v3.7.14
+- Tăng giới hạn tích trữ cùng 1 vật phẩm trong Tu Di Giới từ 150 lên 200.
+- PostgreSQL trigger cap inventory: 200.
+- Database maintenance và API Tu Di Giới tự chuẩn hóa về tối đa 200.
+- Giao diện Tu Di Giới và ô số lượng cập nhật giới hạn 200.
+- Các chức năng khác giữ nguyên.
