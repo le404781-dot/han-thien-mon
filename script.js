@@ -1322,6 +1322,31 @@ $('#memberModal').onclick=e=>{if(e.target===e.currentTarget)e.currentTarget.clos
 $('#searchInput').oninput=e=>{const q=e.target.value.toLowerCase().trim();renderMembers(members.filter(m=>[m.name,m.nick,m.role,...m.tags].join(' ').toLowerCase().includes(q)));};
 $('#accountBtn').onclick=openAccount;$('#joinBtn').onclick=()=>getToken()?accountSummary():renderAuth('register');
 $('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');const dark=document.body.classList.contains('dark');$('#themeBtn').textContent=dark?'☀':'☾';localStorage.setItem('theme',dark?'dark':'light');};
+/* v3.6.93 · GIAO DIỆN MÁY TÍNH / PC — chỉ hiện và chạy trên thiết bị PC */
+(function setupPcInterface(){
+ const btn=$('#pcModeBtn');
+ const isPC=()=>window.matchMedia('(min-width: 1101px) and (hover: hover) and (pointer: fine)').matches && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent||'');
+ if(!btn || !isPC()){ btn?.remove(); document.body.classList.remove('pc-interface'); return; }
+ const saved=localStorage.getItem('htm_pc_interface');
+ const enabled=saved!=='off';
+ document.body.classList.toggle('pc-interface',enabled);
+ btn.textContent=enabled?'🖥️':'🖥';
+ btn.title=enabled?'Giao diện PC đang bật · Tắt':'Giao diện PC đang tắt · Bật';
+ btn.setAttribute('aria-label',btn.title);
+ btn.onclick=()=>{
+   const next=!document.body.classList.contains('pc-interface');
+   document.body.classList.toggle('pc-interface',next);
+   localStorage.setItem('htm_pc_interface',next?'on':'off');
+   btn.textContent=next?'🖥️':'🖥';
+   btn.title=next?'Giao diện PC đang bật · Tắt':'Giao diện PC đang tắt · Bật';
+   btn.setAttribute('aria-label',btn.title);
+ };
+ window.addEventListener('resize',()=>{
+   if(!isPC()){ document.body.classList.remove('pc-interface'); btn.style.display='none'; }
+   else { btn.style.display='inline-grid'; }
+ });
+})();
+
 $('#colorModeBtn').onclick=()=>{document.body.classList.toggle('color-flow');const enabled=document.body.classList.contains('color-flow');localStorage.setItem('colorMode',enabled?'flow':'normal');$('#colorModeBtn').textContent=enabled?'✨':'🌈';};
 $('#menuBtn').onclick=()=>$('#nav').classList.toggle('open');document.querySelectorAll('#nav a').forEach(a=>a.onclick=()=>$('#nav').classList.remove('open'));$('#topBtn').onclick=()=>scrollTo({top:0,behavior:'smooth'});
 if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$('#themeBtn').textContent='☀';}
