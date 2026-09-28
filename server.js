@@ -4366,7 +4366,7 @@ app.post('/api/techniques/unequip',auth,async(req,res)=>{
   catch(e){res.status(500).json({error:'Không thể tháo công pháp.'});}
 });
 
-// CƯỜNG HÓA TIÊN KHÍ · dùng 10-100 phôi cùng phẩm cấp hoặc cùng loại (cùng ID)
+// CƯỜNG HÓA TIÊN KHÍ · dùng 10-100 phôi cùng phẩm cấp hoặc cùng loại
 app.get('/api/tien-khi-enhance',auth,async(req,res)=>{
   try{
     await ensureEquipmentSchema();
@@ -4395,6 +4395,10 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     if(!Number.isInteger(targetId)||targetId<1||!Number.isInteger(coreId)||coreId<1||!Number.isInteger(coreQty)||coreQty<10||coreQty>100){return res.status(400).json({error:'Mỗi lần Cường Hóa cần từ 10 đến 100 phôi Tiên Khí.'});}
     if(!Number.isInteger(catalystQty)||catalystQty<0||catalystQty>1){return res.status(400).json({error:'Thiên Đạo Cường Hóa Thạch chỉ được dùng tối đa 1 cái mỗi lần.'});}
     await client.query('BEGIN');
+    // Lock inventory rows in a stable item_id order to avoid deadlocks when two
+    // concurrent enhancement requests use the same pair of target/core items.
+    const lockIds=[targetId,coreId].sort((a,b)=>a-b);
+    await client.query(`SELECT item_id FROM inventory WHERE user_id=$1 AND item_id = ANY($2::int[]) FOR UPDATE`,[uid,lockIds]);
     const target=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.category,COALESCE(e.enhance_level,0) AS enhance_level,
       (p.equipped_immortal_artifact_id=ti.id) AS equipped
       FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id LEFT JOIN immortal_artifact_enhancements e ON e.user_id=i.user_id AND e.item_id=i.item_id LEFT JOIN profiles p ON p.user_id=i.user_id
@@ -4421,7 +4425,8 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
       if(Number(catalyst.quantity)<1){await client.query('ROLLBACK');return res.status(400).json({error:'Thiên Đạo Cường Hóa Thạch không đủ số lượng.'});}
       await client.query('UPDATE inventory SET quantity=quantity-1,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[uid,Number(catalyst.id)]);
       await client.query('DELETE FROM inventory WHERE user_id=$1 AND item_id=$2 AND quantity<=0',[uid,Number(catalyst.id)]);
-      successRate=Math.min(95,successRate+5);
+      // +5 percentage points; never break the guaranteed first attempt.
+      successRate=Math.min(100,successRate+5);
     }
     const roll=crypto.randomInt(1,101);
     const success=roll<=successRate;
@@ -4433,7 +4438,7 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     else await client.query(`DELETE FROM immortal_artifact_enhancements WHERE user_id=$1 AND item_id=$2`,[uid,targetId]);
     await client.query('COMMIT');
     const enhancedPower=success?Math.round(Number(target.power_bonus||0)*(1+newLevel*0.10)):Number(target.power_bonus||0);
-    res.json({ok:true,success,targetItemId:targetId,targetName:target.name,previousLevel:level,newLevel,coreQuantity:coreQty,catalystQuantity:catalystQty,successRate,enhancedPower,message:success?`✨ Cường Hóa thành công ${target.name} +${newLevel}!`:`💥 Cường Hóa thất bại. ${target.name} đã trở về +0.`});
+    res.json({ok:true,success,targetItemId:targetId,targetName:target.name,previousLevel:level,newLevel,coreQuantity:coreQty,coreConsumed:true,catalystQuantity:catalystQty,successRate,enhancedPower,message:success?`✨ Cường Hóa thành công ${target.name} +${newLevel}!`:`💥 Cường Hóa thất bại. ${target.name} đã trở về +0.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien khi enhance:',e);res.status(500).json({error:'Cường Hóa thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });

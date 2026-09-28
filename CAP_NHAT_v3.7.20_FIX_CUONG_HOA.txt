@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.7.20
+
+- Phôi Tiên Khí được tiêu hao và mất đi sau khi giao dịch Cường Hóa thành công hoặc thất bại.
+- Nếu giao dịch lỗi/rollback thì phôi và Thiên Đạo Cường Hóa Thạch được hoàn lại nguyên trạng.
+- Lần 1: 100%; lần 2: 90%; từ lần 3: ngẫu nhiên 20%-80%.
+- Thiên Đạo Cường Hóa Thạch +5 điểm phần trăm, tối đa 100%; không làm mất tính chắc chắn của lần 1.
+- Khóa inventory theo thứ tự item_id để tránh deadlock khi có request Cường Hóa đồng thời.
+- Đồng bộ cache-busting script/style lên v3.7.20.
