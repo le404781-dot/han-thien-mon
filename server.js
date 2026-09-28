@@ -1760,15 +1760,24 @@ async function initDb() {
 
   const rootCatalog = [
     ['Kim Linh Căn','Phàm','Căn cơ kim hệ, thiên về công kích và luyện khí.','+2% hiệu quả tu luyện',250,0],
-    ['Mộc Linh Căn','Phàm','Sinh cơ dồi dào, hồi phục tốt và ổn định căn cơ.','+2% hiệu quả tu luyện',250,0],
-    ['Thủy Linh Căn','Phàm','Khí tức mềm dẻo, thích hợp pháp thuật và điều tức.','+2% hiệu quả tu luyện',250,0],
-    ['Băng Linh Căn','Hạ Phẩm','Hàn khí ngưng tụ, tăng khả năng khống chế.','+8% hiệu quả tu luyện',700,1],
-    ['Phong Linh Căn','Hạ Phẩm','Thân pháp nhẹ như gió, tăng tốc độ vận công.','+8% hiệu quả tu luyện',700,1],
-    ['Lôi Linh Căn','Trung Phẩm','Lôi lực bộc phát, công thủ đều mạnh.','+18% hiệu quả tu luyện',1500,2],
-    ['Âm Dương Linh Căn','Thượng Phẩm','Âm dương tương sinh, căn cơ cân bằng và sâu dày.','+28% hiệu quả tu luyện',3000,3],
-    ['Thiên Linh Căn','Thần Thoại','Tư chất hiếm có, hấp thu linh khí cực nhanh.','+55% hiệu quả tu luyện',12000,5]
+    ['Mộc Linh Căn','Phàm','Sinh cơ dồi dào, hồi phục tốt và ổn định căn cơ.','+3% hồi phục linh lực',250,0],
+    ['Thủy Linh Căn','Phàm','Khí tức mềm dẻo, thích hợp pháp thuật và điều tức.','+2% hiệu quả pháp thuật',250,0],
+    ['Băng Linh Căn','Hạ Phẩm','Hàn khí ngưng tụ, tăng khả năng khống chế.','+5% khống chế',700,1],
+    ['Phong Linh Căn','Hạ Phẩm','Thân pháp nhẹ như gió, tăng tốc độ vận công.','+6% thân pháp',700,1],
+    ['Lôi Linh Căn','Trung Phẩm','Lôi lực bộc phát, công thủ đều mạnh.','+8% sát thương khi khiêu chiến',1500,2],
+    ['Hỏa Linh Căn','Trung Phẩm','Hỏa nguyên dương cương, luyện đan và công kích đều được gia trì.','+8% hỏa hệ · +5% luyện đan',1700,2],
+    ['Thổ Linh Căn','Trung Phẩm','Địa mạch trầm ổn, tăng sức chống chịu và căn cơ.','+10% phòng ngự',1800,2],
+    ['Âm Dương Linh Căn','Thượng Phẩm','Âm dương tương sinh, căn cơ cân bằng và sâu dày.','+10% công lực · +5% hồi phục',3000,3],
+    ['Ngũ Hành Linh Căn','Thượng Phẩm','Ngũ hành đồng tu, chuyển hóa linh lực ổn định.','+12% hiệu quả tu luyện',4200,4],
+    ['Tinh Thần Linh Căn','Hiếm','Tinh lực hội tụ, tăng ngộ tính và cảm nhận pháp tắc.','+15% ngộ tính · +8% tu luyện',6000,5],
+    ['Hư Không Linh Căn','Hiếm','Hư không tương hợp, thân pháp và né tránh được tăng cường.','+12% thân pháp · +8% né tránh',7500,6],
+    ['Thái Sơ Linh Căn','Sử Thi','Một tia bản nguyên thái sơ dung nhập đạo cơ, tăng mạnh khả năng hấp thu linh khí.','+22% hiệu quả tu luyện · +12% công lực',9500,7],
+    ['Thiên Linh Căn','Thần Thoại','Tư chất hiếm có, hấp thu linh khí cực nhanh.','+15% hiệu quả tu luyện · +8% công lực',12000,8],
+    ['Tiên Thiên Đạo Căn','Tiên Phẩm','Đạo vận tiên thiên bám vào linh căn, thích hợp người bước vào tiên đạo.','+25% tu luyện · +15% công lực · +5% ngộ tính',30000,9],
+    ['Thái Hư Tiên Căn','Tiên Phẩm','Tiên căn dung hợp hư không, tăng khả năng vận chuyển tiên lực và thân pháp.','+30% tu luyện · +18% thân pháp',52000,11],
+    ['Hỗn Độn Tiên Căn','Tiên Phẩm','Hỗn độn bản nguyên chưa phân cực, căn cơ cực kỳ hiếm trong tiên giới.','+40% tu luyện · +25% công lực · +10% ngộ tính',90000,14]
   ];
-  for (const x of rootCatalog) await query('INSERT INTO spirit_roots_catalog(name,rarity,description,support,price_stones,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO NOTHING',x);
+  for (const x of rootCatalog) await query('INSERT INTO spirit_roots_catalog(name,rarity,description,support,price_stones,min_realm) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(name) DO UPDATE SET rarity=EXCLUDED.rarity,description=EXCLUDED.description,support=EXCLUDED.support,price_stones=EXCLUDED.price_stones,min_realm=EXCLUDED.min_realm',x);
   const rootPowers = {
     'Kim Linh Căn':[80,'Kim Nguyên: +2% công lực.'],
     'Mộc Linh Căn':[75,'Mộc Sinh: +3% hồi phục linh lực.'],
@@ -1776,8 +1785,17 @@ async function initDb() {
     'Băng Linh Căn':[180,'Hàn Mạch: +5% khống chế khi khiêu chiến.'],
     'Phong Linh Căn':[190,'Phong Hành: +6% thân pháp.'],
     'Lôi Linh Căn':[300,'Lôi Căn: +8% sát thương khi khiêu chiến.'],
+    'Hỏa Linh Căn':[320,'Hỏa Nguyên: +8% hiệu quả Hỏa hệ và +5% luyện đan.'],
+    'Thổ Linh Căn':[340,'Địa Mạch: +10% phòng ngự.'],
     'Âm Dương Linh Căn':[420,'Âm Dương: +10% công lực và +5% hồi phục.'],
-    'Thiên Linh Căn':[700,'Thiên Đạo: +15% hiệu quả tu luyện và +8% công lực.']
+    'Ngũ Hành Linh Căn':[520,'Ngũ Hành: +12% hiệu quả tu luyện.'],
+    'Tinh Thần Linh Căn':[610,'Tinh Thần: +15% ngộ tính và +8% tu luyện.'],
+    'Hư Không Linh Căn':[680,'Hư Không: +12% thân pháp và +8% né tránh.'],
+    'Thái Sơ Linh Căn':[820,'Thái Sơ: +22% hiệu quả tu luyện và +12% công lực.'],
+    'Thiên Linh Căn':[700,'Thiên Đạo: +15% hiệu quả tu luyện và +8% công lực.'],
+    'Tiên Thiên Đạo Căn':[1200,'Tiên Thiên: +25% tu luyện, +15% công lực, +5% ngộ tính.'],
+    'Thái Hư Tiên Căn':[1550,'Thái Hư: +30% tu luyện và +18% thân pháp.'],
+    'Hỗn Độn Tiên Căn':[2200,'Hỗn Độn: +40% tu luyện, +25% công lực, +10% ngộ tính.']
   };
   for (const [name,[power,ability]] of Object.entries(rootPowers)) await query('UPDATE spirit_roots_catalog SET power_bonus=$2,ability=$3 WHERE name=$1',[name,power,ability]);
   const beastCatalog = [
@@ -4071,6 +4089,10 @@ async function ensureEquipmentSchemaImpl(){
     CREATE TABLE IF NOT EXISTS owned_spirit_beasts (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,beast_id));
     ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS avatar TEXT;
     CREATE TABLE IF NOT EXISTS owned_spirit_roots (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,root_id INTEGER NOT NULL REFERENCES spirit_roots_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,root_id));
+    CREATE INDEX IF NOT EXISTS idx_spirit_roots_min_realm_price ON spirit_roots_catalog(min_realm,price_stones,id);
+    CREATE INDEX IF NOT EXISTS idx_spirit_roots_rarity ON spirit_roots_catalog(rarity,id);
+    CREATE INDEX IF NOT EXISTS idx_owned_spirit_roots_user_positive ON owned_spirit_roots(user_id,root_id) WHERE quantity>0;
+    CREATE INDEX IF NOT EXISTS idx_profiles_equipped_root ON profiles(equipped_root_id) WHERE equipped_root_id IS NOT NULL;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Hạ Phẩm';
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;

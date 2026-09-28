@@ -1662,3 +1662,31 @@ body.function-only-focus .focus-active{padding-top:20px!important}
 .member-root-detail{margin:12px 0;padding:12px;border-radius:14px;border:1px solid rgba(91,155,122,.25);background:rgba(91,155,122,.06)}
 .member-root-detail h3{margin:4px 0}
 .member-root-detail p{margin:0;color:var(--muted);font-size:.84rem}
+
+/* v3.6.92 · KHÓA TUYỆT ĐỐI KHU VỰC CHỨC NĂNG: Chợ Đen / Đan Pháp / Tửu Lâu */
+html.focus-lock, body.focus-lock{overflow:hidden!important;width:100%;height:100%;overscroll-behavior:none!important}
+body.function-only-focus .topbar{z-index:70}
+body.function-only-focus .topbar nav,
+body.function-only-focus .hero,
+body.function-only-focus .join-section,
+body.function-only-focus footer,
+body.function-only-focus .mist,
+body.function-only-focus main>.section:not(.focus-active){display:none!important}
+body.function-only-focus .focus-active{
+  display:block!important;position:fixed!important;left:0!important;right:0!important;top:78px!important;bottom:0!important;
+  height:calc(100dvh - 78px)!important;max-height:calc(100dvh - 78px)!important;
+  margin:0!important;padding:22px max(4vw,16px) 80px!important;
+  overflow-y:auto!important;overflow-x:hidden!important;-webkit-overflow-scrolling:touch!important;
+  overscroll-behavior:contain!important;touch-action:pan-y!important;scrollbar-gutter:stable;
+}
+body.function-only-focus .focus-active>.section-head{display:none!important}
+body.function-only-focus .focus-active:before{display:none!important}
+body.function-only-focus .focus-active>div[id$="Area"]{max-width:1180px!important;margin:0 auto!important}
+body.function-only-focus .focus-bar{z-index:90!important}
+@media(max-width:1000px){body.function-only-focus .focus-active{top:72px!important;height:calc(100dvh - 72px)!important;max-height:calc(100dvh - 72px)!important}}
+@media(max-width:700px){body.function-only-focus .focus-active{padding:14px 4% 70px!important}}
+
+/* v3.6.92 · Linh Căn đa dạng / Tiên Phẩm */
+.spirit-shop-card.immortal-root-card{border-color:rgba(202,166,76,.58);box-shadow:0 0 0 1px rgba(202,166,76,.12),0 14px 34px rgba(73,52,15,.12)}
+.spirit-shop-card.immortal-root-card .spirit-shop-icon{border-color:rgba(202,166,76,.72);box-shadow:0 0 18px rgba(202,166,76,.22);animation:immortalRootPulse 2.4s ease-in-out infinite}
+@keyframes immortalRootPulse{0%,100%{transform:scale(1);box-shadow:0 0 10px rgba(202,166,76,.18)}50%{transform:scale(1.06);box-shadow:0 0 24px rgba(202,166,76,.42)}}
