@@ -1654,3 +1654,11 @@ main>.section{content-visibility:auto;contain-intrinsic-size:720px}
 @keyframes furnaceBreath{0%,100%{transform:translateY(0) scale(.96);filter:drop-shadow(0 0 5px rgba(255,160,58,.28))}50%{transform:translateY(-3px) scale(1.06);filter:drop-shadow(0 0 13px rgba(255,187,74,.72))}}@keyframes furnaceCorePulse{0%,100%{transform:scale(.95);filter:brightness(.95)}50%{transform:scale(1.1);filter:brightness(1.35) drop-shadow(0 0 12px rgba(255,166,57,.5))}}
 @media(max-width:1000px){.alchemy-furnace-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.alchemy-ingredient-slots{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:640px){.alchemy-furnace-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.alchemy-brew-controls,.alchemy-ingredient-slots{grid-template-columns:1fr}.alchemy-panel-title{align-items:flex-start;flex-direction:column}.alchemy-brew-action{align-items:stretch;flex-direction:column}.alchemy-rate-badge{text-align:center}.alchemy-furnace-card{min-height:112px}}
 @media(prefers-reduced-motion:reduce){.furnace-orb,.alchemy-furnace-core span{animation:none!important}}
+
+/* v3.6.91 · Chế độ chức năng riêng: Chợ Đen / Đan Pháp / Tửu Lâu không hiện phần giới thiệu thừa khi mở từ menu. */
+body.function-only-focus .focus-active > .section-head{display:none!important}
+body.function-only-focus .focus-active{padding-top:20px!important}
+.member-root-badge{margin-top:7px;padding:7px 10px;border:1px solid rgba(91,155,122,.28);border-radius:12px;background:rgba(91,155,122,.08);font-size:.78rem;color:var(--jade)}
+.member-root-detail{margin:12px 0;padding:12px;border-radius:14px;border:1px solid rgba(91,155,122,.25);background:rgba(91,155,122,.06)}
+.member-root-detail h3{margin:4px 0}
+.member-root-detail p{margin:0;color:var(--muted);font-size:.84rem}
