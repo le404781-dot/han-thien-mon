@@ -1732,3 +1732,39 @@ body.function-only-focus main{display:block!important;height:calc(100dvh - 72px)
 @media(max-width:1100px){
   .topbar nav{overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
 }
+
+/* v3.6.97 · Đan Chủ là quyền duy nhất được thay đổi người trông coi */
+.alchemy-manager-note{display:flex;flex-direction:column;gap:4px;min-width:220px;padding:10px 12px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.12)}
+.alchemy-manager-note small{opacity:.72;line-height:1.35}
+
+
+/* v3.6.98 · Chí Cao aura */
+.chi-cao-aura{
+  position:relative;
+  display:inline-grid;
+  place-items:center;
+  isolation:isolate;
+  overflow:visible;
+  border-radius:50%;
+  box-shadow:0 0 0 2px rgba(210,238,255,.18),0 0 24px rgba(120,210,255,.48),inset 0 0 18px rgba(230,250,255,.16);
+  animation:chiCaoPulse 2.6s ease-in-out infinite;
+}
+.chi-cao-mark{
+  position:absolute;
+  right:-8px;
+  bottom:-6px;
+  z-index:5;
+  font-size:1rem;
+  line-height:1;
+  text-shadow:0 0 8px rgba(160,225,255,.95);
+  animation:chiCaoMark 1.8s ease-in-out infinite;
+}
+@keyframes chiCaoPulse{0%,100%{filter:drop-shadow(0 0 4px rgba(130,215,255,.35));transform:scale(1)}50%{filter:drop-shadow(0 0 13px rgba(150,230,255,.8));transform:scale(1.025)}}
+@keyframes chiCaoMark{0%,100%{transform:scale(.9) rotate(0deg);opacity:.78}50%{transform:scale(1.16) rotate(180deg);opacity:1}}
+
+
+/* v3.7.01 · Lôi Đài online · thông báo toàn môn 10 giây */
+.challenge-global-announcement{position:fixed;left:50%;top:18px;transform:translate(-50%,-150%);z-index:99999;max-width:min(92vw,760px);padding:14px 22px;border:1px solid rgba(255,255,255,.24);border-radius:18px;background:rgba(20,12,8,.94);backdrop-filter:blur(12px);box-shadow:0 14px 50px rgba(0,0,0,.35);color:#fff4dc;font-weight:800;text-align:center;pointer-events:none;opacity:0;transition:transform .28s ease,opacity .28s ease;}
+.challenge-global-announcement.show{transform:translate(-50%,0);opacity:1;}
+.battle-spit{border-color:rgba(120,220,255,.55)!important;}
+@media(max-width:700px){.challenge-global-announcement{top:10px;padding:11px 14px;font-size:13px;max-width:94vw;border-radius:14px;}}

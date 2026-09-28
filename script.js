@@ -5,12 +5,12 @@ const tokenKey='han_thien_token';
 const getToken=()=>localStorage.getItem(tokenKey);
 const authHeaders=()=>getToken()?{'Authorization':'Bearer '+getToken(),'Content-Type':'application/json'}:{'Content-Type':'application/json'};
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-const avatarHtml=(v,cls='',realmIndex=null,auraRank=0)=>{const x=String(v??'').trim();let inner=/^data:image\//i.test(x)?`<img class="avatar-img ${cls}" src="${esc(x)}" alt="Ảnh đại diện" loading="lazy">`:esc(x||'🧑🏻‍🎓');const rank=Math.max(0,Math.min(3,Number(auraRank)||0));const hasRealm=realmIndex!==null&&realmIndex!==undefined&&!Number.isNaN(Number(realmIndex));const ri=hasRealm?Math.max(0,Math.min(17,Number(realmIndex)||0)):0;if(hasRealm&&ri===17)return `<span class="immortal-emperor-aura ${rank>0?`sect-top-aura sect-top-aura-${rank}`:''}">${inner}<span class="immortal-emperor-crown" aria-label="Tiên Đế Nhất Tinh">♛</span><span class="immortal-emperor-orbit immortal-orbit-one"></span><span class="immortal-emperor-orbit immortal-orbit-two"></span></span>`;if(rank>0)return `<span class="sect-top-aura sect-top-aura-${rank}">${inner}</span>`;if(!hasRealm)return inner;return `<span class="avatar-aura realm-aura-${ri}">${inner}</span>`;};
+const avatarHtml=(v,cls='',realmIndex=null,auraRank=0)=>{const x=String(v??'').trim();let inner=/^data:image\//i.test(x)?`<img class="avatar-img ${cls}" src="${esc(x)}" alt="Ảnh đại diện" loading="lazy">`:esc(x||'🧑🏻‍🎓');const rank=Math.max(0,Math.min(3,Number(auraRank)||0));const hasRealm=realmIndex!==null&&realmIndex!==undefined&&!Number.isNaN(Number(realmIndex));const ri=hasRealm?Math.max(0,Math.min(18,Number(realmIndex)||0)):0;if(hasRealm&&ri===17)return `<span class="immortal-emperor-aura ${rank>0?`sect-top-aura sect-top-aura-${rank}`:''}">${inner}<span class="immortal-emperor-crown" aria-label="Tiên Đế Nhất Tinh">♛</span><span class="immortal-emperor-orbit immortal-orbit-one"></span><span class="immortal-emperor-orbit immortal-orbit-two"></span></span>`;if(hasRealm&&ri===18)return `<span class="chi-cao-aura ${rank>0?`sect-top-aura sect-top-aura-${rank}`:''}">${inner}<span class="chi-cao-mark" aria-label="Chí Cao">✦</span></span>`;if(rank>0)return `<span class="sect-top-aura sect-top-aura-${rank}">${inner}</span>`;if(!hasRealm)return inner;return `<span class="avatar-aura realm-aura-${ri}">${inner}</span>`;};
 const itemAvatarHtml=(v)=>avatarHtml(v);
 const beastAvatarHtml=(v,tier=1,cls='',name='')=>{const x=String(v??'').trim();const inner=/^data:image\//i.test(x)?`<img class="avatar-img ${cls}" src="${esc(x)}" alt="Ảnh linh thú" loading="lazy">`:`<span class="beast-glyph">${esc(x||'🐉')}</span>`;const immortal=Number(tier)>=10||/Tiên Thú|Cửu Vĩ Thiên Hồ|Kỳ Lân|Thần Long/i.test(String(name||''));const t=Math.max(1,Math.min(18,Number(tier)||1));return `<span class="beast-avatar-frame ${immortal?'beast-immortal':''} beast-tier-${t}">${inner}</span>`;};
 
 const fmtDate=v=>v?new Date(v).toLocaleDateString('vi-VN'):'—';
-const REALM_NAMES=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế'];
+const REALM_NAMES=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao'];
 const realmIndexOf=name=>Math.max(0,REALM_NAMES.indexOf(String(name||'')));
 
 async function api(url,opts={}){
@@ -156,7 +156,7 @@ async function loadChallenges(){
     <div class="battle-turn-note">${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
     ${battle.lastAction?`<div class="battle-last-action">${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b></div>`:''}
     ${battle.yourTurn?`<div class="ultimate-choice"><label>⚡ Tuyệt Chiêu</label><select id="battleTechniqueSelect">${(currentProfile?.techniques||[]).map(t=>`<option value="${t.id}" ${t.equipped?'selected':''}>${esc(t.name)} · ${esc(t.grade)} · ⚔+${Number(t.power_bonus||0).toLocaleString('vi-VN')}</option>`).join('') || '<option value="0">⚡ Hàn Thiên Phá</option>'}</select><small>Công pháp đang trang bị được chọn mặc định. Mỗi công pháp có hệ số sát thương riêng.</small></div>`:''}
-    <div class="battle-actions"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ TUNG TUYỆT CHIÊU':'⏳ CHỜ ĐỐI THỦ'}</button><button class="btn ghost battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
+    <div class="battle-actions"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ TUNG TUYỆT CHIÊU':'⏳ CHỜ ĐỐI THỦ'}</button>${battle.spitAllowed&&battle.yourTurn?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn ghost battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
     <small class="battle-rule">Sát thương phụ thuộc Công lực, trang bị, công pháp được chọn và chênh lệch cảnh giới; cảnh giới cao hơn gây sát thương lớn hơn, cảnh giới thấp hơn bị giảm mạnh.</small>
    </div>`:'';
   area.innerHTML=`
@@ -173,6 +173,7 @@ async function loadChallenges(){
   document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept'));
   document.querySelectorAll('.challenge-reject').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'reject'));
   document.querySelectorAll('.battle-ultimate').forEach(b=>b.onclick=()=>useUltimate(Number(b.dataset.id)));
+  document.querySelectorAll('.battle-spit').forEach(b=>b.onclick=()=>useSpit(Number(b.dataset.id)));
   document.querySelectorAll('.battle-leave').forEach(b=>b.onclick=()=>leaveBattle(Number(b.dataset.id)));
   document.querySelectorAll('.challenge-bet').forEach(b=>b.onclick=()=>placeChallengeBet(Number(b.dataset.id)));
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
@@ -182,15 +183,24 @@ async function useUltimate(requestId){
  const b=document.querySelector(`.battle-ultimate[data-id="${requestId}"]`),msg=$('#challengeMsg'); if(b)b.disabled=true;
  try{
   const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,techniqueId:Number($('#battleTechniqueSelect')?.value||0)})});
-  msg.textContent=x.status==='completed'?`🏆 ${x.message}`:`⚡ ${x.message}`;
-  await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
+  const betNote=x.betSettlement?.notices?.find(n=>Number(n.bettorId)===Number(currentUser?.id));
+  const betText=betNote?.result==='won'?` · 🏆 Cược thắng +${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:(betNote?.result==='refunded'?` · ↩ Hoàn ${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:'');
+  msg.textContent=x.status==='completed'?`🏆 ${x.message}${betText}`:`⚡ ${x.message}`;
+  await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard(),loadMailbox()]);
  }catch(e){msg.textContent='❌ '+e.message;await loadChallenges();}
+}
+
+async function useSpit(requestId){
+ const b=document.querySelector(`.battle-spit[data-id="${requestId}"]`),msg=$('#challengeMsg');
+ if(!confirm('Môn nhân cao hơn ít nhất 2 cảnh giới sẽ kết thúc lôi đài bằng Nhổ 1 ngụm nước bọt. Tiếp tục?'))return;
+ if(b)b.disabled=true;
+ try{const x=await api('/api/challenges/online/spit',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId})});const betNote=x.betSettlement?.notices?.find(n=>Number(n.bettorId)===Number(currentUser?.id));const betText=betNote?.result==='won'?` · 🏆 Cược thắng +${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:(betNote?.result==='refunded'?` · ↩ Hoàn ${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:'');msg.textContent='💦 '+x.message+betText;await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard(),loadMailbox(),pollChallengeAnnouncement(true)]);}catch(e){msg.textContent='❌ '+e.message;if(b)b.disabled=false;await loadChallenges();}
 }
 
 async function leaveBattle(requestId){
  const msg=$('#challengeMsg');
  if(!confirm('Rời khỏi lôi đài sẽ được tính là THẤT BẠI và chịu toàn bộ hình phạt. Tiếp tục?'))return;
- try{const x=await api('/api/challenges/online/leave',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId})});msg.textContent='🏳️ '+x.message;await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);}catch(e){msg.textContent='❌ '+e.message;await loadChallenges();}
+ try{const x=await api('/api/challenges/online/leave',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId})});const betNote=x.betSettlement?.notices?.find(n=>Number(n.bettorId)===Number(currentUser?.id));const betText=betNote?.result==='won'?` · 🏆 Cược thắng +${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:(betNote?.result==='refunded'?` · ↩ Hoàn ${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:'');msg.textContent='🏳️ '+x.message+betText;await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard(),loadMailbox()]);}catch(e){msg.textContent='❌ '+e.message;await loadChallenges();}
 }
 
 async function placeChallengeBet(challengeId){
@@ -479,7 +489,7 @@ function startOnlineCultivation(){
 function renderCultivation(p){
  const prog=p.progress;
  const maxDaily=Number(p.maxDaily||10), trainCount=Number(p.trainCount||0);
- const realms=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế'];
+ const realms=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao'];
  const atTribulation=String(p.realm)==='Độ Kiếp' && Number(p.tier)===9;
  const mansionActive=Boolean(p.mansion?.active);
  const onlineRate=Number(p.onlineRate||Math.max(1,18-Number(p.progress?.realmIndex||0)));
@@ -541,7 +551,7 @@ async function loadTreasure(){
  try{
   const d=await api('/api/treasury',{headers:authHeaders()});
   const area=$('#treasureArea'); if(!area)return;
-  const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế'];
+  const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao'];
   const currentRealmIndex=realmNames.indexOf(String(d.realm||''));
   area.innerHTML=`<div class="treasure-wallet"><span>☯ Linh lực hiện có · 💎 Linh thạch</span><strong>${Number(d.spiritPower).toLocaleString('vi-VN')} · ${Number(d.spiritStones||0).toLocaleString('vi-VN')}</strong><small>${esc(d.realm)} · ${esc(d.tierName||(`Tầng ${d.tier}/9`))} · 100 linh lực = 1 linh thạch</small></div>
   <div class="stone-exchange"><div><span class="eyebrow">🏯 TÀNG BẢO CÁC 2.1</span><h3>Pháp khí · Đan dược · Dược Phường · Linh vật trong cùng một kho</h3><p>Toàn bộ vật phẩm của Dược Đường đã được tích hợp vào Tàng Bảo Các. Mua xong vật phẩm chuyển thẳng vào Tu Di Giới; đan dược có thể dùng trực tiếp, thức ăn/Khôi Lỗi/trang bị linh thú dùng tại Dưỡng Thú.</p></div><span class="tag">☯ Giao dịch thống nhất</span></div>
@@ -706,7 +716,7 @@ async function loadBicanh(){
   const [d,h]=await Promise.all([api('/api/bicanh',{headers:authHeaders()}),api('/api/bicanh/history',{headers:authHeaders()})]);
   const realms=d.realms||[], me=d.me||{}, friends=d.friends||[], invites=d.invites||[];
   const debuffActive=me.secret_realm_debuff_until&&new Date(me.secret_realm_debuff_until)>new Date();
-  const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế'];
+  const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao'];
   const currentIndex=Math.max(0,Number(me.realmIndex||0));
   const selectedRealm=realms.find(r=>Number(r.required_realm_index)===currentIndex)||realms[0];
   const selector=realms.map(r=>{const idx=Number(r.required_realm_index);const high=idx>currentIndex;const low=idx<currentIndex;return `<option value="${idx}" ${idx===currentIndex?'selected':''} ${high?'disabled':''}>${esc(r.required_realm_name)} — ${esc(r.name)}${high?' 🔒 cảnh giới chưa đủ':low?' ⚠️ thấp hơn · nguy cơ '+Number(r.break_chance||0)+'%':''}</option>`;}).join('');
@@ -773,8 +783,8 @@ async function loadTienBan(){
  try{
   const d=await api('/api/tien-ban',{headers:authHeaders()});
   const history=d.history||[];
-  area.innerHTML=`<div class="tien-ban-orb"><div class="tien-ban-symbol">🎴</div><div><span class="eyebrow">☯ TIÊN BÀN GIÁNG CƠ DUYÊN</span><h3>Mỗi lần xoay, một mệnh số mới</h3><p>Giá cố định <b>3.000 linh thạch/lượt</b>. Tất cả môn nhân đều được quay.</p><div class="tien-ban-pity">⚜️ Cơ duyên đặc biệt · <b>Cửu Vĩ Thiên Hồ 0,5%</b> · Thiên Phú Vô Thượng: Huyễn Thuật</div></div><div class="tien-ban-wallet">💎 ${Number(d.spiritStones||0).toLocaleString('vi-VN')}</div></div>
-  <div class="tien-ban-action"><button id="tienBanSpinBtn" class="btn primary">🎴 XOAY TIÊN BÀN · 3.000 💎</button><button id="tienBanSpin10Btn" class="btn tien-ban-spin10">✨ QUAY 10 LẦN · 30.000 💎</button><span id="tienBanMsg" class="train-msg"></span></div><div id="tienBanBatchResult" class="tien-ban-batch-result"></div>
+  area.innerHTML=`<div class="tien-ban-orb"><div class="tien-ban-symbol">🎴</div><div><span class="eyebrow">☯ TIÊN BÀN GIÁNG CƠ DUYÊN</span><h3>Mỗi lần xoay, một mệnh số mới</h3><p>Giá cố định <b>8.000 linh thạch/lượt</b>. Tất cả môn nhân đều được quay.</p><div class="tien-ban-pity">⚜️ Cơ duyên đặc biệt · <b>Cửu Vĩ Thiên Hồ 0,5%</b> · Thiên Phú Vô Thượng: Huyễn Thuật</div></div><div class="tien-ban-wallet">💎 ${Number(d.spiritStones||0).toLocaleString('vi-VN')}</div></div>
+  <div class="tien-ban-action"><button id="tienBanSpinBtn" class="btn primary">🎴 XOAY TIÊN BÀN · 8.000 💎</button><button id="tienBanSpin10Btn" class="btn tien-ban-spin10">✨ QUAY 10 LẦN · 80.000 💎</button><span id="tienBanMsg" class="train-msg"></span></div><div id="tienBanBatchResult" class="tien-ban-batch-result"></div>
   <div id="tienBanReward"></div>
   <div class="tien-ban-history"><span class="eyebrow">📜 12 CƠ DUYÊN GẦN NHẤT</span>${history.length?history.map(x=>`<div class="tien-history-row ${x.is_special?'special':''}"><span>${x.is_special?'⚜️':'🎁'}</span><b>${esc(x.reward_name)}</b><small>${esc(x.reward_rarity)} · ${new Date(x.created_at).toLocaleString('vi-VN')}</small></div>`).join(''):'<p class="muted">Chưa có lần quay nào.</p>'}</div>`;
   $('#tienBanSpinBtn').onclick=async()=>{
@@ -790,7 +800,7 @@ async function loadTienBan(){
   };
   $('#tienBanSpin10Btn').onclick=async()=>{
     const b=$('#tienBanSpin10Btn'),one=$('#tienBanSpinBtn'),msg=$('#tienBanMsg'),host=$('#tienBanBatchResult');
-    if(Number(currentProfile?.spirit_stones||0)<30000){msg.textContent='❌ Cần 30.000 linh thạch để quay 10 lần.';return;}
+    if(Number(currentProfile?.spirit_stones||0)<80000){msg.textContent='❌ Cần 80.000 linh thạch để quay 10 lần.';return;}
     b.disabled=true;one.disabled=true;host.innerHTML='<div class="tien-batch-casting">☯ ✦ ☯ Đang mở 10 đạo cơ duyên...</div>';
     try{
       const x=await api('/api/tien-ban/spin10',{method:'POST',headers:authHeaders(),body:'{}'});
@@ -823,7 +833,7 @@ async function loadDanPhap(){
  const area=$('#danPhapArea'); if(!area||!getToken())return;
  try{
   const d=await api('/api/dan-phap',{headers:authHeaders()});
-  const ri=Number(d.realmIndex||0),room=d.room,recipes=d.recipes||[],furnaces=d.furnaces||[],grades=d.roomGrades||[];
+  const ri=Number(d.realmIndex||0),room=d.room,recipes=d.recipes||[],furnaces=d.furnaces||[],grades=d.roomGrades||[],isDanMaster=Boolean(d.isDanMaster);
   const owned=(d.inventory||[]).filter(x=>Number(x.quantity||0)>0);
   const learned=recipes.filter(r=>r.learned);
   const selectedFurnace=Number(localStorage.getItem('htm_alchemy_furnace')||furnaces[0]?.item_id||0);
@@ -834,7 +844,7 @@ async function loadDanPhap(){
   area.innerHTML=`
   <div class="alchemy-hero"><div><span class="eyebrow">⚗️ ĐAN PHÁP · HỎA HẦU CỔ ĐIỂN</span><h3>Huyền Lô Truyền Pháp</h3><p>Trao đổi Đan Pháp bằng linh thạch. Đan Pháp càng cao cấp càng đắt; lò luyện càng cao phẩm cấp càng tăng tỷ lệ thành đan.</p></div><div class="alchemy-wallet">💎 ${fmt(d.spiritStones)}<small>${room?`🏯 ${esc(room.room_grade)} · còn ${roomHours} giờ`:'Chưa thuê Đan Phòng'}</small></div></div>
   <div class="alchemy-room-panel"><div><span class="eyebrow">🏯 LUYỆN ĐAN PHÒNG · PHẨM CẤP</span><h3>${room?`${gradeIcon(room.room_grade)} ${esc(room.room_grade)} đang hoạt động`:'Chọn phẩm cấp Đan Phòng'}</h3><p>${room?`Giá thuê: ${fmt(room.price_stones)} linh thạch/giờ · hết ${new Date(room.expires_at).toLocaleString('vi-VN')}`:'Thuê tối thiểu 1 giờ, tối đa 10 giờ. Giá phụ thuộc phẩm cấp phòng.'}</p></div>
-   ${room?`<div class="alchemy-manager"><label>👤 Người trông coi</label><select id="alchemyManager"><option value="">${room.manager_name?'Đang chọn: '+esc(room.manager_name):'Chọn 1 môn nhân'}</option>${(d.rooms||[]).filter(x=>Number(x.user_id)!==Number(currentUser?.id)).map(x=>`<option value="${x.user_id}">${esc(x.display_name)} · @${esc(x.username)}</option>`).join('')}</select><button class="btn small ghost" id="alchemySetManager">Bổ nhiệm</button><button class="btn small ${room.auto_accept_orders?'primary':'ghost'}" id="alchemyAutoOrders" data-enabled="${room.auto_accept_orders?'1':'0'}">${room.auto_accept_orders?'🟢 Khai phòng':'⚪ Đóng phòng'}</button></div>`:
+   ${room?`<div class="alchemy-manager">${isDanMaster?`<label>👤 Người trông coi</label><select id="alchemyManager"><option value="">${room.manager_name?'Đang chọn: '+esc(room.manager_name):'Chọn 1 môn nhân'}</option>${(d.rooms||[]).filter(x=>Number(x.user_id)!==Number(currentUser?.id)).map(x=>`<option value="${x.user_id}">${esc(x.display_name)} · @${esc(x.username)}</option>`).join('')}</select><button class="btn small ghost" id="alchemySetManager">Bổ nhiệm</button>`:`<div class="alchemy-manager-note">👤 Người trông coi: ${room.manager_name?esc(room.manager_name):'Chưa bổ nhiệm'}<small>Chỉ Đan Chủ Đan Đường được phép thay đổi người trông coi.</small></div>`}<button class="btn small ${room.auto_accept_orders?'primary':'ghost'}" id="alchemyAutoOrders" data-enabled="${room.auto_accept_orders?'1':'0'}">${room.auto_accept_orders?'🟢 Khai phòng':'⚪ Đóng phòng'}</button></div>`:
    `<div class="alchemy-rent"><select id="alchemyRoomGrade">${grades.map(g=>{const locked=ri<Number(g.minRealm||0);return `<option value="${esc(g.grade)}" ${locked?'disabled':''}>${gradeIcon(g.grade)} ${esc(g.grade)} · ${fmt(g.price)} 💎/giờ${locked?' · 🔒':''}</option>`}).join('')}</select><select id="alchemyHours">${Array.from({length:10},(_,i)=>`<option value="${i+1}">${i+1} giờ</option>`).join('')}</select><button class="btn primary" id="alchemyRent">🔥 Thuê Đan Phòng</button></div>`}</div>
   ${room?`<div class="alchemy-furnace-panel"><div class="alchemy-panel-title"><div><span class="eyebrow">🔥 LÒ LUYỆN SỞ HỮU</span><h3>Đan Lô của môn nhân</h3><p>Chọn lò bạn sở hữu. Phẩm cấp lò cộng trực tiếp vào tỷ lệ thành đan.</p></div></div><div class="alchemy-furnace-grid">${furnaces.length?furnaces.map(f=>`<button type="button" class="alchemy-furnace-card ${Number(f.item_id)===selectedFurnace?'selected':''}" data-furnace="${f.item_id}"><span class="furnace-orb">🔥</span><b>${esc(f.name)}</b><small>${esc(f.grade)} · +${Number(f.bonus)}% thành đan · ×${Number(f.quantity)}</small></button>`).join(''):'<div class="empty-state compact"><p>Chưa sở hữu Lò Luyện Đan. Có thể mua lò tại Đan Đường.</p></div>'}</div></div>`:''}
   <div class="alchemy-recipe-grid">${recipes.map(r=>{const locked=ri<Number(r.min_realm||0),ing=(r.ingredients||[]).map(x=>`${esc(x.name)} ×${Number(x.quantity)}`).join(' · ');return `<article class="alchemy-recipe-card ${locked?'locked':''} ${r.learned?'learned':''}"><div class="alchemy-recipe-top"><span class="alchemy-grade">${gradeIcon(r.grade)} ${esc(r.grade)}</span><span>🎯 Cơ bản ${Number(r.success_rate)}%</span></div><h3>${esc(r.name)}</h3><span class="eyebrow">${esc(r.function_name)}</span><p>${esc(r.description)}</p><div class="alchemy-ingredients"><b>🌿 Linh dược cần dùng</b><span>${ing}</span></div><div class="alchemy-meta"><span>📜 Đổi pháp: <b>${fmt(r.learn_price)} 💎</b></span><span>🧪 Giá đan: <b>${fmt(r.exchange_price)} 💎</b></span></div>${locked?'<button class="btn small ghost" disabled>🔒 Chưa đủ cảnh giới</button>':r.learned?`<button class="btn small primary alchemy-open-recipe" data-id="${r.id}">🔥 Chọn công thức</button>`:`<button class="btn small primary alchemy-learn" data-id="${r.id}">📜 Trao đổi Đan Pháp · ${fmt(r.learn_price)} 💎</button>`}</article>`}).join('')}</div>
@@ -847,7 +857,7 @@ async function loadDanPhap(){
     localStorage.setItem('htm_alchemy_recipe',String(rid));localStorage.setItem('htm_alchemy_furnace',String(fId));
     if(!r||!host){return;}
     host.innerHTML=(r.ingredients||[]).map(x=>{const have=Number(owned.find(i=>Number(i.item_id)===Number(x.itemId))?.quantity||0);return `<div class="alchemy-ingredient-slot"><span>🌿</span><div><b>${esc(x.name)}</b><small>Cần ${Number(x.quantity)} · Có ${have}</small></div><input value="${Number(x.quantity)}" min="${Number(x.quantity)}" max="${have}" data-item="${x.itemId}" type="number" ${have<Number(x.quantity)?'disabled':''}></div>`}).join('');
-    const rate=Math.min(99,Number(r.success_rate||0)+Number(f?.bonus||0));$('#alchemyBrewRate').textContent=f?`🎯 Thành đan dự kiến: ${rate}% · ${esc(f.grade)}`:'Chưa chọn lò';
+    const rate=Math.min(100,Number(r.success_rate||0)+Number(f?.bonus||0));$('#alchemyBrewRate').textContent=f?`🎯 Thành đan dự kiến: ${rate}% · ${esc(f.grade)}`:'Chưa chọn lò';
   };
   $('#alchemyAutoOrders')?.addEventListener('click',async()=>{const b=$('#alchemyAutoOrders'),enabled=b.dataset.enabled!=='1';b.disabled=true;try{const x=await api('/api/dan-phap/room/auto',{method:'POST',headers:authHeaders(),body:JSON.stringify({enabled})});$('#alchemyMsg').textContent='✅ '+x.message;await loadDanPhap();}catch(e){$('#alchemyMsg').textContent='❌ '+e.message;b.disabled=false;}});
   $('#alchemyRent')?.addEventListener('click',async()=>{const hours=Number($('#alchemyHours').value||1),grade=$('#alchemyRoomGrade').value;try{const x=await api('/api/dan-phap/room/rent',{method:'POST',headers:authHeaders(),body:JSON.stringify({hours,grade})});$('#alchemyMsg').textContent='✅ '+x.message;await Promise.all([loadDanPhap(),loadProfile()]);}catch(e){$('#alchemyMsg').textContent='❌ '+e.message;}});
@@ -858,7 +868,7 @@ async function loadDanPhap(){
   $('#alchemyBrewRecipe')?.addEventListener('change',updateSlots);$('#alchemyBrewFurnace')?.addEventListener('change',updateSlots);updateSlots();
   $('#alchemyOrderRecipe')?.addEventListener('change',()=>{const r=recipes.find(x=>Number(x.id)===Number($('#alchemyOrderRecipe').value));const ingredientValue=(r.ingredients||[]).reduce((sum,x)=>sum+Number(x.price||0)*Number(x.quantity||0),0);$('#alchemyOrderPrice').textContent=r?`Giá linh dược = ${fmt(ingredientValue)} × số lượng · Giá gửi đơn 150% = ${fmt(Math.round(ingredientValue*Number($('#alchemyOrderQty').value||1)*1.5))} linh thạch · Thành công: 10 viên/đơn.`:'';});
   $('#alchemyOrderQty')?.addEventListener('input',()=>$('#alchemyOrderRecipe')?.dispatchEvent(new Event('change')));$('#alchemyOrderRecipe')?.dispatchEvent(new Event('change'));
-  $('#alchemyOrderForm')?.addEventListener('submit',async e=>{e.preventDefault();const msg=$('#alchemyOrderMsg');try{const x=await api('/api/dan-phap/order',{method:'POST',headers:authHeaders(),body:JSON.stringify({recipeId:Number($('#alchemyOrderRecipe').value),roomOwnerId:Number($('#alchemyOrderRoom').value),quantity:Number($('#alchemyOrderQty').value||1)})});msg.textContent='✅ '+x.message;await loadDanPhap();}catch(err){msg.textContent='❌ '+err.message;}});
+  $('#alchemyOrderForm')?.addEventListener('submit',async e=>{e.preventDefault();const msg=$('#alchemyOrderMsg');try{const recipeId=Number($('#alchemyOrderRecipe').value||0),roomOwnerId=Number($('#alchemyOrderRoom').value||0),quantity=Math.max(1,Math.min(20,Math.floor(Number($('#alchemyOrderQty').value)||1)));if(!recipeId)return void(msg.textContent='❌ Hãy chọn Đan Pháp.');if(!roomOwnerId)return void(msg.textContent='❌ Hãy chọn Đan Phòng môn nhân.');const x=await api('/api/dan-phap/order',{method:'POST',headers:authHeaders(),body:JSON.stringify({recipeId,roomOwnerId,quantity})});msg.textContent='✅ '+x.message;await loadDanPhap();}catch(err){msg.textContent='❌ '+err.message;}});
   document.querySelectorAll('.alchemy-accept,.alchemy-reject').forEach(b=>b.onclick=async()=>{try{const x=await api('/api/dan-phap/order/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:Number(b.dataset.id),action:b.classList.contains('alchemy-accept')?'accept':'reject'})});$('#alchemyMsg').textContent='✅ '+x.message;await loadDanPhap();}catch(e){$('#alchemyMsg').textContent='❌ '+e.message;}});
   document.querySelectorAll('.alchemy-brew-order').forEach(b=>b.onclick=async()=>{b.disabled=true;const furnaceId=Number($('#alchemyBrewFurnace')?.value||selectedFurnace);try{const x=await api('/api/dan-phap/brew',{method:'POST',headers:authHeaders(),body:JSON.stringify({orderId:Number(b.dataset.id),recipeId:Number(b.dataset.recipe),furnaceId})});$('#alchemyMsg').textContent=(x.success?'✨ ':'❌ ')+x.message;await Promise.all([loadDanPhap(),loadProfile(),loadTuDi()]);}catch(e){$('#alchemyMsg').textContent='❌ '+e.message;b.disabled=false;}});
   $('.alchemy-main-brew')?.addEventListener('click',async()=>{const b=$('.alchemy-main-brew'),recipeId=Number($('#alchemyBrewRecipe').value||0),furnaceId=Number($('#alchemyBrewFurnace').value||0);if(!recipeId||!furnaceId)return;b.disabled=true;area.classList.add('alchemy-furnace-active');$('#alchemyMsg').textContent='🔥 Đan Lô đang tụ hỏa · luyện đan...';try{const x=await api('/api/dan-phap/brew-direct',{method:'POST',headers:authHeaders(),body:JSON.stringify({recipeId,furnaceId})});$('#alchemyMsg').textContent=(x.success?'✨ ':'❌ ')+x.message;await Promise.all([loadDanPhap(),loadProfile(),loadTuDi()]);}catch(e){$('#alchemyMsg').textContent='❌ '+e.message;}finally{area.classList.remove('alchemy-furnace-active');b.disabled=false;}});
@@ -948,7 +958,7 @@ async function loadBeastHouse(){
  const area=$('#beastHouseArea'); if(!area||!getToken())return;
  try{
   const [d,rankData]=await Promise.all([api('/api/beast-house',{headers:authHeaders()}),api('/api/linh-thu-bang',{headers:authHeaders()})]); const p=d.profile||{};
-  const realms=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế'];
+  const realms=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao'];
   const realmIndex=realms.indexOf(currentProfile?.rank);
   const refreshAt=Date.now()+Number(d.nextRefreshMs||300000);
   area.innerHTML=`<div class="spirit-shop-summary"><div><span class="eyebrow">🐉 THÚ ĐƯỜNG · LUÂN PHIÊN LINH THÚ</span><h3>${esc(p.spirit_beast||'Chưa có linh thú')}</h3><small>Kho hiện có <b>${Number(d.totalBeasts||0)}</b> chủng · phiên hàng đổi mỗi <b>5 phút</b>.</small></div><div class="beast-refresh-box"><b id="beastRefreshCountdown">Đang tính...</b><small>🔄 Làm mới sau</small></div><b>💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')} linh thạch</b></div><div class="beast-rotation-note">🌌 <b>Phiên ${esc(d.rotationKey||'')}</b> · Danh sách hiện tại gồm <b>${(d.catalog||[]).length}</b> linh thú được chọn từ kho lớn. Hãy quay lại sau 5 phút để gặp những linh thú khác.</div><div class="spirit-shop-grid">${(d.catalog||[]).map(x=>{const unavailable=realmIndex<Number(x.min_realm); return `<article class="spirit-shop-card ${unavailable?'locked':''}"><div class="spirit-shop-icon">🐉</div><div class="spirit-shop-copy"><span class="eyebrow">${esc(x.rarity)} · ${esc(x.beast_realm)} ${Number(x.beast_realm_tier||1)}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>⚔ ${x.attack} · 🛡 ${x.defense} · 💨 ${x.speed} · ☯ ${x.spirit}</small><small>Thiên phú: ${esc(x.skill)}</small><small>⚔ Chiến lực trang bị: +${Number(x.power_bonus||0).toLocaleString('vi-VN')} · ${esc(x.ability||'—')}</small><small>Yêu cầu: ${esc(realms[Number(x.min_realm)]||'—')}</small></div><div class="spirit-shop-buy"><b>💎 ${Number(x.price_stones).toLocaleString('vi-VN')}</b><button class="btn small primary beast-buy" data-id="${x.id}" ${unavailable?'disabled':''}>${unavailable?'🔒 Chưa đủ cảnh giới':'Mua linh thú'}</button></div></article>`}).join('')}</div><div class="spirit-shop-note">Linh thú mua thành công sẽ được lưu vào Tu Di Giới. Vào Trang Bị để thay thế linh thú đang dùng.</div><div class="shop-ranking"><div class="friend-subtitle">🏆 Bảng xếp hạng Linh Thú</div><div class="shop-ranking-list">${(rankData.rows||[]).slice(0,10).map((x,i)=>`<div class="shop-ranking-row"><b>#${i+1}</b><span>🐉</span><div><strong>${esc(x.name)}</strong><small>${esc(x.beast_realm||'Nhất Giai')} · ${Number(x.beast_realm_tier||1)} · ${esc(x.rarity)}</small></div><em>${Number(x.owner_count||0)} người sở hữu</em></div>`).join('')||'<div class="empty-state compact"><p>Chưa có linh thú được ghi danh.</p></div>'}</div></div><p id="beastHouseMsg" class="train-msg"></p>`;
@@ -961,7 +971,7 @@ async function loadBeastHouse(){
 async function loadLinhPhap(){
  const area=$('#linhPhapArea'); if(!area||!getToken())return;
  try{
-  const [d,rankData]=await Promise.all([api('/api/linh-phap',{headers:authHeaders()}),api('/api/linh-can-bang',{headers:authHeaders()})]); const p=d.profile||{}; const realms=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế']; const realmIndex=realms.indexOf(currentProfile?.rank);
+  const [d,rankData]=await Promise.all([api('/api/linh-phap',{headers:authHeaders()}),api('/api/linh-can-bang',{headers:authHeaders()})]); const p=d.profile||{}; const realms=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao']; const realmIndex=realms.indexOf(currentProfile?.rank);
   area.innerHTML=`<div class="spirit-shop-summary"><div><span class="eyebrow">🌿 LINH CĂN HIỆN TẠI</span><h3>${esc(p.spirit_root||'Chưa có linh căn')}</h3><small>${esc(p.spirit_root_rarity||'—')}</small></div><b>💎 ${Number(p.spirit_stones||0).toLocaleString('vi-VN')} linh thạch</b></div><div class="spirit-shop-grid">${(d.catalog||[]).map(x=>{const unavailable=realmIndex<Number(x.min_realm);const immortal=String(x.rarity||'').includes('Tiên');const icon=immortal?'☯️':'🌿';return `<article class="spirit-shop-card ${immortal?'immortal-root-card ':''}${unavailable?'locked':''}"><div class="spirit-shop-icon">${icon}</div><div class="spirit-shop-copy"><span class="eyebrow">${immortal?'✨ ':''}${esc(x.rarity)}</span><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p><small>${esc(x.support)}</small><small>⚔ Chiến lực trang bị: +${Number(x.power_bonus||0).toLocaleString('vi-VN')} · ${esc(x.ability||'—')}</small><small>Yêu cầu: ${esc(realms[Number(x.min_realm)]||'—')}</small></div><div class="spirit-shop-buy"><b>💎 ${Number(x.price_stones).toLocaleString('vi-VN')}</b><button class="btn small primary root-buy" data-id="${x.id}" ${unavailable?'disabled':''}>${unavailable?'🔒 Chưa đủ cảnh giới':'Mua linh căn'}</button></div></article>`}).join('')}</div><div class="spirit-shop-note">Linh căn mua thành công sẽ được lưu vào Tu Di Giới. Vào Trang Bị để thay thế linh căn đang dùng.</div><div class="shop-ranking"><div class="friend-subtitle">🏆 Bảng xếp hạng Linh Căn</div><div class="shop-ranking-list">${(rankData.rows||[]).slice(0,10).map((x,i)=>`<div class="shop-ranking-row"><b>#${i+1}</b><span>🌿</span><div><strong>${esc(x.name)}</strong><small>${esc(x.rarity)} · +${Number(x.owner_count||0)} người sở hữu</small></div><em>${esc(x.support||'')}</em></div>`).join('')||'<div class="empty-state compact"><p>Chưa có linh căn được ghi danh.</p></div>'}</div></div><p id="linhPhapMsg" class="train-msg"></p>`;
   document.querySelectorAll('.root-buy').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/linh-phap/buy',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(b.dataset.id)})});$('#linhPhapMsg').textContent=`🌿 ${x.message||('Đã nhận '+x.item)} · Trừ ${Number(x.price).toLocaleString('vi-VN')} linh thạch.`;await loadProfile();await loadLinhPhap();await loadSpiritRankings();await loadEquipment();}catch(e){$('#linhPhapMsg').textContent='❌ '+e.message;b.disabled=false;}});
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
@@ -1286,6 +1296,12 @@ async function loadMailbox(){
   });
  }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
 }
+let lastChallengeAnnouncementId=0;
+async function pollChallengeAnnouncement(force=false){
+ if(!getToken())return;
+ try{const d=await api('/api/challenges/announcement',{headers:authHeaders()});const a=d.announcement;if(!a)return;const id=Number(a.id);if(!force&&id<=lastChallengeAnnouncementId)return;lastChallengeAnnouncementId=id;let el=document.getElementById('challengeGlobalAnnouncement');if(!el){el=document.createElement('div');el.id='challengeGlobalAnnouncement';el.className='challenge-global-announcement';document.body.appendChild(el);}el.textContent=a.message;el.classList.remove('show');void el.offsetWidth;el.classList.add('show');const ms=Math.max(0,new Date(a.expires_at).getTime()-Date.now());setTimeout(()=>{if(el)el.classList.remove('show');},Math.min(10000,ms||10000));}catch{}
+}
+
 async function loadChat(){
  if(!getToken())return;
  try{const d=await api('/api/chat',{headers:authHeaders()});renderChat(d.rows,d.elderSettings);}catch(e){if(getToken())$('#chatArea').innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
@@ -1356,6 +1372,7 @@ setupTutorial();
 
 loadData();loadSect();checkSession();startRewardWatcher();
 setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},30000);
+setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},2000);
 setInterval(()=>{if(getToken()&&!document.hidden)sendPresenceHeartbeat();},45000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
 
