@@ -1,0 +1,25 @@
+HÀN THIÊN MÔN v3.6.87
+
+1. Đan Pháp trao đổi bằng linh thạch:
+- Mỗi công thức có learn_price theo phẩm cấp: Hạ 2.000; Trung 8.000; Thượng 30.000; Cực 100.000; Tiên 500.000 linh thạch.
+- Chỉ lưu một dòng user_id + recipe_id trong alchemy_known_recipes khi môn nhân đã trao đổi.
+- Chưa sở hữu thì không được luyện hoặc gửi đơn.
+
+2. Đan Phòng chia theo phẩm cấp:
+- Hạ 10.000/giờ, Trung 50.000/giờ, Thượng 180.000/giờ, Cực 450.000/giờ, Tiên 900.000/giờ.
+- Thuê 1-10 giờ; cảnh giới tối thiểu tương ứng 0/3/6/9/12.
+- alchemy_rooms lưu room_grade.
+
+3. Luyện bằng Lò Luyện Đan sở hữu:
+- Giao diện phụ có chọn lò, chọn Đan Pháp, ô linh dược và nút luyện.
+- Lò Hạ/Trung/Thượng/Cực/Tiên cộng lần lượt 0/5/10/18/28 điểm phần trăm vào tỷ lệ thành đan, tối đa 99%.
+- Server bắt buộc xác nhận tài khoản sở hữu lò trong inventory.
+
+4. Giá gửi đơn:
+- NPC = giá trị đan dược (exchange_price) × số lượng × 180%.
+- Môn nhân = giá trị đan dược × số lượng × 200%.
+- Không còn tính giá đơn theo giá trị linh dược. ingredient_value chỉ còn dùng để tính phần lợi nhuận của Đan Phòng.
+
+5. Database:
+- Không lưu lịch sử lò luyện hay nguyên liệu trung gian; chỉ giữ inventory, công thức, quyền sở hữu Đan Pháp, phòng đang thuê và đơn đang chờ.
+- Các đơn đã hoàn thành/từ chối/thất bại vẫn dọn sau 5 phút theo maintenance.
