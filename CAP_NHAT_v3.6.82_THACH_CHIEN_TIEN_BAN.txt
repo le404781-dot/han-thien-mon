@@ -1,0 +1,6 @@
+HÀN THIÊN MÔN v3.6.82
+
+- Khiêu Chiến: tối đa 5 lượt / 24 giờ / môn nhân.
+- Thú Trường: tối đa 5 lượt / 24 giờ / môn nhân, áp dụng Offline, Thần Thú và mở lời mời Online. Dùng bảng usage nhỏ để đếm lượt, không ảnh hưởng dữ liệu chiến đấu.
+- Hiệu ứng động cho Khiêu Chiến Online/Offline và Thú Trường.
+- Tiên Bàn thêm QUAY 10 LẦN: 30.000 linh thạch, xử lý trong một giao dịch.

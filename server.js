@@ -722,6 +722,8 @@ async function ensureBeastArenaSchemaImpl(){
     );
     CREATE INDEX IF NOT EXISTS idx_beast_arena_pending ON beast_arena_requests(opponent_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_beast_arena_history ON beast_arena_requests(created_at DESC);
+    CREATE TABLE IF NOT EXISTS beast_arena_usage (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,mode TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE INDEX IF NOT EXISTS idx_beast_arena_usage_user_time ON beast_arena_usage(user_id,created_at DESC);
     ALTER TABLE beast_arena_requests ADD COLUMN IF NOT EXISTS challenger_skill_id INTEGER;
     ALTER TABLE beast_arena_requests ADD COLUMN IF NOT EXISTS opponent_skill_id INTEGER;
     ALTER TABLE beast_arena_requests ADD COLUMN IF NOT EXISTS challenger_skill_queue TEXT NOT NULL DEFAULT '[]';
@@ -792,19 +794,66 @@ async function ensureVenueRoleSchemaImpl(){
     );
     CREATE INDEX IF NOT EXISTS idx_dan_invites_buyer_status ON dan_duong_member_invites(buyer_id,status,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_dan_invites_owner_status ON dan_duong_member_invites(owner_id,status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_created ON chat_messages(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_private_messages_read_created ON private_messages(read_at,created_at) WHERE read_at IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_activity_events_created ON activity_events(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tavern_sales_created ON tavern_sales(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tien_ban_history_created ON tien_ban_history(created_at DESC);
   `);
 }
 
 async function runDatabaseMaintenance(){
-  // Keep the database lean without deleting active gameplay data.
+  // v3.6.81: dữ liệu tạm/lịch sử được dọn sau 5 giờ. Không xóa dữ liệu tài khoản,
+  // vật phẩm, thành tựu, bạn bè, bài viết, công pháp hoặc tiến trình hiện tại.
+  // Các bảng bên dưới chủ yếu là phiên đăng nhập / inbox / log lịch sử có thể tăng vô hạn.
   try{
+    // 1) Session đã hết hạn: hoàn toàn không còn giá trị.
     await query(`DELETE FROM sessions WHERE expires_at < (EXTRACT(EPOCH FROM NOW())*1000)::BIGINT`);
-    await query(`DELETE FROM mailbox_notifications WHERE read_at IS NOT NULL AND created_at < NOW()-INTERVAL '30 days'`);
+
+    // 2) Kho có quantity=0: không cần lưu row rỗng.
     await query(`DELETE FROM inventory WHERE quantity<=0`);
     await query(`DELETE FROM tavern_inventory WHERE quantity<=0`);
+
+    // 3) Inbox: giữ thông báo chưa đọc; thông báo đã đọc quá 5 giờ không còn cần thiết.
+    await query(`DELETE FROM mailbox_notifications WHERE read_at IS NOT NULL AND created_at < NOW()-INTERVAL '5 hours'`);
+
+    // 4) Lời mời / giao dịch tạm đã kết thúc: dọn sau 5 giờ.
     await query(`DELETE FROM tavern_listings WHERE active=false AND created_at < NOW()-INTERVAL '14 days'`);
-    await query(`DELETE FROM tavern_member_invites WHERE status<>'pending' AND responded_at < NOW()-INTERVAL '30 days'`);
-    await query(`DELETE FROM black_market_sales WHERE created_at < NOW()-INTERVAL '90 days'`);
+    await query(`DELETE FROM tavern_member_invites WHERE status<>'pending' AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM dan_duong_member_invites WHERE status<>'pending' AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM friend_requests WHERE status='rejected' AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM market_trades WHERE status<>'pending' AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 hours'`);
+
+    // 5) Log hoạt động chỉ phục vụ nhiệm vụ theo chu kỳ ngắn; giữ 14 ngày là đủ.
+    await query(`DELETE FROM activity_events WHERE created_at < NOW()-INTERVAL '14 days'`);
+
+    // 6) Lịch sử giao dịch / bí cảnh / khiêu chiến không ảnh hưởng gameplay hiện tại: dọn sau 5 giờ.
+    await query(`DELETE FROM black_market_sales WHERE created_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM tavern_sales WHERE created_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM tien_ban_history WHERE created_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM secret_realm_contributions WHERE created_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM secret_realm_runs WHERE created_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM challenge_bets WHERE settled_at IS NOT NULL AND settled_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM challenge_requests WHERE status IN ('rejected','completed') AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM beast_arena_requests WHERE status IN ('rejected','completed') AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 hours'`);
+
+    // 7) Tin nhắn riêng đã đọc lâu ngày: chỉ xóa khi cả hai phía đều đã có cơ hội đọc.
+    await query(`DELETE FROM private_messages WHERE read_at IS NOT NULL AND created_at < NOW()-INTERVAL '5 hours'`);
+    // Global chat là dữ liệu realtime, không phải kho lưu trữ lâu dài.
+    await query(`DELETE FROM chat_messages WHERE created_at < NOW()-INTERVAL '5 hours'`);
+
+    // 8) Quyền / yêu cầu đã dùng hoặc bị từ chối: dọn sau 5 giờ.
+    await query(`DELETE FROM disciple_challenge_permissions WHERE status IN ('rejected','used') AND COALESCE(used_at,responded_at,created_at) < NOW()-INTERVAL '5 hours'`);
+    await query(`DELETE FROM discipleship_requests WHERE status IN ('rejected','cancelled') AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 hours'`);
+
+    // 9) Xóa battle_log JSONB cũ sau 5 giờ trước khi record được dọn; tránh giữ payload trận đấu lớn.
+    await query(`UPDATE beast_arena_requests SET battle_log='[]'::jsonb, challenger_stats='{}'::jsonb, opponent_stats='{}'::jsonb WHERE status='completed' AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 hours' AND (battle_log <> '[]'::jsonb OR challenger_stats <> '{}'::jsonb OR opponent_stats <> '{}'::jsonb)`);
+
+    // 10) Cập nhật planner statistics sau khi dọn dữ liệu.
+    await query(`ANALYZE sessions`);
+    await query(`ANALYZE mailbox_notifications`);
+    await query(`ANALYZE activity_events`);
+    await query(`ANALYZE chat_messages`);
   }catch(e){ console.error('database maintenance:',e.message); }
 }
 
@@ -3170,8 +3219,15 @@ app.post('/api/black-market/sell',auth,async(req,res)=>{
     const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='black-market' FOR SHARE`)).rows[0]?.user_id||null;
     const ownerBonus=owner&&Number(owner)!==uid?Math.floor(total*0.20):0;
     const sellerTotal=total;
-    if(type==='root') await client.query(`UPDATE owned_spirit_roots SET quantity=quantity-$3 WHERE user_id=$1 AND root_id=$2`,[uid,id,qty]);
-    else await client.query(`UPDATE owned_spirit_beasts SET quantity=quantity-$3 WHERE user_id=$1 AND beast_id=$2`,[uid,id,qty]);
+    // quantity has CHECK(quantity > 0), therefore selling the entire stack must DELETE the row
+    // instead of updating quantity to 0. This fixes the PostgreSQL constraint error seen in Render.
+    if(type==='root') {
+      if(Number(row.quantity)===qty) await client.query(`DELETE FROM owned_spirit_roots WHERE user_id=$1 AND root_id=$2`,[uid,id]);
+      else await client.query(`UPDATE owned_spirit_roots SET quantity=quantity-$3 WHERE user_id=$1 AND root_id=$2`,[uid,id,qty]);
+    } else {
+      if(Number(row.quantity)===qty) await client.query(`DELETE FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2`,[uid,id]);
+      else await client.query(`UPDATE owned_spirit_beasts SET quantity=quantity-$3, unbound_quantity=LEAST(unbound_quantity, GREATEST(0, quantity-$3)) WHERE user_id=$1 AND beast_id=$2`,[uid,id,qty]);
+    }
     await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[uid,sellerTotal]);
     if(ownerBonus) await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[owner,ownerBonus]);
     await client.query(`INSERT INTO black_market_sales(seller_id,asset_type,asset_id,asset_name,quantity,unit_price,total_price) VALUES($1,$2,$3,$4,$5,$6,$7)`,[uid,type,id,row.name,qty,unit,total]);
@@ -3484,6 +3540,44 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
     await client.query('COMMIT');
     res.json({ok:true,special:false,cost,remainingStones:Number(p.spirit_stones)-cost,reward:{type:'item',id:item.id,name:item.name,category:item.category,description:item.description,rarity,power:Number(item.power_bonus||0),ability:item.ability||''},message:`🎴 Tiên Bàn ban thưởng: ${item.name} ×1.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien ban spin:',e);res.status(500).json({error:'Tiên Bàn thất bại. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
+});
+
+app.post('/api/tien-ban/spin10',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    await ensureTienBanSchema(); await client.query('BEGIN');
+    const uid=req.session.user_id, rolls=10, cost=30000;
+    const p=(await client.query(`SELECT spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});}
+    if(Number(p.spirit_stones)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost.toLocaleString('vi-VN')} linh thạch để quay 10 lần.`});}
+    const cap=Number(p.storage_capacity)||30, rewards=[];
+    for(let i=0;i<rolls;i++){
+      const special=Math.random()<0.005;
+      if(special){
+        const b=(await client.query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,skill,ability,power_bonus FROM spirit_beasts_catalog WHERE name=$1 FOR UPDATE`,['Cực Phẩm Cửu Vĩ Thiên Hồ'])).rows[0];
+        if(!b)throw new Error('Tiên Thú đặc biệt chưa được khởi tạo.');
+        const existing=Number((await client.query(`SELECT quantity FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2 FOR UPDATE`,[uid,b.id])).rows[0]?.quantity||0);
+        if(existing<=0){const used=Number((await client.query(`SELECT COUNT(*)::int c FROM inventory WHERE user_id=$1 AND quantity>0`,[uid])).rows[0]?.c||0);if(used>=cap)throw new Error(`Tu Di Giới đã đầy (${used}/${cap}), không thể nhận Tiên Thú.`);}
+        await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity,unbound_quantity) VALUES($1,$2,1,1) ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1,unbound_quantity=owned_spirit_beasts.unbound_quantity+1`,[uid,b.id]);
+        await client.query(`INSERT INTO spirit_beast_care(user_id,beast_id) VALUES($1,$2) ON CONFLICT(user_id,beast_id) DO NOTHING`,[uid,b.id]);
+        await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'beast',$2,$3,$4,TRUE,3000)`,[uid,b.id,b.name,b.rarity]);
+        rewards.push({type:'beast',name:b.name,rarity:b.rarity,description:b.description,realm:b.beast_realm,skill:b.skill,ability:b.ability,power:Number(b.power_bonus||0),special:true});
+      }else{
+        const item=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị' ORDER BY RANDOM() LIMIT 1`)).rows[0];
+        if(!item)throw new Error('Tiên Bàn hiện không có vật phẩm để quay.');
+        const owned=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,item.id])).rows[0]?.quantity||0);
+        if(owned<=0){const used=Number((await client.query(`SELECT COUNT(*)::int c FROM inventory WHERE user_id=$1 AND quantity>0`,[uid])).rows[0]?.c||0);if(used>=cap)throw new Error(`Tu Di Giới đã đầy (${used}/${cap}). Hãy dùng vật phẩm trước khi quay.`);}
+        await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[uid,item.id]);
+        const rarity=item.reward_grade|| (Number(item.power_bonus)>500?'Thượng Đẳng':'Hạ Đẳng');
+        await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'item',$2,$3,$4,FALSE,3000)`,[uid,item.id,item.name,rarity]);
+        rewards.push({type:'item',id:item.id,name:item.name,category:item.category,description:item.description,rarity,power:Number(item.power_bonus||0),ability:item.ability||'',special:false});
+      }
+    }
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,cost]);
+    await client.query('COMMIT');
+    res.json({ok:true,rolls,cost,remainingStones:Number(p.spirit_stones)-cost,rewards,message:`🎴 Tiên Bàn đã xoay 10 lần · tiêu hao ${cost.toLocaleString('vi-VN')} linh thạch.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien ban spin10:',e);res.status(400).json({error:e.message||'Tiên Bàn 10 lần thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });
 
@@ -4901,6 +4995,16 @@ app.post('/api/mailbox/read',auth,async(req,res)=>{try{const id=Number(req.body?
 // Guard này chạy trước các API lôi đài để tránh SELECT vào cột chưa tồn tại.
 
 let __ensureChallengeSchemaPromise=null;
+const CHALLENGE_LIMIT_24H = 5;
+const BEAST_ARENA_LIMIT_24H = 5;
+async function usageCount24h(client, table, column, userId){
+  const allowedTables={challenge_requests:'challenge_requests',beast_arena_requests:'beast_arena_requests',beast_arena_usage:'beast_arena_usage'};
+  const allowedCols={challenger_id:'challenger_id',user_id:'user_id'};
+  if(!allowedTables[table]||!allowedCols[column]) return 0;
+  const r=await client.query(`SELECT COUNT(*)::int AS c FROM ${allowedTables[table]} WHERE ${allowedCols[column]}=$1 AND created_at>=NOW()-INTERVAL '24 hours'`,[userId]);
+  return Number(r.rows[0]?.c||0);
+}
+
 async function ensureChallengeSchema(){
   if(!__ensureChallengeSchemaPromise) __ensureChallengeSchemaPromise=ensureChallengeSchemaImpl().catch(err=>{__ensureChallengeSchemaPromise=null;throw err;});
   return __ensureChallengeSchemaPromise;
@@ -4996,8 +5100,9 @@ app.get('/api/challenges',auth,async(req,res)=>{
              WHERE cr.status='accepted' ORDER BY cr.id DESC LIMIT 20`,[])
     ]);
     const me=(await query(`SELECT spirit_power,spirit_stones,challenge_debuff_until,challenge_debuff_percent,challenge_debuff_text FROM profiles WHERE user_id=$1`,[uid])).rows[0];
+    const usage=Number((await query(`SELECT COUNT(*)::int AS c FROM challenge_requests WHERE challenger_id=$1 AND created_at>=NOW()-INTERVAL '24 hours'`,[uid])).rows[0]?.c||0);
     const active=activeRows.rows[0]||null;
-    res.json({users:users.rows,pending:pending.rows,history:history.rows,me,activeBattles:publicBattles.rows,activeBattle:active?{...battleSnapshot(active,uid),challengerName:active.challenger_name,challengerAvatar:active.challenger_avatar,challengerRank:active.challenger_rank,challengerSpirit:Number(active.challenger_spirit)||0,opponentName:active.opponent_name,opponentAvatar:active.opponent_avatar,opponentRank:active.opponent_rank,opponentSpirit:Number(active.opponent_spirit)||0}:null});
+    res.json({users:users.rows,pending:pending.rows,history:history.rows,me,usage:{used:usage,limit:CHALLENGE_LIMIT_24H,remaining:Math.max(0,CHALLENGE_LIMIT_24H-usage),windowHours:24},activeBattles:publicBattles.rows,activeBattle:active?{...battleSnapshot(active,uid),challengerName:active.challenger_name,challengerAvatar:active.challenger_avatar,challengerRank:active.challenger_rank,challengerSpirit:Number(active.challenger_spirit)||0,opponentName:active.opponent_name,opponentAvatar:active.opponent_avatar,opponentRank:active.opponent_rank,opponentSpirit:Number(active.opponent_spirit)||0}:null});
   }catch(e){console.error('challenges load:',e);res.status(500).json({error:'Không thể mở Khiêu Chiến.'});}
 });
 
@@ -5008,6 +5113,9 @@ app.post('/api/challenges/offline',auth,async(req,res)=>{
     const uid=req.session.user_id,target=Number(req.body?.userId);
     if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
     await client.query('BEGIN');
+    await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
+    const used24=await usageCount24h(client,'challenge_requests','challenger_id',uid);
+    if(used24>=CHALLENGE_LIMIT_24H){await client.query('ROLLBACK');return res.status(429).json({error:`Bạn đã dùng hết ${CHALLENGE_LIMIT_24H} lượt Khiêu Chiến trong 24 giờ.`,usage:{used:used24,limit:CHALLENGE_LIMIT_24H,remaining:0,windowHours:24}});}
     const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[uid,target])).rows;
     const me=rows.find(x=>Number(x.id)===uid), opp=rows.find(x=>Number(x.id)===target);
     if(!me||!opp){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy đối thủ.'});}
@@ -5033,6 +5141,9 @@ app.post('/api/challenges/online/request',auth,async(req,res)=>{
     const uid=req.session.user_id,target=Number(req.body?.userId);
     if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
     await client.query('BEGIN');
+    await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
+    const used24=await usageCount24h(client,'challenge_requests','challenger_id',uid);
+    if(used24>=CHALLENGE_LIMIT_24H){await client.query('ROLLBACK');return res.status(429).json({error:`Bạn đã dùng hết ${CHALLENGE_LIMIT_24H} lượt mở Khiêu Chiến trong 24 giờ.`,usage:{used:used24,limit:CHALLENGE_LIMIT_24H,remaining:0,windowHours:24}});}
     const exists=(await client.query('SELECT id FROM users WHERE id=$1',[target])).rows[0];
     if(!exists){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân.'});}
     const protection=await consumeDiscipleChallengePermission(client,uid,target,false);
@@ -5398,13 +5509,18 @@ app.get('/api/beast-arena',auth,async(req,res)=>{
       query(`SELECT r.id,r.status,r.winner_id,r.loser_id,r.rounds,r.reward_quantity,r.created_at,cu.display_name AS challenger_name,ou.display_name AS opponent_name,cb.name AS challenger_beast,ob.name AS opponent_beast,ri.name AS reward_item FROM beast_arena_requests r JOIN users cu ON cu.id=r.challenger_id JOIN users ou ON ou.id=r.opponent_id JOIN spirit_beasts_catalog cb ON cb.id=r.challenger_beast_id LEFT JOIN spirit_beasts_catalog ob ON ob.id=r.opponent_beast_id LEFT JOIN treasure_items ri ON ri.id=r.reward_item_id WHERE r.challenger_id=$1 OR r.opponent_id=$1 ORDER BY r.id DESC LIMIT 30`,[uid]),
       query(`SELECT r.id,r.challenger_id,r.opponent_id,r.challenger_beast_id,r.opponent_beast_id,r.status,r.round_number,r.rounds,r.turn_user_id,r.challenger_hp,r.opponent_hp,r.challenger_max_hp,r.opponent_max_hp,r.battle_log,r.last_actor_id,r.last_damage,r.last_skill_id,r.challenger_type,r.opponent_type,cu.display_name AS challenger_name,ou.display_name AS opponent_name,cb.name AS challenger_beast,ob.name AS opponent_beast FROM beast_arena_requests r JOIN users cu ON cu.id=r.challenger_id JOIN users ou ON ou.id=r.opponent_id JOIN spirit_beasts_catalog cb ON cb.id=r.challenger_beast_id LEFT JOIN spirit_beasts_catalog ob ON ob.id=r.opponent_beast_id WHERE r.status='accepted' AND (r.challenger_id=$1 OR r.opponent_id=$1) ORDER BY r.id DESC LIMIT 1`,[uid])
     ]);
-    res.json({beasts,members:members.rows,pending:pending.rows,history:history.rows,npcs:BEAST_ARENA_NPCS,activeBattle:activeBattle.rows[0]||null,me:{userId:uid}});
+    const usage=Number((await query(`SELECT COUNT(*)::int AS c FROM beast_arena_usage WHERE user_id=$1 AND created_at>=NOW()-INTERVAL '24 hours'`,[uid])).rows[0]?.c||0);
+    res.json({beasts,members:members.rows,pending:pending.rows,history:history.rows,npcs:BEAST_ARENA_NPCS,activeBattle:activeBattle.rows[0]||null,me:{userId:uid},usage:{used:usage,limit:BEAST_ARENA_LIMIT_24H,remaining:Math.max(0,BEAST_ARENA_LIMIT_24H-usage),windowHours:24}});
   }catch(e){console.error('beast arena load:',e);res.status(500).json({error:'Không thể mở Thú Trường.'});}
 });
 
 app.post('/api/beast-arena/offline',auth,async(req,res)=>{
   const client=await pool.connect();
   try{await ensureBeastArenaSchema();await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),npcId=String(req.body?.npcId||'');
+    await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
+    const used24=await usageCount24h(client,'beast_arena_usage','user_id',uid);
+    if(used24>=BEAST_ARENA_LIMIT_24H){await client.query('ROLLBACK');return res.status(429).json({error:`Bạn đã dùng hết ${BEAST_ARENA_LIMIT_24H} lượt Thách Chiến Thú Trường trong 24 giờ.`,usage:{used:used24,limit:BEAST_ARENA_LIMIT_24H,remaining:0,windowHours:24}});}
+    await client.query(`INSERT INTO beast_arena_usage(user_id,mode) VALUES($1,$2)`,[uid,'offline']);
     const skillId=Math.max(1,Math.min(3,Number(req.body?.skillId)||1)); const skillQueue=(Array.isArray(req.body?.skillQueue)?req.body.skillQueue:[skillId]).map(Number).filter(x=>x>=1&&x<=3).slice(0,12); if(!skillQueue.length)skillQueue.push(skillId); const npc=BEAST_ARENA_NPCS.find(x=>x.id===npcId);if(!npc||!Number.isInteger(beastId)){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thú hoặc NPC không hợp lệ.'});}
     const beast=(await client.query(`SELECT o.*,c.* FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 AND o.quantity>0 FOR UPDATE`,[uid,beastId])).rows[0];
     if(!beast){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn chưa sở hữu linh thú này.'});}
@@ -5419,7 +5535,11 @@ app.post('/api/beast-arena/offline',auth,async(req,res)=>{
 
 app.post('/api/beast-arena/divine',auth,async(req,res)=>{
   const client=await pool.connect();
-  try{await ensureBeastArenaSchema();await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),skillId=Math.max(1,Math.min(3,Number(req.body?.skillId)||1)),npcId=String(req.body?.npcId||'thien-ho'); const skillQueue=(Array.isArray(req.body?.skillQueue)?req.body.skillQueue:[skillId]).map(Number).filter(x=>x>=1&&x<=3).slice(0,12); if(!skillQueue.length)skillQueue.push(skillId);
+  try{await ensureBeastArenaSchema();await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),skillId=Math.max(1,Math.min(3,Number(req.body?.skillId)||1)),npcId=String(req.body?.npcId||'thien-ho');
+    await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
+    const used24=await usageCount24h(client,'beast_arena_usage','user_id',uid);
+    if(used24>=BEAST_ARENA_LIMIT_24H){await client.query('ROLLBACK');return res.status(429).json({error:`Bạn đã dùng hết ${BEAST_ARENA_LIMIT_24H} lượt Thách Chiến Thú Trường trong 24 giờ.`,usage:{used:used24,limit:BEAST_ARENA_LIMIT_24H,remaining:0,windowHours:24}});}
+    await client.query(`INSERT INTO beast_arena_usage(user_id,mode) VALUES($1,$2)`,[uid,'divine']); const skillQueue=(Array.isArray(req.body?.skillQueue)?req.body.skillQueue:[skillId]).map(Number).filter(x=>x>=1&&x<=3).slice(0,12); if(!skillQueue.length)skillQueue.push(skillId);
     const npc=BEAST_ARENA_NPCS.find(x=>x.id===npcId&&['thien-ho','than-long'].includes(x.id));if(!npc||!Number.isInteger(beastId)){await client.query('ROLLBACK');return res.status(400).json({error:'Thần Thú hoặc linh thú không hợp lệ.'});}
     const beast=(await client.query(`SELECT o.*,c.* FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 AND o.quantity>0 FOR UPDATE`,[uid,beastId])).rows[0];if(!beast){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn chưa sở hữu linh thú này.'});}
     const gear=Number((await client.query(`SELECT COALESCE(SUM(ti.beast_gear_power),0)::int AS power FROM spirit_beast_equipment se JOIN treasure_items ti ON ti.id=se.item_id WHERE se.user_id=$1 AND se.beast_id=$2`,[uid,beastId])).rows[0]?.power||0);const care=(await client.query(`SELECT * FROM spirit_beast_care WHERE user_id=$1 AND beast_id=$2`,[uid,beastId])).rows[0];
@@ -5432,7 +5552,11 @@ app.post('/api/beast-arena/divine',auth,async(req,res)=>{
 
 app.post('/api/beast-arena/online/request',auth,async(req,res)=>{
   const client=await pool.connect();
-  try{await ensureBeastArenaSchema();await client.query('BEGIN');const uid=req.session.user_id,target=Number(req.body?.targetUserId),beastId=Number(req.body?.beastId),skillId=Math.max(1,Math.min(3,Number(req.body?.skillId)||1)); const skillQueue=(Array.isArray(req.body?.skillQueue)?req.body.skillQueue:[skillId]).map(Number).filter(x=>x>=1&&x<=3).slice(0,12); if(!skillQueue.length)skillQueue.push(skillId);if(!Number.isInteger(target)||target===uid||!Number.isInteger(beastId)){await client.query('ROLLBACK');return res.status(400).json({error:'Đối thủ hoặc linh thú không hợp lệ.'});}
+  try{await ensureBeastArenaSchema();await client.query('BEGIN');const uid=req.session.user_id,target=Number(req.body?.targetUserId),beastId=Number(req.body?.beastId),skillId=Math.max(1,Math.min(3,Number(req.body?.skillId)||1));
+    await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
+    const used24=await usageCount24h(client,'beast_arena_usage','user_id',uid);
+    if(used24>=BEAST_ARENA_LIMIT_24H){await client.query('ROLLBACK');return res.status(429).json({error:`Bạn đã dùng hết ${BEAST_ARENA_LIMIT_24H} lượt Thách Chiến Thú Trường trong 24 giờ.`,usage:{used:used24,limit:BEAST_ARENA_LIMIT_24H,remaining:0,windowHours:24}});}
+    await client.query(`INSERT INTO beast_arena_usage(user_id,mode) VALUES($1,$2)`,[uid,'online']); const skillQueue=(Array.isArray(req.body?.skillQueue)?req.body.skillQueue:[skillId]).map(Number).filter(x=>x>=1&&x<=3).slice(0,12); if(!skillQueue.length)skillQueue.push(skillId);if(!Number.isInteger(target)||target===uid||!Number.isInteger(beastId)){await client.query('ROLLBACK');return res.status(400).json({error:'Đối thủ hoặc linh thú không hợp lệ.'});}
     const targetExists=(await client.query('SELECT id FROM users WHERE id=$1',[target])).rows[0];const beast=(await client.query(`SELECT c.name FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 AND o.quantity>0`,[uid,beastId])).rows[0];if(!targetExists||!beast){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy đối thủ hoặc linh thú của bạn.'});}
     const pending=(await client.query(`SELECT id FROM beast_arena_requests WHERE challenger_id=$1 AND opponent_id=$2 AND status='pending'`,[uid,target])).rows[0];if(pending){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã gửi lời mời Thú Trường cho môn nhân này.'});}
     const r=await client.query(`INSERT INTO beast_arena_requests(challenger_id,opponent_id,challenger_beast_id,challenger_skill_id,challenger_skill_queue) VALUES($1,$2,$3,$4,$5) RETURNING id`,[uid,target,beastId,skillId,JSON.stringify(skillQueue)]);await createMailboxNotification(target,'beast_challenge','🪶 Lời mời Thú Trường',`Một môn nhân muốn dùng linh thú ${beast.name} so tài với bạn.`,'#beast-arena',{action:'beast_challenge',requestId:Number(r.rows[0].id)});await client.query('COMMIT');res.json({ok:true,message:'Đã gửi lời mời Thú Trường vào Hòm Thư.'});
