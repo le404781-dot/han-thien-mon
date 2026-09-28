@@ -161,7 +161,6 @@ async function ensureRuntimeSchemaImpl(){
     CREATE INDEX IF NOT EXISTS idx_sect_post_comments_post ON sect_post_comments(post_id,id);
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
-    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_food_gain INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS beast_joy_gain INTEGER NOT NULL DEFAULT 0;
@@ -683,7 +682,6 @@ async function seedTienKhi(){
       power_bonus=EXCLUDED.power_bonus,ability=EXCLUDED.ability,buyback_price=EXCLUDED.buyback_price`,
       [name,`Tiên Khí · ${grade}`,description,price,spiritGain,minRealm,rewardGrade,power,ability]);
   }
-  await query(`UPDATE treasure_items SET avatar=CASE reward_grade WHEN 'Hạ Phẩm' THEN '⚔️' WHEN 'Trung Phẩm' THEN '🗡️' WHEN 'Thượng Phẩm' THEN '🔱' WHEN 'Cực Phẩm' THEN '⚜️' WHEN 'Tiên Phẩm' THEN '🌌' WHEN 'Chí Tôn' THEN '👑' WHEN 'Chí Cao' THEN '☯️' ELSE '⚜️' END WHERE LOWER(TRIM(category)) LIKE 'tiên khí%' AND COALESCE(avatar,'')=''`);
 }
 async function seedDuocDuong(){
   const items=[
@@ -2762,9 +2760,9 @@ app.get('/api/data',async(req,res)=>{
       query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier,p.presence_status,p.last_seen_at,
              b.name AS equipped_beast_name,b.beast_realm AS equipped_beast_realm,b.beast_realm_tier AS equipped_beast_realm_tier,COALESCE(ob.avatar,b.default_avatar) AS equipped_beast_avatar,
              r.name AS equipped_root_name,r.rarity AS equipped_root_rarity,r.ability AS equipped_root_ability,r.power_bonus AS equipped_root_power,
-             ik.name AS equipped_immortal_artifact_name,ik.reward_grade AS equipped_immortal_artifact_grade,ik.power_bonus AS equipped_immortal_artifact_power,ik.spirit_gain AS equipped_immortal_artifact_spirit_gain,ik.ability AS equipped_immortal_artifact_ability,COALESCE(iak.avatar,ik.avatar) AS equipped_immortal_artifact_avatar,
+             ik.name AS equipped_immortal_artifact_name,ik.reward_grade AS equipped_immortal_artifact_grade,ik.power_bonus AS equipped_immortal_artifact_power,ik.spirit_gain AS equipped_immortal_artifact_spirit_gain,ik.ability AS equipped_immortal_artifact_ability,ik.avatar AS equipped_immortal_artifact_avatar,
              COALESCE((SELECT SUM(ti.beast_gear_power) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=u.id AND sbe.beast_id=p.equipped_beast_id),0)::int AS equipped_beast_gear_power
-             FROM users u JOIN profiles p ON p.user_id=u.id LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id LEFT JOIN owned_spirit_beasts ob ON ob.user_id=u.id AND ob.beast_id=p.equipped_beast_id LEFT JOIN spirit_roots_catalog r ON r.id=p.equipped_root_id LEFT JOIN treasure_items ik ON ik.id=p.equipped_immortal_artifact_id LEFT JOIN inventory iak ON iak.user_id=u.id AND iak.item_id=p.equipped_immortal_artifact_id AND iak.quantity>0 ORDER BY u.id`)
+             FROM users u JOIN profiles p ON p.user_id=u.id LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id LEFT JOIN owned_spirit_beasts ob ON ob.user_id=u.id AND ob.beast_id=p.equipped_beast_id LEFT JOIN spirit_roots_catalog r ON r.id=p.equipped_root_id LEFT JOIN treasure_items ik ON ik.id=p.equipped_immortal_artifact_id ORDER BY u.id`)
     ]);
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
@@ -2878,7 +2876,7 @@ app.get('/api/profile',auth,async(req,res)=>{
       b.name AS beast_name,b.power_bonus AS beast_power,b.ability AS beast_ability,ob.avatar AS beast_avatar,
       r.name AS root_name,r.power_bonus AS root_power,r.ability AS root_ability,
       a.name AS artifact_name,a.power_bonus AS artifact_power,a.ability AS artifact_ability,ia.avatar AS artifact_avatar,
-      ik.name AS immortal_artifact_name,ik.reward_grade AS immortal_artifact_grade,ik.power_bonus AS immortal_artifact_power,ik.ability AS immortal_artifact_ability,ik.category AS immortal_artifact_category,ik.min_realm AS immortal_artifact_min_realm,ik.spirit_gain AS immortal_artifact_spirit_gain,COALESCE(iak.avatar,ik.avatar) AS immortal_artifact_avatar,
+      ik.name AS immortal_artifact_name,ik.reward_grade AS immortal_artifact_grade,ik.power_bonus AS immortal_artifact_power,ik.ability AS immortal_artifact_ability,ik.category AS immortal_artifact_category,ik.min_realm AS immortal_artifact_min_realm,ik.spirit_gain AS immortal_artifact_spirit_gain,iak.avatar AS immortal_artifact_avatar,
       it.name AS immortal_name,it.power_bonus AS immortal_power,it.ability AS immortal_ability,it.grade AS immortal_grade
       FROM profiles p
       LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id
@@ -3830,34 +3828,17 @@ function bondChanceFor(userSpirit){
 }
 
 
-async function pickTienBanItem(client){
-  // Tiên Phẩm: đúng 0,002% mỗi lượt (1/50.000). Các phẩm khác dùng pool còn lại.
-  const roll=Math.random();
-  const rare=roll < 0.00002;
-  const whereBase=`category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị'`;
-  const sql=rare
-    ? `SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} AND reward_grade='Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`
-    : `SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} AND COALESCE(reward_grade,'')<>'Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`;
-  let item=(await client.query(sql)).rows[0];
-  // Nếu database cũ chưa có vật phẩm Tiên Phẩm, không làm hỏng lượt quay.
-  if(!item && rare){
-    item=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} ORDER BY RANDOM() LIMIT 1`)).rows[0];
-  }
-  return {item,rare:rare && Boolean(item && item.reward_grade==='Tiên Phẩm')};
-}
-
 app.get('/api/tien-ban',auth,async(req,res)=>{
   try{
     await ensureTienBanSchema();
     const p=(await query(`SELECT spirit_stones FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
     const history=(await query(`SELECT reward_type,reward_name,reward_rarity,is_special,cost_stones,created_at
       FROM tien_ban_history WHERE user_id=$1 ORDER BY id DESC LIMIT 12`,[req.session.user_id])).rows;
-    res.json({spiritStones:Number(p?.spirit_stones||0),cost:4500,bulkCost:45000,history});
+    res.json({spiritStones:Number(p?.spirit_stones||0),cost:4500,bulkCost:80000,history});
   }catch(e){console.error('tien ban:',e);res.status(500).json({error:'Không thể mở Tiên Bàn.'});}
 });
 
 app.post('/api/tien-ban/spin',auth,async(req,res)=>{
-  await ensureTienBanSchema();
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
@@ -3866,9 +3847,7 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
     if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});}
     if(Number(p.spirit_stones)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost.toLocaleString('vi-VN')} linh thạch để quay Tiên Bàn.`});}
 
-    const spinRoll=Math.random();
-    const rareTienPham=spinRoll<0.00002;
-    const special=!rareTienPham && spinRoll<0.00502;
+    const special=Math.random()<0.005;
     if(special){
       const b=(await client.query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,skill,ability,power_bonus
         FROM spirit_beasts_catalog WHERE name=$1 FOR UPDATE`,['Cực Phẩm Cửu Vĩ Thiên Hồ'])).rows[0];
@@ -3889,8 +3868,11 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
     }
 
     const cap=Number(p.storage_capacity)||30;
-    const picked=rareTienPham ? await (async()=>{ const r=await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị' AND reward_grade='Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`); return {item:r.rows[0],rare:Boolean(r.rows[0])}; })() : await pickTienBanItem(client);
-    const item=picked.item;
+    const items=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability
+      FROM treasure_items WHERE category NOT LIKE 'Dược Đường · Linh thú thức ăn'
+      AND category NOT LIKE 'Dược Đường · Linh thú trang bị'
+      ORDER BY RANDOM() LIMIT 1`)).rows;
+    const item=items[0];
     if(!item){await client.query('ROLLBACK');return res.status(500).json({error:'Tiên Bàn hiện không có vật phẩm để quay.'});}
     const owned=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,item.id])).rows[0]?.quantity||0);
     if(owned<=0){
@@ -3912,15 +3894,13 @@ app.post('/api/tien-ban/spin10',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
     await ensureTienBanSchema(); await client.query('BEGIN');
-    const uid=req.session.user_id, rolls=10, unitCost=4500, cost=45000;
+    const uid=req.session.user_id, rolls=10, cost=45000;
     const p=(await client.query(`SELECT spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
     if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});}
     if(Number(p.spirit_stones)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost.toLocaleString('vi-VN')} linh thạch để quay 10 lần.`});}
     const cap=Number(p.storage_capacity)||30, rewards=[];
     for(let i=0;i<rolls;i++){
-      const spinRoll=Math.random();
-      const rareTienPham=spinRoll<0.00002;
-      const special=!rareTienPham && spinRoll<0.00502;
+      const special=Math.random()<0.005;
       if(special){
         const b=(await client.query(`SELECT id,name,rarity,description,beast_realm,beast_realm_tier,skill,ability,power_bonus FROM spirit_beasts_catalog WHERE name=$1 FOR UPDATE`,['Cực Phẩm Cửu Vĩ Thiên Hồ'])).rows[0];
         if(!b)throw new Error('Tiên Thú đặc biệt chưa được khởi tạo.');
@@ -3928,17 +3908,16 @@ app.post('/api/tien-ban/spin10',auth,async(req,res)=>{
         if(existing<=0){const used=Number((await client.query(`SELECT COUNT(*)::int c FROM inventory WHERE user_id=$1 AND quantity>0`,[uid])).rows[0]?.c||0);if(used>=cap)throw new Error(`Tu Di Giới đã đầy (${used}/${cap}), không thể nhận Tiên Thú.`);}
         await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity,unbound_quantity) VALUES($1,$2,1,1) ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+1,unbound_quantity=owned_spirit_beasts.unbound_quantity+1`,[uid,b.id]);
         await client.query(`INSERT INTO spirit_beast_care(user_id,beast_id) VALUES($1,$2) ON CONFLICT(user_id,beast_id) DO NOTHING`,[uid,b.id]);
-        await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'beast',$2,$3,$4,TRUE,$5)`,[uid,b.id,b.name,b.rarity,unitCost]);
+        await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'beast',$2,$3,$4,TRUE,$5)`,[uid,b.id,b.name,b.rarity,cost]);
         rewards.push({type:'beast',name:b.name,rarity:b.rarity,description:b.description,realm:b.beast_realm,skill:b.skill,ability:b.ability,power:Number(b.power_bonus||0),special:true});
       }else{
-        const picked=rareTienPham ? await (async()=>{ const r=await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị' AND reward_grade='Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`); return {item:r.rows[0],rare:Boolean(r.rows[0])}; })() : await pickTienBanItem(client);
-        const item=picked.item;
+        const item=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị' ORDER BY RANDOM() LIMIT 1`)).rows[0];
         if(!item)throw new Error('Tiên Bàn hiện không có vật phẩm để quay.');
         const owned=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,item.id])).rows[0]?.quantity||0);
         if(owned<=0){const used=Number((await client.query(`SELECT COUNT(*)::int c FROM inventory WHERE user_id=$1 AND quantity>0`,[uid])).rows[0]?.c||0);if(used>=cap)throw new Error(`Tu Di Giới đã đầy (${used}/${cap}). Hãy dùng vật phẩm trước khi quay.`);}
         await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,1,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+1,updated_at=NOW()`,[uid,item.id]);
         const rarity=item.reward_grade|| (Number(item.power_bonus)>500?'Thượng Đẳng':'Hạ Đẳng');
-        await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'item',$2,$3,$4,FALSE,$5)`,[uid,item.id,item.name,rarity,unitCost]);
+        await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'item',$2,$3,$4,FALSE,$5)`,[uid,item.id,item.name,rarity,cost]);
         rewards.push({type:'item',id:item.id,name:item.name,category:item.category,description:item.description,rarity,power:Number(item.power_bonus||0),ability:item.ability||'',special:false});
       }
     }
@@ -4244,7 +4223,6 @@ async function ensureEquipmentSchemaImpl(){
     ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS avatar TEXT;
-    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar TEXT;
     CREATE TABLE IF NOT EXISTS owned_spirit_beasts (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,beast_id));
     ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS avatar TEXT;
     CREATE TABLE IF NOT EXISTS owned_spirit_roots (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,root_id INTEGER NOT NULL REFERENCES spirit_roots_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,root_id));
@@ -4321,7 +4299,7 @@ app.get('/api/equipment',auth,async(req,res)=>{
         WHERE i.user_id=$1 AND i.quantity>0
           AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
         ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
-      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.ability,COALESCE(i.avatar,ti.avatar) AS avatar,(p.equipped_immortal_artifact_id=ti.id) AS equipped FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id WHERE i.user_id=$1 AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%' ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.ability,i.avatar,(p.equipped_immortal_artifact_id=ti.id) AS equipped FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id WHERE i.user_id=$1 AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%' ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
       query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,ut.avatar,(p.equipped_technique_id=ct.id) AS equipped
         FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id
         WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[userId]),
@@ -4338,7 +4316,7 @@ app.patch('/api/equipment/avatar',auth,async(req,res)=>{
     const type=String(req.body?.type||'');
     const id=Number(req.body?.id);
     let avatar=req.body?.avatar===undefined?null:String(req.body.avatar||'').trim();
-    if(!['beast','artifact','immortal-artifact','technique'].includes(type)||!Number.isInteger(id)||id<1)return res.status(400).json({error:'Vật phẩm hoặc công pháp không hợp lệ.'});
+    if(!['beast','artifact','technique'].includes(type)||!Number.isInteger(id)||id<1)return res.status(400).json({error:'Vật phẩm hoặc công pháp không hợp lệ.'});
     if(avatar!==null){
       if(!avatar.startsWith('data:image/'))return res.status(400).json({error:'Ảnh đại diện phải là ảnh từ album.'});
       if(avatar.length>900000)return res.status(400).json({error:'Ảnh quá lớn. Hãy chọn ảnh nhẹ hơn.'});
@@ -4348,7 +4326,6 @@ app.patch('/api/equipment/avatar',auth,async(req,res)=>{
     let r;
     if(type==='beast') r=await query('UPDATE owned_spirit_beasts SET avatar=$3 WHERE user_id=$1 AND beast_id=$2 AND quantity>0 RETURNING avatar',[uid,id,avatar]);
     else if(type==='artifact') r=await query(`UPDATE inventory i SET avatar=$3 FROM treasure_items ti WHERE i.user_id=$1 AND i.item_id=$2 AND i.item_id=ti.id AND i.quantity>0 AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí') RETURNING i.avatar`,[uid,id,avatar]);
-    else if(type==='immortal-artifact') r=await query(`UPDATE inventory i SET avatar=$3 FROM treasure_items ti WHERE i.user_id=$1 AND i.item_id=$2 AND i.item_id=ti.id AND i.quantity>0 AND LOWER(TRIM(ti.category)) LIKE 'tiên khí%' RETURNING i.avatar`,[uid,id,avatar]);
     else r=await query('UPDATE user_techniques SET avatar=$3 WHERE user_id=$1 AND technique_id=$2 RETURNING avatar',[uid,id,avatar]);
     if(!r.rowCount)return res.status(404).json({error:'Không tìm thấy vật phẩm/công pháp thuộc về bạn.'});
     res.json({ok:true,avatar:r.rows[0].avatar,message:'Đã đổi ảnh đại diện.'});

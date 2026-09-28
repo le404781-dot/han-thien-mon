@@ -1,0 +1,32 @@
+HÀN THIÊN MÔN v3.7.05
+
+1. Tối ưu chống lag
+- Giảm polling thông báo Lôi Đài từ 2s xuống 5s.
+- Cache /api/data trong 5 giây để giảm truy vấn lặp.
+- Tăng pool PostgreSQL mặc định từ 3 lên 6 connection.
+- Bổ sung index cho inventory, treasure_items, challenge_bets và challenge_requests.
+- Tự dọn challenge announcements hết hạn.
+
+2. Tiên Bàn
+- 1 lượt: 4.500 linh thạch.
+- 10 lượt: 45.000 linh thạch.
+- Đồng bộ server + giao diện.
+
+3. Khiêu Chiến
+- Tăng giới hạn mở Khiêu Chiến lên 15 lượt / 24 giờ.
+
+4. Tiên Khí
+- Thêm nhiều Tiên Khí.
+- Tiên Khí có chiến lực cố định theo phẩm cấp/giá trị.
+- Tiên Khí có giá trị linh lực bị động riêng.
+- Khi trang bị sẽ nhận buff ngẫu nhiên, biên độ được giới hạn theo phẩm cấp.
+- Buff được lưu server-side, không đổi ngẫu nhiên mỗi lần tải trang.
+- Buff và chiến lực được áp dụng vào hồ sơ và Khiêu Chiến.
+- Tiên Khí bán tại Chợ Đen với đúng giá price_stones của vật phẩm.
+- Tiên Khí đang trang bị phải tháo trước khi bán.
+- Tiên Khí đang trang bị hiển thị trong Đệ Tử Bảng.
+- Ô Tiên Khí có hiệu ứng cánh tiên động.
+
+5. Database
+- Migration tự động thêm các cột buff Tiên Khí vào profiles.
+- Mở rộng asset_type của black_market_sales cho immortal-artifact.
