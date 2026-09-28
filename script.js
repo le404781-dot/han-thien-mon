@@ -1326,7 +1326,8 @@ $('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');const dark=do
 (function setupPcInterface(){
  const btn=$('#pcModeBtn');
  const isPC=()=>window.matchMedia('(min-width: 1101px) and (hover: hover) and (pointer: fine)').matches && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent||'');
- if(!btn || !isPC()){ btn?.remove(); document.body.classList.remove('pc-interface'); return; }
+ if(!btn){ return; }
+ if(!isPC()){ btn.style.display='none'; document.body.classList.remove('pc-interface'); return; }
  const saved=localStorage.getItem('htm_pc_interface');
  const enabled=saved!=='off';
  document.body.classList.toggle('pc-interface',enabled);
@@ -1343,7 +1344,7 @@ $('#themeBtn').onclick=()=>{document.body.classList.toggle('dark');const dark=do
  };
  window.addEventListener('resize',()=>{
    if(!isPC()){ document.body.classList.remove('pc-interface'); btn.style.display='none'; }
-   else { btn.style.display='inline-grid'; }
+   else { btn.style.display='inline-grid'; const saved=localStorage.getItem('htm_pc_interface'); document.body.classList.toggle('pc-interface',saved!=='off'); }
  });
 })();
 
@@ -1362,7 +1363,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
