@@ -3391,7 +3391,7 @@ app.post('/api/storage/use',auth,async(req,res)=>{
   const client=await pool.connect();
   try{
     const itemId=Number(req.body?.itemId);
-    const qty=Math.max(1,Math.min(99,Number(req.body?.quantity)||1));
+    const qty=Math.max(1,Math.min(200,Number(req.body?.quantity)||1));
     if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
     await client.query('BEGIN');
     const r=await client.query(`SELECT ti.id,ti.name,ti.description,ti.category,ti.spirit_gain,i.quantity
@@ -4380,7 +4380,8 @@ app.get('/api/tien-khi-enhance',auth,async(req,res)=>{
       WHERE i.user_id=$1 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%'
       ORDER BY ti.reward_grade,ti.power_bonus DESC,ti.id`,[uid])).rows;
     const items=rows.map(x=>({...x,enhance_level:Math.max(0,Math.min(9,Number(x.enhance_level)||0)),enhanced_power:Math.round(Number(x.power_bonus||0)*(1+(Number(x.enhance_level)||0)*0.10))}));
-    res.json({ok:true,items,maxLevel:9,minCore:10,maxCore:100});
+    const catalyst=(await query(`SELECT i.item_id AS id,i.quantity,ti.name FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND ti.name='Thiên Đạo Cường Hóa Thạch' AND i.quantity>0 LIMIT 1`,[uid])).rows[0]||null;
+    res.json({ok:true,items,maxLevel:9,minCore:10,maxCore:100,catalyst:catalyst?{id:Number(catalyst.id),quantity:Number(catalyst.quantity),name:catalyst.name}:null});
   }catch(e){console.error('tien khi enhance get:',e);res.status(500).json({error:'Không thể mở Cường Hóa Tiên Khí.'});}
 });
 
@@ -4390,7 +4391,9 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     await ensureEquipmentSchema();
     const uid=req.session.user_id;
     const targetId=Number(req.body?.targetItemId),coreId=Number(req.body?.coreItemId),coreQty=Math.floor(Number(req.body?.coreQuantity));
+    const catalystQty=Math.floor(Number(req.body?.catalystQuantity)||0);
     if(!Number.isInteger(targetId)||targetId<1||!Number.isInteger(coreId)||coreId<1||!Number.isInteger(coreQty)||coreQty<10||coreQty>100){return res.status(400).json({error:'Mỗi lần Cường Hóa cần từ 10 đến 100 phôi Tiên Khí.'});}
+    if(!Number.isInteger(catalystQty)||catalystQty<0||catalystQty>1){return res.status(400).json({error:'Thiên Đạo Cường Hóa Thạch chỉ được dùng tối đa 1 cái mỗi lần.'});}
     await client.query('BEGIN');
     const target=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.category,COALESCE(e.enhance_level,0) AS enhance_level,
       (p.equipped_immortal_artifact_id=ti.id) AS equipped
@@ -4406,9 +4409,19 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     if(String(core.reward_grade||'').trim()!==String(target.reward_grade||'').trim() && Number(core.id)!==Number(target.id)){
       await client.query('ROLLBACK');return res.status(400).json({error:'Phôi phải cùng phẩm cấp hoặc cùng loại Tiên Khí với Tiên Khí mục tiêu.'});
     }
-    // 10 phôi = 50% ở +0; 100 phôi = 95%. Mỗi cấp hiện tại giảm 5 điểm %.
-    const successRate=Math.max(5,Math.min(95,45+coreQty*0.5-level*5));
-    const roll=crypto.randomInt(1,10001)/100;
+    // Tỷ lệ thành công được bốc ngẫu nhiên cho từng lần Cường Hóa: 10%–90%.
+    // coreQty vẫn là số phôi người chơi quyết định (10–100), nhưng không làm lộ một tỷ lệ cố định;
+    // mỗi lượt server sẽ bốc lại một tỷ lệ mới trong khoảng này.
+    let successRate=crypto.randomInt(10,91);
+    if(catalystQty===1){
+      const catalyst=(await client.query(`SELECT i.item_id AS id,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND ti.name='Thiên Đạo Cường Hóa Thạch' AND i.quantity>0 FOR UPDATE`,[uid])).rows[0];
+      if(!catalyst){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không có Thiên Đạo Cường Hóa Thạch.'});}
+      if(Number(catalyst.quantity)<1){await client.query('ROLLBACK');return res.status(400).json({error:'Thiên Đạo Cường Hóa Thạch không đủ số lượng.'});}
+      await client.query('UPDATE inventory SET quantity=quantity-1,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[uid,Number(catalyst.id)]);
+      await client.query('DELETE FROM inventory WHERE user_id=$1 AND item_id=$2 AND quantity<=0',[uid,Number(catalyst.id)]);
+      successRate=Math.min(95,successRate+5);
+    }
+    const roll=crypto.randomInt(1,101);
     const success=roll<=successRate;
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,coreId,coreQty]);
     if(Number(core.quantity)===coreQty) await client.query('DELETE FROM inventory WHERE user_id=$1 AND item_id=$2 AND quantity<=0',[uid,coreId]);
@@ -4417,7 +4430,7 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     else await client.query(`DELETE FROM immortal_artifact_enhancements WHERE user_id=$1 AND item_id=$2`,[uid,targetId]);
     await client.query('COMMIT');
     const enhancedPower=success?Math.round(Number(target.power_bonus||0)*(1+newLevel*0.10)):Number(target.power_bonus||0);
-    res.json({ok:true,success,targetItemId:targetId,targetName:target.name,previousLevel:level,newLevel,coreQuantity:coreQty,successRate,enhancedPower,message:success?`✨ Cường Hóa thành công ${target.name} +${newLevel}!`:`💥 Cường Hóa thất bại. ${target.name} đã trở về +0.`});
+    res.json({ok:true,success,targetItemId:targetId,targetName:target.name,previousLevel:level,newLevel,coreQuantity:coreQty,catalystQuantity:catalystQty,successRate,enhancedPower,message:success?`✨ Cường Hóa thành công ${target.name} +${newLevel}!`:`💥 Cường Hóa thất bại. ${target.name} đã trở về +0.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien khi enhance:',e);res.status(500).json({error:'Cường Hóa thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });

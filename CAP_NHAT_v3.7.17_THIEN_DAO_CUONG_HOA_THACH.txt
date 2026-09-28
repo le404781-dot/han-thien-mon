@@ -1,0 +1,5 @@
+Hàn Thiên Môn v3.7.17
+- Cường Hóa Tiên Khí: có thể dùng 1 Thiên Đạo Cường Hóa Thạch mỗi lần.
+- Khi dùng, tăng thêm 5 điểm phần trăm vào tỷ lệ ngẫu nhiên 10%-90%, tối đa 95%.
+- Thiên Đạo Cường Hóa Thạch bị tiêu hao 1 cái cho mỗi lần sử dụng.
+- Server kiểm tra sở hữu và giới hạn tối đa 1 cái, chống gửi request vượt giới hạn.
