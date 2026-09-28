@@ -1,6 +1,6 @@
 {
   "name": "han-thien-mon",
-  "version": "3.7.01",
+  "version": "3.7.03",
   "description": "Hàn Thiên Môn - website tiên hiệp có đăng ký, đăng nhập và PostgreSQL database",
   "main": "server.js",
   "scripts": {

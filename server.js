@@ -10,22 +10,23 @@ const HOST = '0.0.0.0';
 let dbReady = false;
 let dbInitError = null;
 let backgroundJobsStarted = false;
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
-  console.error('Thiếu DATABASE_URL. Hãy tạo PostgreSQL và thêm biến môi trường DATABASE_URL trên Render.');
-  process.exit(1);
-}
-
-const pool = new Pool({
+const DATABASE_URL = String(process.env.DATABASE_URL || '').trim();
+let pool = null;
+if (DATABASE_URL) {
+  pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   max: Number(process.env.DB_POOL_MAX || 3),
   idleTimeoutMillis: 15000,
   connectionTimeoutMillis: 5000,
   maxLifetimeSeconds: 300
-});
+  });
+}
 
-async function query(text, params = []) { return pool.query(text, params); }
+async function query(text, params = []) {
+  if (!pool) throw new Error('DATABASE_URL chưa được cấu hình trên Render.');
+  return pool.query(text, params);
+}
 
 // Runtime schema guard: Render/PostgreSQL deployments can keep an older schema
 // even after a newer app is deployed. Repair the columns used by profile,
@@ -6044,27 +6045,37 @@ function startBackgroundJobs(){
   processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e));
 }
 
-initDb().then(async()=>{
-  await ensureVenueRoleSchema();
-  await runDatabaseMaintenance();
-  dbInitError = null;
-  dbReady = true;
-  console.log('PostgreSQL schema/data initialization hoàn tất.');
-  startBackgroundJobs();
-  setInterval(runDatabaseMaintenance, 5*60*1000);
-}).catch(err=>{
-  dbReady = false;
-  dbInitError = err?.message || String(err);
-  console.error('Không khởi tạo được database:',err);
-  // Keep the process alive briefly so the startup error is visible in Render logs,
-  // then exit and let Render restart the instance cleanly.
-  setTimeout(()=>process.exit(1),1000);
-});
+async function initializeDatabaseWithRetry(){
+  if(!DATABASE_URL){
+    dbReady=false;
+    dbInitError='DATABASE_URL chưa được cấu hình trên Render.';
+    console.error('[DB] DATABASE_URL chưa được cấu hình. HTTP server vẫn chạy để Render hiển thị /health và log lỗi.');
+    return;
+  }
+  try{
+    await initDb();
+    await ensureVenueRoleSchema();
+    await runDatabaseMaintenance();
+    dbInitError = null;
+    dbReady = true;
+    console.log('[DB] PostgreSQL schema/data initialization hoàn tất.');
+    startBackgroundJobs();
+    setInterval(runDatabaseMaintenance, 5*60*1000);
+  }catch(err){
+    dbReady = false;
+    dbInitError = err?.message || String(err);
+    console.error('[DB] Không khởi tạo được database:', dbInitError);
+    console.error('[DB] Kiểm tra DATABASE_URL, SSL và quyền truy cập PostgreSQL trên Render.');
+    setTimeout(initializeDatabaseWithRetry, 15000).unref();
+  }
+}
+
+initializeDatabaseWithRetry();
 
 process.on('SIGTERM',async()=>{
   console.log('Nhận SIGTERM — đang đóng Hàn Thiên Môn...');
   server.close(async()=>{
-    try{ await pool.end(); }catch(e){ console.error('pool.end:',e); }
+    try{ if(pool) await pool.end(); }catch(e){ console.error('pool.end:',e); }
     process.exit(0);
   });
   setTimeout(()=>process.exit(1),10000).unref();
@@ -6072,7 +6083,7 @@ process.on('SIGTERM',async()=>{
 
 process.on('SIGINT',async()=>{
   server.close(async()=>{
-    try{ await pool.end(); }catch(e){}
+    try{ if(pool) await pool.end(); }catch(e){}
     process.exit(0);
   });
 });
