@@ -1,0 +1,6 @@
+Hàn Thiên Môn v3.7.11
+- Thêm chức năng Tiên Thải.
+- Môn nhân có thể thanh lý Tiên Khí đang sở hữu theo số lượng tùy chỉnh.
+- Giá thanh lý cố định 31% giá trị ban đầu (treasure_items.price).
+- Tiên Khí đang trang bị được giữ lại; muốn thanh lý toàn bộ phải tháo trước.
+- Cập nhật linh thạch ngay sau giao dịch và làm mới Tu Di Giới/Trang Bị/Đệ Tử Bảng.

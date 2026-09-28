@@ -354,7 +354,7 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDanDuong();await loadDanPhap();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadBlackMarket();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadTreasure();await loadTienBan();await loadDanCac();await loadDanDuong();await loadDanPhap();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadBlackMarket();await loadTienThai();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
  catch(e){if(e?.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}else{console.warn('Phiên vẫn được giữ, lỗi tải dữ liệu tạm thời:',e);}}
 }
 function renderGuestAreas(){
@@ -686,6 +686,16 @@ function venueRolePanel(role){
 }
 async function fillVenueTransferTargets(){
   /* Target lists are rendered from the role response; kept as a compatibility hook. */
+}
+
+async function loadTienThai(){
+ const area=$('#tienThaiArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/tien-thai',{headers:authHeaders()});
+  const items=d.items||[];
+  area.innerHTML=`<div class="stone-exchange tien-thai-banner"><div><span class="eyebrow">♻️ THANH LÝ TIÊN KHÍ</span><h3>31% giá trị ban đầu</h3><p>Chọn số lượng Tiên Khí đang sở hữu để thanh lý. Tiên Khí đang trang bị sẽ được giữ lại.</p></div><span class="tag">💎 NHẬN LINH THẠCH NGAY</span></div><div class="market-listings tien-thai-list">${items.length?items.map(x=>{const sellable=Math.max(0,Number(x.sellable_quantity||0));const unit=Number(x.liquidation_unit_price||0);return `<article class="market-card tien-thai-card ${sellable<=0?'locked':''}"><div class="tien-thai-card-main"><div class="tien-thai-avatar">${immortalArtifactAvatarHtml(x.avatar||'⚜️')}</div><div><span class="eyebrow">♻️ TIÊN THẢI · ${esc(x.reward_grade||'Tiên Khí')}</span><h3>${esc(x.name)} ×${Number(x.quantity||0)}</h3><p>${esc(x.description||x.ability||'')}</p><small>${x.equipped?`🔒 Đang trang bị 1 bản · Có thể thanh lý ${sellable}`:`🟢 Có thể thanh lý ${sellable}`} · 💎 <b>${unit.toLocaleString('vi-VN')}</b> linh thạch / 1</small></div></div><div class="market-black-actions"><input class="tien-thai-qty" data-id="${x.id}" type="number" min="1" max="${Math.max(1,sellable)}" value="1" ${sellable<=0?'disabled':''}><button class="btn small primary tien-thai-btn" data-id="${x.id}" ${sellable<=0?'disabled':''}>${sellable<=0?'🔒 Không thể thanh lý':'♻️ Thanh lý'}</button></div></article>`}).join(''):'<div class="empty-state compact"><p>Không có Tiên Khí để thanh lý.</p></div>'}</div><p id="tienThaiMsg" class="train-msg"></p>`;
+  document.querySelectorAll('.tien-thai-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;const q=document.querySelector(`.tien-thai-qty[data-id="${b.dataset.id}"]`);try{const x=await api('/api/tien-thai/liquidate',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number(b.dataset.id),quantity:Number(q?.value||1)})});$('#tienThaiMsg').textContent=`♻️ ${x.message}`;await Promise.all([loadProfile(),loadTienThai(),loadTuDi(),loadEquipment(),loadDisciples()]);}catch(e){$('#tienThaiMsg').textContent='❌ '+e.message;b.disabled=false;}});
+ }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>♻️ Không thể mở Tiên Thải</h3><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadTienThai()">↻ Mở lại</button></div>`;}
 }
 
 async function loadBlackMarket(){
@@ -1401,7 +1411,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
@@ -1412,7 +1422,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  }
  function enterFocus(id,push=true){
    const target=document.getElementById(id); if(!target)return;
-   const compactOnly=['black-market','dan-phap','tavern'].includes(id);
+   const compactOnly=['black-market','dan-phap','tavern','tien-thai'].includes(id);
    document.body.classList.toggle('function-only-focus',compactOnly);
    document.body.classList.add('focus-mode','focus-lock');document.documentElement.classList.add('focus-lock');
    sections().forEach(s=>s.classList.toggle('focus-active',s===target));

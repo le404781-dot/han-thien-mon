@@ -3464,6 +3464,61 @@ app.post('/api/dan-cac/sell',auth,async(req,res)=>{
 // PHƯỜNG THỊ 1.0 · mua bán và trao đổi vật phẩm giữa các môn nhân
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TIÊN THẢI · thanh lý Tiên Khí sở hữu lấy 31% giá trị ban đầu
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/tien-thai',auth,async(req,res)=>{
+  try{
+    const uid=req.session.user_id;
+    const rows=(await query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.description,ti.price,ti.reward_grade,ti.power_bonus,ti.ability,ti.avatar,
+      (p.equipped_immortal_artifact_id=ti.id) AS equipped,
+      CASE WHEN p.equipped_immortal_artifact_id=ti.id THEN 1 ELSE 0 END AS equipped_quantity
+      FROM inventory i
+      JOIN treasure_items ti ON ti.id=i.item_id
+      LEFT JOIN profiles p ON p.user_id=i.user_id
+      WHERE i.user_id=$1 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%'
+      ORDER BY ti.price DESC,ti.id`,[uid])).rows;
+    res.json({items:rows.map(x=>({
+      ...x,
+      liquidation_unit_price:Math.max(1,Math.floor(Number(x.price||0)*0.31)),
+      sellable_quantity:Math.max(0,Number(x.quantity||0)-Number(x.equipped_quantity||0))
+    }))});
+  }catch(e){console.error('tien thai:',e);res.status(500).json({error:'Không thể mở Tiên Thải.'});}
+});
+
+app.post('/api/tien-thai/liquidate',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const uid=req.session.user_id;
+    const itemId=Number(req.body?.itemId), qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));
+    if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Tiên Khí không hợp lệ.'});
+    await client.query('BEGIN');
+    const row=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.price,ti.category,ti.reward_grade,
+      (p.equipped_immortal_artifact_id=ti.id) AS equipped,
+      CASE WHEN p.equipped_immortal_artifact_id=ti.id THEN 1 ELSE 0 END AS equipped_quantity
+      FROM inventory i
+      JOIN treasure_items ti ON ti.id=i.item_id
+      LEFT JOIN profiles p ON p.user_id=i.user_id
+      WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%'
+      FOR UPDATE`,[uid,itemId])).rows[0];
+    if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Tiên Khí trong Tu Di Giới.'});}
+    const equippedQty=Number(row.equipped_quantity||0);
+    const sellable=Math.max(0,Number(row.quantity||0)-equippedQty);
+    if(qty>sellable){
+      await client.query('ROLLBACK');
+      return res.status(400).json({error:equippedQty?`Bạn đang trang bị 1 ${row.name}. Có thể thanh lý tối đa ${sellable}. Hãy tháo Tiên Khí nếu muốn thanh lý toàn bộ.`:`Chỉ có ${sellable} ${row.name} có thể thanh lý.`});
+    }
+    const unit=Math.max(1,Math.floor(Number(row.price||0)*0.31));
+    const total=unit*qty;
+    if(Number(row.quantity)===qty) await client.query('DELETE FROM inventory WHERE user_id=$1 AND item_id=$2',[uid,itemId]);
+    else await client.query('UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[uid,itemId,qty]);
+    const st=(await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones`,[uid,total])).rows[0];
+    await client.query('COMMIT');
+    res.json({ok:true,item:row.name,quantity:qty,unitPrice:unit,total,spiritStones:Number(st?.spirit_stones||0),message:`Tiên Thải đã thanh lý ${row.name} ×${qty}, nhận ${total.toLocaleString('vi-VN')} linh thạch (31% giá trị ban đầu).`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien thai liquidate:',e);res.status(500).json({error:'Không thể thanh lý Tiên Khí. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
+});
+
 app.get('/api/black-market',auth,async(req,res)=>{
   try{
     if(!(await regionAccessFor(req.session.user_id,'black-market'))) return res.status(403).json({error:regionLockMessage('black-market'),regionLocked:true});
