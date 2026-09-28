@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.7.18
+
+- Cường Hóa lần đầu (+0 -> +1): 100% chắc chắn thành công.
+- Lần thứ hai (+1 -> +2): 90%.
+- Từ +2 trở lên: ngẫu nhiên 20%–80%.
+- Thiên Đạo Cường Hóa Thạch: +5 điểm phần trăm, tối đa 95%, tối đa 1 viên/lần.
+- Fix giao dịch phôi: UPDATE có điều kiện quantity >= số phôi để tránh lỗi race/âm kho.
+- Thất bại vẫn reset mục tiêu về +0 và tiêu phôi đúng theo giao dịch.

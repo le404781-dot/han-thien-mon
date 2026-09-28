@@ -4409,10 +4409,12 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     if(String(core.reward_grade||'').trim()!==String(target.reward_grade||'').trim() && Number(core.id)!==Number(target.id)){
       await client.query('ROLLBACK');return res.status(400).json({error:'Phôi phải cùng phẩm cấp hoặc cùng loại Tiên Khí với Tiên Khí mục tiêu.'});
     }
-    // Tỷ lệ thành công được bốc ngẫu nhiên cho từng lần Cường Hóa: 10%–90%.
-    // coreQty vẫn là số phôi người chơi quyết định (10–100), nhưng không làm lộ một tỷ lệ cố định;
-    // mỗi lượt server sẽ bốc lại một tỷ lệ mới trong khoảng này.
-    let successRate=crypto.randomInt(10,91);
+    // Tỷ lệ Cường Hóa theo cấp hiện tại:
+    // +0 -> +1: 100% chắc chắn thành công.
+    // +1 -> +2: 90%.
+    // +2 trở lên: ngẫu nhiên 20%–80% cho từng lượt.
+    // Thiên Đạo Cường Hóa Thạch cộng thêm 5 điểm phần trăm, tối đa 95%.
+    let successRate = level===0 ? 100 : (level===1 ? 90 : crypto.randomInt(20,81));
     if(catalystQty===1){
       const catalyst=(await client.query(`SELECT i.item_id AS id,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND ti.name='Thiên Đạo Cường Hóa Thạch' AND i.quantity>0 FOR UPDATE`,[uid])).rows[0];
       if(!catalyst){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không có Thiên Đạo Cường Hóa Thạch.'});}
@@ -4423,8 +4425,9 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     }
     const roll=crypto.randomInt(1,101);
     const success=roll<=successRate;
-    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,coreId,coreQty]);
-    if(Number(core.quantity)===coreQty) await client.query('DELETE FROM inventory WHERE user_id=$1 AND item_id=$2 AND quantity<=0',[uid,coreId]);
+    const consumed=(await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2 AND quantity >= $3 RETURNING quantity`,[uid,coreId,coreQty])).rows[0];
+    if(!consumed){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng phôi đã thay đổi. Vui lòng mở lại Cường Hóa rồi thử lại.'});}
+    if(Number(consumed.quantity)<=0) await client.query('DELETE FROM inventory WHERE user_id=$1 AND item_id=$2 AND quantity<=0',[uid,coreId]);
     let newLevel=0;
     if(success){newLevel=level+1;await client.query(`INSERT INTO immortal_artifact_enhancements(user_id,item_id,enhance_level,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET enhance_level=EXCLUDED.enhance_level,updated_at=NOW()`,[uid,targetId,newLevel]);}
     else await client.query(`DELETE FROM immortal_artifact_enhancements WHERE user_id=$1 AND item_id=$2`,[uid,targetId]);
