@@ -197,6 +197,21 @@ async function ensureRuntimeSchemaImpl(){
     CREATE INDEX IF NOT EXISTS idx_sect_post_comments_post ON sect_post_comments(post_id,id);
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
+
+    -- v3.7.56: CẤM VĨNH VIỄN Tiên Đế Hồng Mông Đan ở tầng PostgreSQL.
+    -- Không cho phép tạo lại vật phẩm này kể cả khi seed/migration/khôi phục dữ liệu chạy lại.
+    CREATE OR REPLACE FUNCTION block_tien_de_hong_mong_dan_catalog() RETURNS TRIGGER AS $$
+    BEGIN
+      IF LOWER(TRIM(COALESCE(NEW.name,''))) = LOWER(TRIM('Tiên Đế Hồng Mông Đan')) THEN
+        RAISE EXCEPTION 'FORBIDDEN_ITEM_TIEN_DE_HONG_MONG_DAN: item permanently disabled';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    DROP TRIGGER IF EXISTS trg_block_tien_de_hong_mong_dan_catalog ON treasure_items;
+    CREATE TRIGGER trg_block_tien_de_hong_mong_dan_catalog
+      BEFORE INSERT OR UPDATE OF name ON treasure_items
+      FOR EACH ROW EXECUTE FUNCTION block_tien_de_hong_mong_dan_catalog();
     ALTER TABLE tavern_products ADD COLUMN IF NOT EXISTS storage_item_id INTEGER;
     DO $$ BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='tavern_products_storage_item_id_fkey') THEN
@@ -2077,6 +2092,30 @@ async function initDb() {
   if((await query('SELECT 1 FROM app_migrations WHERE id=$1',[removeHongMengDanMigration])).rowCount===0){
     await query('INSERT INTO app_migrations(id) VALUES($1)',[removeHongMengDanMigration]);
   }
+  // v3.7.56: khóa tuyệt đối — không để vật phẩm xuất hiện lại dưới bất kỳ hình thức nào.
+  const forbidHongMengMigration='v3.7.56_forbid_tien_de_hong_mong_dan_forever';
+  const forbiddenNames=['Tiên Đế Hồng Mông Đan'];
+  // Thu hồi mọi tham chiếu còn tồn tại trước khi xóa catalog. Các bảng SET NULL/CASCADE
+  // sẽ tự xử lý theo FK; các bảng giao dịch cần hủy để không còn bản ghi treo.
+  const forbiddenIds=(await query(`SELECT id FROM treasure_items WHERE LOWER(TRIM(name))=LOWER(TRIM($1))`,[forbiddenNames[0]])).rows.map(r=>Number(r.id)).filter(Number.isFinite);
+  if(forbiddenIds.length){
+    const c=await dbConnect();
+    try{
+      await c.query('BEGIN');
+      await c.query(`DELETE FROM market_trades WHERE offer_item_id = ANY($1::bigint[]) OR want_item_id = ANY($1::bigint[])`,[forbiddenIds]);
+      await c.query(`DELETE FROM market_listings WHERE item_id = ANY($1::bigint[])`,[forbiddenIds]);
+      await c.query(`DELETE FROM dan_duong_member_invites WHERE item_id = ANY($1::bigint[])`,[forbiddenIds]);
+      await c.query(`DELETE FROM alchemy_recipe_ingredients WHERE item_id = ANY($1::bigint[])`,[forbiddenIds]);
+      await c.query(`DELETE FROM inventory WHERE item_id = ANY($1::bigint[])`,[forbiddenIds]);
+      await c.query(`DELETE FROM immortal_artifact_enhancements WHERE item_id = ANY($1::bigint[])`,[forbiddenIds]);
+      await c.query(`DELETE FROM spirit_beast_equipment WHERE item_id = ANY($1::bigint[])`,[forbiddenIds]);
+      await c.query(`DELETE FROM treasure_items WHERE id = ANY($1::bigint[])`,[forbiddenIds]);
+      await c.query('COMMIT');
+    }catch(e){try{await c.query('ROLLBACK')}catch{};throw e;}finally{c.release();}
+  }
+  if((await query('SELECT 1 FROM app_migrations WHERE id=$1',[forbidHongMengMigration])).rowCount===0){
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[forbidHongMengMigration]);
+  }
 
   // v3.7.45: đặt chính xác linh thạch cho 2 môn nhân theo yêu cầu quản trị.
   const spiritStonesCorrectionMigration = 'v3.7.45_set_spirit_stones_cuu_vi_ho_reytheon_exact';
@@ -3843,6 +3882,16 @@ app.get('/api/reward-snapshot',auth,async(req,res)=>{
   }catch(e){res.status(500).json({error:'Không thể kiểm tra phần thưởng mới.'});}
 });
 
+// v3.7.55 · KHÓA VĨNH VIỄN Tiên Đế Hồng Mông Đan nếu còn sót trong Tu Di Giới.
+// Khóa server-side theo tên để không phụ thuộc vào ID (kể cả dữ liệu cũ/restore DB).
+const FORBIDDEN_HONG_MENG_DAN_NAME='Tiên Đế Hồng Mông Đan';
+function isForbiddenHongMengDan(name){
+  return String(name||'').trim().toLocaleLowerCase('vi-VN')===FORBIDDEN_HONG_MENG_DAN_NAME.toLocaleLowerCase('vi-VN');
+}
+function forbiddenHongMengDanMessage(action='sử dụng'){
+  return `Tiên Đế Hồng Mông Đan đã bị khóa vĩnh viễn, không thể ${action}.`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TU DI GIỚI 2.0 · kho vật phẩm, dùng vật phẩm và nâng dung lượng
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3873,6 +3922,10 @@ app.post('/api/storage/use',auth,async(req,res)=>{
       WHERE i.user_id=$1 AND ti.id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
     if(!r.rows.length||Number(r.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng vật phẩm trong Tu Di Giới không đủ.'});}
     const item=r.rows[0];
+    if(isForbiddenHongMengDan(item.name)){
+      await client.query('ROLLBACK');
+      return res.status(423).json({error:forbiddenHongMengDanMessage('hấp thu'),itemLocked:true});
+    }
     const foundation=await requireSpiritRootHealthy(client,req.session.user_id);
     let gain=Number(item.spirit_gain)||0;
     let buffText='';
@@ -3959,6 +4012,7 @@ app.post('/api/dan-cac/sell',auth,async(req,res)=>{
     const row=(await client.query(`SELECT ti.id,ti.name,ti.category,ti.price,ti.buyback_price,COALESCE(i.quantity,0)::int AS quantity,
       p.equipped_artifact_id FROM treasure_items ti JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1 JOIN profiles p ON p.user_id=$1 WHERE ti.id=$2 FOR UPDATE`,[req.session.user_id,itemId])).rows[0];
     if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không có vật phẩm này trong Tu Di Giới.'});}
+    if(isForbiddenHongMengDan(row.name)){await client.query('ROLLBACK');return res.status(423).json({error:forbiddenHongMengDanMessage('bán'),itemLocked:true});}
     if(quantity>Number(row.quantity)) {await client.query('ROLLBACK');return res.status(400).json({error:`Chỉ có ${Number(row.quantity)} ${row.name}.`});}
     if(Number(row.equipped_artifact_id)===itemId){await client.query('ROLLBACK');return res.status(400).json({error:'Pháp khí đang trang bị. Hãy tháo trang bị trước khi bán.'});}
     const unit=Math.max(1,Number(row.buyback_price)||Math.round((Number(row.price)||0)*0.45));
@@ -4129,8 +4183,9 @@ app.post('/api/market/list',auth,async(req,res)=>{
     const itemId=Number(req.body?.itemId), qty=Math.max(1,Math.floor(Number(req.body?.quantity)||0)), price=Math.max(1,Math.floor(Number(req.body?.priceStones)||0));
     if(!Number.isInteger(itemId)||qty<1||price<1)return res.status(400).json({error:'Vật phẩm, số lượng hoặc giá bán không hợp lệ.'});
     await client.query('BEGIN');
-    const ir=await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
+    const ir=await client.query(`SELECT i.quantity,ti.name FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
     if(!ir.rows.length||Number(ir.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không có đủ vật phẩm để bán.'});}
+    if(isForbiddenHongMengDan(ir.rows[0]?.name)){await client.query('ROLLBACK');return res.status(423).json({error:forbiddenHongMengDanMessage('rao bán'),itemLocked:true});}
     const equipped=await client.query(`SELECT equipped_artifact_id FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
     if(Number(equipped.rows[0]?.equipped_artifact_id)===itemId){await client.query('ROLLBACK');return res.status(400).json({error:'Pháp khí đang trang bị. Hãy tháo trang bị trước khi bán.'});}
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[req.session.user_id,itemId,qty]);
@@ -4150,6 +4205,11 @@ app.post('/api/market/buy',auth,async(req,res)=>{
     const lr=await client.query(`SELECT ml.*,ti.name AS item_name FROM market_listings ml JOIN treasure_items ti ON ti.id=ml.item_id WHERE ml.id=$1 FOR UPDATE`,[listingId]);
     if(!lr.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Tin bán không còn tồn tại.'});}
     const l=lr.rows[0];
+    if(isForbiddenHongMengDan(l.item_name)){
+      await client.query('DELETE FROM market_listings WHERE id=$1',[listingId]);
+      await client.query('COMMIT');
+      return res.status(423).json({error:forbiddenHongMengDanMessage('giao dịch'),itemLocked:true});
+    }
     if(Number(l.seller_id)===Number(req.session.user_id)){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn không thể mua vật phẩm của chính mình.'});}
     const buyer=await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
     const seller=await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[l.seller_id]);
