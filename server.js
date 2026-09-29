@@ -2443,8 +2443,13 @@ app.use(express.static(__dirname, {
   setHeaders(res, filePath) {
     if (/\.html$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache');
-    } else if (/\.(?:js|css|png|jpe?g|webp|svg|ico)$/i.test(filePath)) {
-      res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=2592000, stale-while-revalidate=604800, immutable' : 'no-cache');
+    } else if (/\.(?:js|css)$/i.test(filePath)) {
+      // JS/CSS must always revalidate. Older deployments reused the same asset
+      // query string while Render/browser caches were told `immutable`, causing
+      // newly deployed functions to silently keep running old code on iPhone.
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else if (/\.(?:png|jpe?g|webp|svg|ico)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=2592000, stale-while-revalidate=604800' : 'no-cache');
     } else {
       res.setHeader('Cache-Control', 'public, max-age=600');
     }

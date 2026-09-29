@@ -31,7 +31,7 @@ function setChallengeAuto(enabled){
 const GET_CACHE_TTL={
  '/api/data':10000,'/api/profile':5000,'/api/chat':4000,'/api/mailbox':5000,
  '/api/challenges':1500,'/api/challenges/online/state':0,'/api/challenges/announcement':5000,'/api/arena/live':2500,
- '/api/rewards':15000,'/api/presence':10000
+
 };
 function getCacheTTL(url){const base=String(url).split('?')[0];return GET_CACHE_TTL[base]??3000;}
 function invalidateGetCache(){__getCache.clear();}
@@ -46,11 +46,29 @@ async function api(url,opts={}){
   if(__inflightGets.has(key))return __inflightGets.get(key);
  }
  const run=(async()=>{
-  const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...(opts.body&&typeof opts.body==='string'?{'Content-Type':'application/json'}:{})}});
-  let d={}; try{d=await r.json();}catch{}
-  if(!r.ok){const e=new Error(d.error||'Có lỗi xảy ra.');e.status=r.status;throw e;}
-  if(d&&typeof d==='object')d._status=r.status;
-  return d;
+  // Render opens HTTP before PostgreSQL finishes migrations. During that short
+  // window the API returns 503; do not let the first page load permanently fail.
+  const retryableStatuses=new Set([502,503,504]);
+  const delays=[0,700,1400,2500];
+  let lastError=null;
+  for(let attempt=0;attempt<delays.length;attempt++){
+   if(delays[attempt])await new Promise(r=>setTimeout(r,delays[attempt]));
+   try{
+    const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...(opts.body&&typeof opts.body==='string'?{'Content-Type':'application/json'}:{})}});
+    let d={}; try{d=await r.json();}catch{}
+    if(!r.ok){
+      const e=new Error(d.error||'Có lỗi xảy ra.');e.status=r.status;lastError=e;
+      if(!retryableStatuses.has(r.status)||attempt===delays.length-1)throw e;
+      continue;
+    }
+    if(d&&typeof d==='object')d._status=r.status;
+    return d;
+   }catch(e){
+    lastError=e;
+    if(!retryableStatuses.has(e?.status)||attempt===delays.length-1)throw e;
+   }
+  }
+  throw lastError||new Error('Không thể kết nối máy chủ.');
  })();
  if(key){__inflightGets.set(key,run);try{const d=await run;__getCache.set(key,{at:Date.now(),value:d});return d;}finally{if(__inflightGets.get(key)===run)__inflightGets.delete(key);}}
  return run;
@@ -1609,7 +1627,7 @@ if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('colo
 setupTutorial();
 
 loadData();loadSect();checkSession();startRewardWatcher();
-setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();loadWealth();}},180000);
+setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();loadWealth();}},30000);
 setInterval(()=>{if(getToken()&&!document.hidden){loadGlobalAnnouncement();loadRedPackets();}},5000);
 setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},20000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
