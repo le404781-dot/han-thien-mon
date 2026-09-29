@@ -1,0 +1,25 @@
+HÀN THIÊN MÔN v3.7.49
+
+1. Reytheon
+- Chuẩn hóa chính xác: Tiên Đế 12 Tinh.
+- Linh lực được tính theo đúng mốc 12 Tinh của hệ thống hiện tại.
+- Migration tự chạy khi server khởi động, không cần sửa trực tiếp PostgreSQL.
+
+2. Khiêu Chiến Online
+- Bổ sung migration phục hồi dữ liệu lôi đài bị lỗi: kiểm tra HP, HP tối đa, lượt đánh và bộ 3 chiêu.
+- Trận hợp lệ được giữ nguyên; trận lỗi được hủy an toàn và hoàn lại cược.
+- Loại bỏ lời mời online bị trùng cùng chiều.
+- Danh sách Lôi Đài Trực Chiến chỉ lấy trận mode=online.
+- API trạng thái online gửi no-cache để hai máy nhận cùng trạng thái DB mới nhất.
+- Khóa lượt đánh bằng transaction + điều kiện turn_user_id phía server.
+- Client đồng bộ trạng thái Lôi Đài Online mỗi 1 giây khi đang mở trận.
+- Khi đổi lượt, nút tuyệt chiêu tự động bật/tắt đúng theo lượt thực tế.
+- HP, lượt, sát thương và người đang ra chiêu lấy từ server; không tin dữ liệu HP do client gửi.
+- Hỗ trợ avatar ảnh trong giao diện hai đấu thủ.
+
+3. Kiểm tra
+- server.js: node --check PASS
+- script.js: node --check PASS
+
+Lưu ý:
+- Migration dữ liệu chạy khi deploy/khởi động server có DATABASE_URL.
