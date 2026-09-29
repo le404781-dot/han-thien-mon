@@ -1,0 +1,8 @@
+HÀN THIÊN MÔN v3.7.53
+
+FIX GỐC LỖI @reytheon chưa về Tiên Đế 12 Tinh:
+- Không còn phụ thuộc app_migrations đã chạy hay chưa.
+- Đồng bộ lại @reytheon ở mỗi lần server khởi động.
+- Nhận diện cả username "reytheon" và "@reytheon".
+- Ghi trực tiếp spirit_power đúng mốc Tiên Đế 12 Tinh, rank="Tiên Đế", realm_tier=12.
+- Không thay đổi các môn nhân khác.

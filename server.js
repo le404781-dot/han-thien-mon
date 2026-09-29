@@ -2244,6 +2244,29 @@ async function initDb() {
     `, [reyNames, spirit]);
   }
 
+  // v3.7.54: FORCE-SYNC cảnh giới 5 môn nhân theo yêu cầu hiện tại.
+  // Chạy mỗi lần khởi động, không phụ thuộc app_migrations, để DB luôn khớp
+  // với cảnh giới yêu cầu kể cả khi tài khoản được tạo sau các migration cũ.
+  {
+    const exactMembers = [
+      ['ho_linh_15', 'Tiên Tôn', 16, 9, RANK_MINS[16] + Math.ceil((RANK_MINS[17] - RANK_MINS[16]) * 8 / 9)],
+      ['reytheon', 'Tiên Đế', 17, 12, RANK_MINS[17] + (12 - 1) * TIEN_DE_STAR_SIZE],
+      ['@reytheon', 'Tiên Đế', 17, 12, RANK_MINS[17] + (12 - 1) * TIEN_DE_STAR_SIZE],
+      ['Cuu_Vi_Ho', 'Tiên Đế', 17, 5, RANK_MINS[17] + (5 - 1) * TIEN_DE_STAR_SIZE],
+      ['wutati', 'Thiên Tiên', 12, 1, RANK_MINS[12]],
+      ['libais', 'Thiên Tiên', 12, 1, RANK_MINS[12]]
+    ];
+    for (const [username, rank, realmIndex, tier, spiritPower] of exactMembers) {
+      await query(`
+        UPDATE profiles p
+        SET spirit_power=$2, rank=$3, realm_tier=$4, updated_at=NOW()
+        FROM users u
+        WHERE u.id=p.user_id AND LOWER(TRIM(u.username))=LOWER(TRIM($1))
+      `, [username, rank, tier, clampSpiritPower(spiritPower)]);
+    }
+    console.log('[DB] v3.7.54: FORCE-SYNC ho_linh_15=Tiên Tôn 9 tầng; Reytheon=Tiên Đế 12 tinh; Cuu_Vi_Ho=Tiên Đế 5 tinh; wutati/libais=Thiên Tiên.');
+  }
+
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);

@@ -1,0 +1,5 @@
+HÀN THIÊN MÔN v3.7.52
+
+- Ép chính xác môn nhân @reytheon về Tiên Đế 12 Tinh.
+- Thêm migration riêng v3.7.52 để cập nhật được cả khi database đã chạy migration v3.7.50 trước đó.
+- Giữ nguyên toàn bộ chức năng khác, bao gồm Khiêu Chiến Online đã khôi phục.
