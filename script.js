@@ -20,7 +20,7 @@ const __getCache=new Map();
 const GET_CACHE_TTL={
  '/api/data':10000,'/api/profile':5000,'/api/chat':4000,'/api/mailbox':5000,
  '/api/challenges':5000,'/api/challenges/announcement':5000,'/api/arena/live':2500,
- '/api/rewards':15000,'/api/presence':10000
+ '/api/rewards':15000,'/api/presence':10000,'/api/equipment':2000
 };
 function getCacheTTL(url){const base=String(url).split('?')[0];return GET_CACHE_TTL[base]??3000;}
 function isSectionVisible(id){const el=document.getElementById(id);if(!el||document.hidden)return false;const r=el.getBoundingClientRect();return r.bottom>0&&r.top<window.innerHeight;}
@@ -36,7 +36,19 @@ async function api(url,opts={}){
   if(__inflightGets.has(key))return __inflightGets.get(key);
  }
  const run=(async()=>{
-  const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...(opts.body&&typeof opts.body==='string'?{'Content-Type':'application/json'}:{})}});
+  // Prevent a blocked Render/PostgreSQL request from leaving a section stuck
+  // on its initial loading placeholder forever. 15s is enough for normal mobile
+  // connections while still giving the user a retry path on a bad deployment.
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),15000);
+  let r;
+  try{
+   r=await fetch(url,{...opts,signal:opts.signal||controller.signal,headers:{...(opts.headers||{}),...(opts.body&&typeof opts.body==='string'?{'Content-Type':'application/json'}:{})}});
+  }catch(err){
+   if(err?.name==='AbortError') throw new Error('Máy chủ phản hồi quá lâu. Vui lòng bấm Thử lại.');
+   throw err;
+  }finally{clearTimeout(timeout);}
+
   let d={}; try{d=await r.json();}catch{}
   if(!r.ok){const e=new Error(d.error||'Có lỗi xảy ra.');e.status=r.status;throw e;}
   if(d&&typeof d==='object')d._status=r.status;
@@ -626,7 +638,7 @@ async function loadEquipment(){
   area.innerHTML=`<div class="equipment-power"><div><span class="eyebrow">⚔ CHIẾN LỰC HIỆN TẠI</span><p>Chiến lực đã bao gồm Linh Thú + Linh Căn + Pháp Khí + Tiên Khí đang trang bị.</p><small>Trang bị cộng thêm: +${power.toLocaleString('vi-VN')}</small></div><strong>${combat.toLocaleString('vi-VN')}</strong></div><div class="equipment-slots">${slot('beast','Linh Thú','🐉',e.beast)}${slot('root','Linh Căn','🌿',e.root)}${slot('artifact','Pháp Khí','⚔',e.artifact)}${slot('immortal-artifact','Tiên Khí','⚜️',equippedImmortalArtifact)}</div><div class="equipment-immortal-panel"><div class="equipment-power"><div><span class="eyebrow">🌌 TIÊN PHÁP TRANG BỊ</span><p>${e.equipped_immortal_technique_id&&immortalTechniques.find(x=>Number(x.id)===Number(e.equipped_immortal_technique_id))?`Đang dùng: ${esc(immortalTechniques.find(x=>Number(x.id)===Number(e.equipped_immortal_technique_id)).name)}`:'Chưa trang bị Tiên Pháp'}</p></div><select id="equippedImmortalSelect"><option value="0">— Chọn Tiên Pháp —</option>${immortalTechniques.map(x=>`<option value="${x.id}" ${x.equipped?'selected':''}>${esc(x.name)} · ${esc(x.grade)}</option>`).join('')}</select><button class="btn small primary" id="equipImmortalBtn">🌌 Trang bị Tiên Pháp</button>${immortalTechniques.some(x=>x.equipped)?'<button class="btn small ghost" id="unequipImmortalBtn">Tháo</button>':''}</div></div>${techniquePanel}<div><div class="friend-subtitle">📦 Linh Thú trong Tu Di Giới</div><div class="equipment-list">${beastCards||'<div class="equipment-empty">Chưa có Linh Thú.</div>'}</div></div><div><div class="friend-subtitle">📦 Linh Căn trong Tu Di Giới</div><div class="equipment-list">${rootCards||'<div class="equipment-empty">Chưa có Linh Căn.</div>'}</div></div><div><div class="friend-subtitle">📦 Pháp Khí trong Tu Di Giới</div><div class="equipment-list">${artifactCards||'<div class="equipment-empty">Chưa có Pháp Khí/Pháp Bảo.</div>'}</div></div><div><div class="friend-subtitle">📦 Tiên Khí trong Tu Di Giới</div><div class="equipment-list">${immortalArtifactCards||'<div class="equipment-empty">Chưa có Tiên Khí.</div>'}</div></div><p id="equipmentMsg" class="train-msg"></p>`;
   $('#equipImmortalBtn')?.addEventListener('click',async()=>{const id=Number($('#equippedImmortalSelect')?.value||0);if(!id){$('#equipmentMsg').textContent='❌ Hãy chọn Tiên Pháp.';return;}try{const x=await api('/api/equipment/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:'immortal',id})});$('#equipmentMsg').textContent='✅ '+x.message;await Promise.all([loadEquipment(),loadProfile()]);}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;}});
   $('#unequipImmortalBtn')?.addEventListener('click',async()=>{try{await api('/api/equipment/unequip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:'immortal'})});$('#equipmentMsg').textContent='✅ Đã tháo Tiên Pháp.';await Promise.all([loadEquipment(),loadProfile()]);}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;}});
-  document.querySelectorAll('[data-equip-type]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/equipment/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:b.dataset.equipType,id:Number(b.dataset.equipId)})});$('#equipmentMsg').textContent=`✅ ${x.message}`;await loadProfile();}catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;b.disabled=false;}});
+  document.querySelectorAll('[data-equip-type]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/equipment/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:b.dataset.equipType,id:Number(b.dataset.equipId)})});$('#equipmentMsg').textContent=`✅ ${x.message}`;await Promise.all([loadProfile(),loadEquipment()]);}catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;b.disabled=false;}});
   document.querySelectorAll('[data-unequip]').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/api/equipment/unequip',{method:'POST',headers:authHeaders(),body:JSON.stringify({type:b.dataset.unequip})});$('#equipmentMsg').textContent='✅ Đã tháo trang bị.';await loadProfile();await loadEquipment();}catch(err){const m=$('#equipmentMsg');if(m)m.textContent='❌ '+err.message;b.disabled=false;}});
   const et=$('#equipTechniqueBtn'); if(et)et.onclick=async()=>{const id=Number($('#equippedTechniqueSelect')?.value||0);if(!id){$('#equipmentMsg').textContent='❌ Hãy chọn công pháp.';return;}et.disabled=true;try{const x=await api('/api/techniques/equip',{method:'POST',headers:authHeaders(),body:JSON.stringify({techniqueId:id})});$('#equipmentMsg').textContent='✅ '+x.message;await loadProfile();await loadEquipment();}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;et.disabled=false;}};
   const ut=$('#unequipTechniqueBtn'); if(ut)ut.onclick=async()=>{ut.disabled=true;try{const x=await api('/api/techniques/unequip',{method:'POST',headers:authHeaders(),body:'{}'});$('#equipmentMsg').textContent='✅ '+x.message;await loadProfile();await loadEquipment();}catch(err){$('#equipmentMsg').textContent='❌ '+err.message;ut.disabled=false;}};

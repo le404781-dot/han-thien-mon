@@ -1,0 +1,17 @@
+HÀN THIÊN MÔN v3.7.36 – FIX TRANG BỊ KHÔNG MỞ
+
+1. FIX /api/equipment
+- Không gọi ensureEquipmentSchema() trong GET /api/equipment.
+- Schema Trang Bị chỉ được migration một lần khi server khởi động.
+- Tránh request GET phải chờ ALTER TABLE/DDL lock trên PostgreSQL Render.
+- Giữ nguyên toàn bộ dữ liệu và chức năng Trang Bị.
+
+2. FIX GIAO DIỆN LOADING
+- /api/equipment có cache 5 giây.
+- API client có timeout 15 giây để không kẹt vĩnh viễn ở “Đang mở Trang Bị...”.
+- Khi server phản hồi quá lâu, giao diện chuyển sang trạng thái lỗi + Thử lại.
+
+3. KHÔNG THAY ĐỔI BỐ CỤC
+- Không đổi tên menu/icon.
+- Không đổi bố cục Trang Bị.
+- Không xóa dữ liệu Tiên Khí/Linh Thú/Linh Căn/Pháp Khí/Công Pháp.
