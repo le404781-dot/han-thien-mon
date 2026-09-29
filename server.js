@@ -1935,6 +1935,32 @@ async function initDb() {
     FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=$1`,['kien',RANK_MINS[11],'Địa Tiên']);
   await query(`UPDATE profiles p SET spirit_power=GREATEST(COALESCE(p.spirit_power,0),$2),rank=$3,realm_tier=GREATEST(COALESCE(p.realm_tier,1),1),updated_at=NOW()
     FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=$1`,['ho_linh_15',RANK_MINS[14],'Kim Tiên']);
+  // v3.7.43: chuẩn hóa cảnh giới cho các môn nhân được chỉ định.
+  // Đây là migration một lần và đặt đúng đại cảnh giới + tầng/tinh, kể cả khi
+  // cần hạ linh lực về mốc tương ứng. Không dùng GREATEST để tránh giữ cảnh giới cũ.
+  const realmCorrectionMigration = 'v3.7.43_set_member_realms_exact';
+  const realmCorrectionApplied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[realmCorrectionMigration])).rowCount > 0;
+  if(!realmCorrectionApplied){
+    const exactRealmRows = [
+      // Tiên Tôn 8 tầng: chọn đúng mốc đầu của Tầng 8.
+      ['ho_linh_15', 'Tiên Tôn', 16, 8, RANK_MINS[16] + Math.ceil(((RANK_MINS[17]-RANK_MINS[16]) * 7) / 9)],
+      // Tiên Đế 11 tinh / 5 tinh: mỗi tinh có một khoảng TIEN_DE_STAR_SIZE.
+      ['Reytheon', 'Tiên Đế', 17, 11, RANK_MINS[17] + (11-1) * TIEN_DE_STAR_SIZE],
+      ['Cuu_Vi_Ho', 'Tiên Đế', 17, 5, RANK_MINS[17] + (5-1) * TIEN_DE_STAR_SIZE],
+      // Thiên Tiên không ghi tầng => đặt tại Nhất Tầng.
+      ['wutati', 'Thiên Tiên', 12, 1, RANK_MINS[12]],
+      ['libais', 'Thiên Tiên', 12, 1, RANK_MINS[12]]
+    ];
+    for(const [username,rank,realmIndex,tier,spiritPower] of exactRealmRows){
+      await query(`UPDATE profiles p
+        SET spirit_power=$2, rank=$3, realm_tier=$4, updated_at=NOW()
+        FROM users u
+        WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)`,
+        [username, clampSpiritPower(spiritPower), rank, tier]);
+    }
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[realmCorrectionMigration]);
+    console.log(`[DB] ${realmCorrectionMigration}: đã chỉnh cảnh giới chính xác cho 5 môn nhân.`);
+  }
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
@@ -6899,6 +6925,109 @@ async function lockImmortalPillsOnce(){
   finally{client.release();}
 }
 
+async function recallImmortalPillsToDanMasterOnce(){
+  // v3.7.42: Thu hồi toàn bộ Tiên Đan đang nằm trong Tu Di Giới của
+  // các môn nhân khác và chuyển về Tu Di Giới của Đan Chủ.
+  // Schema hiện tại không lưu nguồn gốc từng stack (mua/luyện/nhận thưởng),
+  // vì vậy migration thu hồi toàn bộ inventory được phân loại là Tiên Đan,
+  // ngoại trừ chính Đan Chủ, để không bỏ sót stack Tiên Đan đã mua trước đây.
+  const migrationId='v3.7.42-recall-immortal-pills-to-dan-master';
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    const already=(await client.query('SELECT 1 FROM app_migrations WHERE id=$1',[migrationId])).rows[0];
+    if(already){await client.query('COMMIT');return;}
+
+    const master=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1 FOR UPDATE`)).rows[0];
+    if(!master){
+      // Chưa có Đan Chủ thì chưa đánh dấu migration; deploy sau sẽ thử lại.
+      await client.query('ROLLBACK');
+      console.log('[ALCHEMY] v3.7.42 chưa thu hồi Tiên Đan: chưa có Đan Chủ.');
+      return;
+    }
+    const masterId=Number(master.user_id);
+
+    const rows=(await client.query(`
+      SELECT i.user_id,i.item_id,i.quantity,ti.name
+      FROM inventory i
+      JOIN treasure_items ti ON ti.id=i.item_id
+      WHERE i.user_id<>$1
+        AND i.quantity>0
+        AND LOWER(TRIM(COALESCE(ti.category,''))) LIKE '%tiên đan%'
+      ORDER BY i.item_id,i.user_id
+      FOR UPDATE OF i,ti
+    `,[masterId])).rows;
+
+    if(!rows.length){
+      await client.query(`INSERT INTO app_migrations(id) VALUES($1)`,[migrationId]);
+      await client.query('COMMIT');
+      console.log('[ALCHEMY] v3.7.42 không có Tiên Đan của môn nhân khác để thu hồi.');
+      return;
+    }
+
+    // Thu hồi theo từng loại. Tu Di Giới giới hạn 200 đơn vị / một loại;
+    // gom các stack về Đan Chủ theo từng item, không làm mất số lượng.
+    const totals=new Map();
+    for(const row of rows){
+      const itemId=Number(row.item_id), qty=Math.max(0,Number(row.quantity)||0);
+      if(qty>0) totals.set(itemId,(totals.get(itemId)||0)+qty);
+    }
+
+    // Bảo đảm đủ số ô cho các loại Tiên Đan mới nhận. Đây là migration đặc quyền
+    // của Đan Chủ, nên chỉ tăng đúng số ô cần thiết thay vì phá giới hạn chung.
+    const capR=(await client.query(`
+      SELECT COALESCE(storage_capacity,30)::int AS capacity,
+             COALESCE((SELECT COUNT(*) FROM inventory WHERE user_id=$1 AND quantity>0),0)::int AS used
+      FROM profiles WHERE user_id=$1 FOR UPDATE
+    `,[masterId])).rows[0];
+    if(!capR) throw new Error('Không tìm thấy hồ sơ Đan Chủ.');
+    const missingItems=(await client.query(`
+      SELECT COUNT(*)::int AS n
+      FROM treasure_items ti
+      WHERE LOWER(TRIM(COALESCE(ti.category,''))) LIKE '%tiên đan%'
+        AND ti.id IN (${Array.from(totals.keys()).map((_,i)=>`$${i+2}`).join(',')})
+        AND NOT EXISTS(SELECT 1 FROM inventory i WHERE i.user_id=$1 AND i.item_id=ti.id AND i.quantity>0)
+    `,[masterId,...Array.from(totals.keys())])).rows[0]?.n||0;
+    const requiredCapacity=Number(capR.used)+Number(missingItems);
+    if(requiredCapacity>Number(capR.capacity)){
+      await client.query(`UPDATE profiles SET storage_capacity=$2,updated_at=NOW() WHERE user_id=$1`,[masterId,requiredCapacity]);
+    }
+
+    // inventory hiện giới hạn 200 đơn vị / một loại vật phẩm. Nếu tổng thu hồi
+    // vượt giới hạn, rollback toàn bộ để tuyệt đối không làm mất Tiên Đan.
+    for(const [itemId,totalQty] of totals){
+      const current=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[masterId,itemId])).rows[0]?.quantity||0);
+      if(current+totalQty>200){
+        await client.query('ROLLBACK');
+        console.error(`[ALCHEMY] v3.7.42 rollback: Tiên Đan item ${itemId} sẽ vượt giới hạn 200 (${current}+${totalQty}).`);
+        return;
+      }
+    }
+
+    const audit=[];
+    for(const row of rows){
+      const qty=Math.max(0,Number(row.quantity)||0);
+      if(!qty) continue;
+      // Khóa/kiểm tra stack của Đan Chủ trước khi cộng để tránh race trong migration.
+      await client.query(`
+        INSERT INTO inventory(user_id,item_id,quantity,updated_at)
+        VALUES($1,$2,$3,NOW())
+        ON CONFLICT(user_id,item_id)
+        DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()
+      `,[masterId,Number(row.item_id),qty]);
+      await client.query(`UPDATE inventory SET quantity=0,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[Number(row.user_id),Number(row.item_id)]);
+      audit.push({fromUserId:Number(row.user_id),itemId:Number(row.item_id),itemName:row.name,quantity:qty});
+    }
+
+    await client.query(`INSERT INTO app_migrations(id) VALUES($1)`,[migrationId]);
+    await client.query('COMMIT');
+    console.log(`[ALCHEMY] v3.7.42 đã thu hồi ${audit.length} stack Tiên Đan về Tu Di Giới Đan Chủ (user ${masterId}).`);
+  }catch(e){
+    try{await client.query('ROLLBACK')}catch{}
+    throw e;
+  }finally{client.release();}
+}
+
 async function clearActiveOnlineChallengesOnce(){
   const migrationId='v3.7.39-reset-online-challenges-and-moves';
   const client=await dbConnect();
@@ -6950,6 +7079,8 @@ async function initializeDatabaseWithRetry(){
     if(shuttingDown||poolClosed)return;
     await ensureTreasuryImmortalPillLockSchema();
     await lockImmortalPillsOnce();
+    if(shuttingDown||poolClosed)return;
+    await recallImmortalPillsToDanMasterOnce();
     if(shuttingDown||poolClosed)return;
     await ensureChallengeSchema();
     if(shuttingDown||poolClosed)return;
