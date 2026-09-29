@@ -1967,6 +1967,35 @@ async function initDb() {
     }finally{client.release();}
   }
 
+  // v3.7.47: phục hồi NGAY và ĐẦY ĐỦ thanh Căn Cơ cho toàn bộ môn nhân.
+  // Không phụ thuộc thời gian hồi phục nội thương; luôn đặt current = max theo cảnh giới.
+  const foundationFullRecoveryMigration = 'v3.7.47_full_spirit_root_foundation_recovery';
+  const foundationFullRecoveryApplied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[foundationFullRecoveryMigration])).rowCount > 0;
+  if(!foundationFullRecoveryApplied){
+    const client = await dbConnect();
+    try{
+      await client.query('BEGIN');
+      const foundationRows = (await client.query('SELECT user_id,spirit_power FROM profiles FOR UPDATE')).rows;
+      for(const fp of foundationRows){
+        const fStage = stageFor(Number(fp.spirit_power)||0);
+        const fMax = foundationMaxForStage(fStage);
+        await client.query(`
+          UPDATE profiles
+          SET spirit_root_foundation=$2,
+              spirit_root_injury_until=NULL,
+              updated_at=NOW()
+          WHERE user_id=$1
+        `,[fp.user_id,fMax]);
+      }
+      await client.query('INSERT INTO app_migrations(id) VALUES($1)',[foundationFullRecoveryMigration]);
+      await client.query('COMMIT');
+      console.log(`[DB] ${foundationFullRecoveryMigration}: đã phục hồi đầy đủ thanh Căn Cơ cho ${foundationRows.length} môn nhân.`);
+    }catch(e){
+      try{await client.query('ROLLBACK')}catch{}
+      throw e;
+    }finally{client.release();}
+  }
+
   // v3.7.29: nạp đầy Căn Cơ cho toàn bộ môn nhân một lần.
   // Mức đầy được tính theo cảnh giới hiện tại (không dùng một giá trị cố định),
   // đồng thời xóa trạng thái Nội Thương đang tồn tại để tất cả môn nhân bắt đầu
@@ -2041,6 +2070,32 @@ async function initDb() {
       FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)`,['Reytheon',150896940297]);
     await query('INSERT INTO app_migrations(id) VALUES($1)',[spiritStonesCorrectionMigration]);
     console.log(`[DB] ${spiritStonesCorrectionMigration}: đã đặt lại linh thạch chính xác.`);
+  }
+
+  // v3.7.48: tái khởi tạo sạch Lôi Đài Online.
+  // Chỉ dọn các trận pending/accepted hiện hữu của hệ thống cũ; lịch sử completed/rejected được giữ lại.
+  // Cược đang mở của các trận bị hủy được hoàn lại trong cùng transaction.
+  const challengeRebuildMigration='v3.7.48_rebuild_online_challenge';
+  const challengeRebuildApplied=(await query('SELECT 1 FROM app_migrations WHERE id=$1',[challengeRebuildMigration])).rowCount>0;
+  if(!challengeRebuildApplied){
+    const client=await dbConnect();
+    try{
+      await client.query('BEGIN');
+      const active=(await client.query(`SELECT id FROM challenge_requests WHERE mode='online' AND status IN ('pending','accepted') FOR UPDATE`)).rows;
+      const ids=active.map(r=>Number(r.id));
+      if(ids.length){
+        const bets=(await client.query(`SELECT bettor_id,SUM(amount)::BIGINT AS total FROM challenge_bets WHERE challenge_id=ANY($1::bigint[]) AND status='open' GROUP BY bettor_id`,[ids])).rows;
+        for(const b of bets){
+          await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,b.total]);
+        }
+        await client.query(`UPDATE challenge_bets SET status='refunded',settled_at=NOW(),payout=amount WHERE challenge_id=ANY($1::bigint[]) AND status='open'`,[ids]);
+        await client.query(`DELETE FROM challenge_requests WHERE id=ANY($1::bigint[])`,[ids]);
+      }
+      await client.query(`DELETE FROM challenge_announcements WHERE expires_at>NOW()`);
+      await client.query('INSERT INTO app_migrations(id) VALUES($1)',[challengeRebuildMigration]);
+      await client.query('COMMIT');
+      console.log(`[DB] ${challengeRebuildMigration}: đã dọn sạch lôi đài online cũ${ids.length?` (${ids.length} trận)`:''}.`);
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
   }
 
   await backfillRealmBreakthroughRewards();
@@ -6214,6 +6269,7 @@ async function ensureChallengeSchemaImpl(){
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_moves JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_moves JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action_token TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_challenge_requests_challenger_status
       ON challenge_requests(challenger_id,status,mode,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_requests_opponent_status
@@ -6479,7 +6535,8 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_hp=$4,opponent_hp=$5,turn_user_id=NULL,round_number=$6,last_actor_id=$7,last_damage=$8,last_action=$9,challenger_damage=$10,opponent_damage=$11,success_chance=1,reward_spirit=$12,reward_item_id=$13,reward_quantity=$14,penalty_text=$15,responded_at=NOW() WHERE id=$1`,[requestId,winner.id,loser.id,attackerIsChallenger?Number(battle.challenger_hp):newDefHp,attackerIsChallenger?newDefHp:Number(battle.opponent_hp),newRound,attacker.id,damage,actionName,challengerDamage,opponentDamage,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text]);
       const betResult=await settleChallengeBets(client,requestId,winner.id);
       await client.query('COMMIT');
-      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,moveId,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
+      res.set('Cache-Control','no-store');
+      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,moveId,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,targetUserId:Number(loser.id),targetHpBefore:oldDefHp,targetHpAfter:0,challengerHp:attackerIsChallenger?Number(battle.challenger_hp):0,opponentHp:attackerIsChallenger?0:Number(battle.opponent_hp),challengerMaxHp:Number(battle.challenger_max_hp)||0,opponentMaxHp:Number(battle.opponent_max_hp)||0,turnUserId:null,lastActorId:Number(winner.id),lastDamage:damage,lastAction:actionName,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
     }
     // Luôn tính HP mới từ đúng phía bị tấn công, sau đó ghi cả hai cột trong cùng transaction.
     // Không cập nhật HP theo client để tránh trường hợp phía đối thủ vẫn giữ HP cũ.
@@ -6501,16 +6558,17 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
           last_actor_id=$6,
           last_damage=$7::numeric,
           last_action=$8,
+          last_action_token=$12,
           challenger_damage=challenger_damage+$9::numeric,
           opponent_damage=opponent_damage+$10::numeric
       WHERE id=$1 AND status='accepted' AND turn_user_id=$11
-    `,[requestId,challengerHp,opponentHp,nextTurn,newRound,attacker.id,damage,actionName,attackerIsChallenger?damage:0,attackerIsChallenger?0:damage,uid]);
+    `,[requestId,challengerHp,opponentHp,nextTurn,newRound,attacker.id,damage,actionName,attackerIsChallenger?damage:0,attackerIsChallenger?0:damage,uid,`${requestId}:${newRound}:${uid}:${moveId}`]);
     if(updateResult.rowCount!==1){
       await client.query('ROLLBACK');
       return res.status(409).json({error:'Lượt đánh đã thay đổi. Hãy đồng bộ lại lôi đài rồi thử lại.'});
     }
     const saved=(await client.query(`
-      SELECT challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action
+      SELECT challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action,last_action_token
       FROM challenge_requests WHERE id=$1 FOR UPDATE
     `,[requestId])).rows[0];
     if(!saved){
@@ -6525,7 +6583,7 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       challengerHp:savedChallengerHp,opponentHp:savedOpponentHp,
       challengerMaxHp:Number(saved.challenger_max_hp)||Number(battle.challenger_max_hp),
       opponentMaxHp:Number(saved.opponent_max_hp)||Number(battle.opponent_max_hp),
-      lastActorId:Number(saved.last_actor_id),lastDamage:Number(saved.last_damage)||0,lastAction:saved.last_action||actionName,
+      lastActorId:Number(saved.last_actor_id),lastDamage:Number(saved.last_damage)||0,lastAction:saved.last_action||actionName,lastActionToken:saved.last_action_token||'',
       targetUserId:Number(defender.id),targetHpBefore,targetHpAfter,
       message:`${attacker.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương. ${defender.display_name} còn ${targetHpAfter.toLocaleString('vi-VN')} HP. Đến lượt ${defender.display_name}.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge action:',e);res.status(500).json({error:'Không thể tung tuyệt chiêu. Giao dịch đã được hoàn tác.'});}

@@ -1,0 +1,1 @@
+v3.7.47: Phục hồi ngay và đầy đủ thanh Căn Cơ cho toàn bộ môn nhân theo mức tối đa của cảnh giới hiện tại; xóa trạng thái nội thương/khóa Căn Cơ.
