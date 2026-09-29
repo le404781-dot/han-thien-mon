@@ -2230,20 +2230,6 @@ async function initDb() {
     console.log(`[DB] ${reytheon12StarCorrectionMigration}: Reytheon=${rey.rowCount?'Tiên Đế 12 Tinh':'chưa tồn tại'}.`);
   }
 
-  // v3.7.53: FORCE-SYNC Reytheon mỗi lần khởi động.
-  // Không phụ thuộc trạng thái app_migrations và hỗ trợ cả username 'reytheon' lẫn '@reytheon'.
-  // Mục đích: đảm bảo tài khoản tồn tại sau migration cũ vẫn được đưa đúng Tiên Đế 12 Tinh.
-  {
-    const reyNames = ['reytheon','@reytheon'];
-    const spirit = clampSpiritPower(RANK_MINS[TIEN_DE_REALM_INDEX] + (12-1) * TIEN_DE_STAR_SIZE);
-    await query(`
-      UPDATE profiles p
-      SET spirit_power=$2, rank='Tiên Đế', realm_tier=12, updated_at=NOW()
-      FROM users u
-      WHERE u.id=p.user_id AND LOWER(TRIM(u.username)) = ANY($1::text[])
-    `, [reyNames, spirit]);
-  }
-
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
