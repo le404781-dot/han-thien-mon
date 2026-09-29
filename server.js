@@ -1127,7 +1127,6 @@ async function ensureAlchemySchemaImpl(){
     ['Kim Tiên Bất Diệt Đan','Đan dược · Tiên Đan','Bất diệt đan tôi luyện tiên thể Kim Tiên.',6000000,5600000,14,'Cực Phẩm'],
     ['Tiên Quân Cửu Thiên Đan','Đan dược · Tiên Đan','Cửu thiên tiên đan hội tụ cửu trọng tiên vận.',15000000,15000000,15,'Tiên Phẩm'],
     ['Tiên Tôn Vạn Đạo Đan','Đan dược · Tiên Đan','Vạn đạo đan chứa đạo vận mạnh mẽ của Tiên Tôn.',35000000,38000000,16,'Tiên Phẩm'],
-    ['Tiên Đế Hồng Mông Đan','Đan dược · Tiên Đan','Hồng Mông đan chứa một tia bản nguyên Hồng Mông.',80000000,100000000,17,'Chí Tôn'],
     ['Chí Cao Thiên Đạo Đan','Đan dược · Tiên Đan','Thiên đạo đan dành cho Chí Cao, ẩn chứa đạo vận vượt Tiên Đế.',250000000,350000000,18,'Chí Cao']
   ];
   for(const [name,category,description,price,spiritGain,minRealm,grade] of immortalPills){
@@ -1908,6 +1907,95 @@ async function initDb() {
 
   await query('INSERT INTO profiles(user_id) SELECT id FROM users ON CONFLICT (user_id) DO NOTHING');
 
+  // v3.7.46: thu hồi toàn bộ Tiên Đan khỏi môn nhân thường, chỉ giữ cho Đan Chủ;
+  // đồng thời phục hồi đầy Căn Cơ cho toàn bộ môn nhân theo cảnh giới hiện tại.
+  const v3746 = 'v3.7.46_reclaim_immortal_pills_restore_foundation';
+  const v3746Applied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[v3746])).rowCount > 0;
+  if(!v3746Applied){
+    const client = await dbConnect();
+    try{
+      await client.query('BEGIN');
+      // Xác định Đan Chủ hiện tại. Nếu chưa có chức vị, không xóa Tiên Đan của bất kỳ ai
+      // để tránh thu hồi nhầm dữ liệu quản trị.
+      const master = (await client.query(`
+        SELECT vr.user_id
+        FROM venue_roles vr
+        WHERE vr.venue_code='dan-duong'
+          AND COALESCE(vr.active,true)=true
+        ORDER BY vr.applied_at DESC NULLS LAST, vr.user_id
+        LIMIT 1
+        FOR UPDATE
+      `)).rows[0];
+      if(!master){
+        await client.query('ROLLBACK');
+        console.warn('[DB] v3.7.46: chưa xác định được Đan Chủ; bỏ qua migration để thử lại lần sau.');
+      } else {
+        // Chỉ thu hồi Tiên Đan của các môn nhân khác; không đụng tới inventory của Đan Chủ.
+        await client.query(`
+          DELETE FROM inventory i
+          USING treasure_items ti
+          WHERE i.item_id=ti.id
+            AND i.user_id<>$1
+            AND i.quantity>0
+            AND (
+              ti.category ILIKE '%Tiên Đan%'
+              OR ti.category ILIKE '%Tiên đan%'
+              OR ti.category ILIKE 'Đan dược · Tiên Đan%'
+            )
+        `,[master.user_id]);
+
+        // Nạp đầy Căn Cơ cho toàn bộ môn nhân, đồng thời xóa trạng thái nội thương.
+        const foundationRows=(await client.query('SELECT user_id,spirit_power FROM profiles FOR UPDATE')).rows;
+        for(const fp of foundationRows){
+          const fStage=stageFor(Number(fp.spirit_power)||0);
+          const fMax=foundationMaxForStage(fStage);
+          await client.query(`
+            UPDATE profiles
+            SET spirit_root_foundation=$2,
+                spirit_root_injury_until=NULL,
+                updated_at=NOW()
+            WHERE user_id=$1
+          `,[fp.user_id,fMax]);
+        }
+        await client.query('INSERT INTO app_migrations(id) VALUES($1)',[v3746]);
+        await client.query('COMMIT');
+        console.log(`[DB] ${v3746}: đã thu hồi Tiên Đan khỏi môn nhân khác (giữ Đan Chủ ${master.user_id}) và phục hồi Căn Cơ cho ${foundationRows.length} môn nhân.`);
+      }
+    }catch(e){
+      try{await client.query('ROLLBACK')}catch{}
+      throw e;
+    }finally{client.release();}
+  }
+
+  // v3.7.47: phục hồi NGAY và ĐẦY ĐỦ thanh Căn Cơ cho toàn bộ môn nhân.
+  // Không phụ thuộc thời gian hồi phục nội thương; luôn đặt current = max theo cảnh giới.
+  const foundationFullRecoveryMigration = 'v3.7.47_full_spirit_root_foundation_recovery';
+  const foundationFullRecoveryApplied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[foundationFullRecoveryMigration])).rowCount > 0;
+  if(!foundationFullRecoveryApplied){
+    const client = await dbConnect();
+    try{
+      await client.query('BEGIN');
+      const foundationRows = (await client.query('SELECT user_id,spirit_power FROM profiles FOR UPDATE')).rows;
+      for(const fp of foundationRows){
+        const fStage = stageFor(Number(fp.spirit_power)||0);
+        const fMax = foundationMaxForStage(fStage);
+        await client.query(`
+          UPDATE profiles
+          SET spirit_root_foundation=$2,
+              spirit_root_injury_until=NULL,
+              updated_at=NOW()
+          WHERE user_id=$1
+        `,[fp.user_id,fMax]);
+      }
+      await client.query('INSERT INTO app_migrations(id) VALUES($1)',[foundationFullRecoveryMigration]);
+      await client.query('COMMIT');
+      console.log(`[DB] ${foundationFullRecoveryMigration}: đã phục hồi đầy đủ thanh Căn Cơ cho ${foundationRows.length} môn nhân.`);
+    }catch(e){
+      try{await client.query('ROLLBACK')}catch{}
+      throw e;
+    }finally{client.release();}
+  }
+
   // v3.7.29: nạp đầy Căn Cơ cho toàn bộ môn nhân một lần.
   // Mức đầy được tính theo cảnh giới hiện tại (không dùng một giá trị cố định),
   // đồng thời xóa trạng thái Nội Thương đang tồn tại để tất cả môn nhân bắt đầu
@@ -1961,6 +2049,90 @@ async function initDb() {
     await query('INSERT INTO app_migrations(id) VALUES($1)',[realmCorrectionMigration]);
     console.log(`[DB] ${realmCorrectionMigration}: đã chỉnh cảnh giới chính xác cho 5 môn nhân.`);
   }
+  // v3.7.45: loại bỏ hoàn toàn Tiên Đế Hồng Mông Đan khỏi hệ thống.
+  // Xóa cả catalog và mọi tồn kho/reward tham chiếu thông qua FK phù hợp.
+  // Migration chạy đúng một lần để không tái tạo vật phẩm ở các lần restart.
+  const removeHongMengDanMigration = 'v3.7.45_remove_tien_de_hong_mong_dan';
+  const removeHongMengDanApplied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[removeHongMengDanMigration])).rowCount > 0;
+  if(!removeHongMengDanApplied){
+    await query(`DELETE FROM treasure_items WHERE name='Tiên Đế Hồng Mông Đan'`);
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[removeHongMengDanMigration]);
+    console.log(`[DB] ${removeHongMengDanMigration}: đã xóa hoàn toàn Tiên Đế Hồng Mông Đan khỏi web.`);
+  }
+
+  // v3.7.45: đặt chính xác linh thạch cho 2 môn nhân theo yêu cầu quản trị.
+  const spiritStonesCorrectionMigration = 'v3.7.45_set_spirit_stones_cuu_vi_ho_reytheon_exact';
+  const spiritStonesCorrectionApplied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[spiritStonesCorrectionMigration])).rowCount > 0;
+  if(!spiritStonesCorrectionApplied){
+    await query(`UPDATE profiles p SET spirit_stones=$2,updated_at=NOW()
+      FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)`,['Cuu_Vi_Ho',229147161840]);
+    await query(`UPDATE profiles p SET spirit_stones=$2,updated_at=NOW()
+      FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)`,['Reytheon',150896940297]);
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[spiritStonesCorrectionMigration]);
+    console.log(`[DB] ${spiritStonesCorrectionMigration}: đã đặt lại linh thạch chính xác.`);
+  }
+
+  // v3.7.49: chuẩn hóa lại cảnh giới 5 môn nhân theo yêu cầu quản trị mới.
+  // Dùng giá trị tuyệt đối, không dùng GREATEST, để cả trường hợp dữ liệu cũ cao hơn
+  // cũng được đưa về đúng đại cảnh giới/tinh yêu cầu. Đồng thời đồng bộ Căn Cơ theo
+  // cảnh giới mới để không còn lệch giữa spirit_power và thanh Căn Cơ.
+  const realmCorrectionV3749='v3.7.49_set_member_realms_exact';
+  const realmCorrectionV3749Applied=(await query('SELECT 1 FROM app_migrations WHERE id=$1',[realmCorrectionV3749])).rowCount>0;
+  if(!realmCorrectionV3749Applied){
+    const exactRealmRows=[
+      ['ho_linh_15','Tiên Đế',17,1,RANK_MINS[17]],
+      ['Reytheon','Tiên Đế',17,14,RANK_MINS[17]+(14-1)*TIEN_DE_STAR_SIZE],
+      ['Cuu_Vi_Ho','Tiên Đế',17,5,RANK_MINS[17]+(5-1)*TIEN_DE_STAR_SIZE],
+      ['wutati','Thiên Tiên',12,1,RANK_MINS[12]],
+      ['libais','Thiên Tiên',12,1,RANK_MINS[12]]
+    ];
+    const client=await dbConnect();
+    try{
+      await client.query('BEGIN');
+      for(const [username,rank,realmIndex,tier,spiritPower] of exactRealmRows){
+        const fMax=foundationMaxForStage({realmIndex});
+        const result=await client.query(`
+          UPDATE profiles p
+          SET spirit_power=$2, rank=$3, realm_tier=$4,
+              spirit_root_foundation=$5,
+              spirit_root_injury_until=NULL, updated_at=NOW()
+          FROM users u
+          WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)
+        `,[username,clampSpiritPower(spiritPower),rank,tier,fMax]);
+        if(result.rowCount!==1) throw new Error(`Không tìm thấy hồ sơ môn nhân: ${username}`);
+      }
+      await client.query('INSERT INTO app_migrations(id) VALUES($1)',[realmCorrectionV3749]);
+      await client.query('COMMIT');
+      console.log(`[DB] ${realmCorrectionV3749}: đã đặt lại cảnh giới + Căn Cơ cho 5 môn nhân.`);
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+  }
+
+  // v3.7.48: tái khởi tạo sạch Lôi Đài Online.
+  // Chỉ dọn các trận pending/accepted hiện hữu của hệ thống cũ; lịch sử completed/rejected được giữ lại.
+  // Cược đang mở của các trận bị hủy được hoàn lại trong cùng transaction.
+  const challengeRebuildMigration='v3.7.48_rebuild_online_challenge';
+  const challengeRebuildApplied=(await query('SELECT 1 FROM app_migrations WHERE id=$1',[challengeRebuildMigration])).rowCount>0;
+  if(!challengeRebuildApplied){
+    const client=await dbConnect();
+    try{
+      await client.query('BEGIN');
+      const active=(await client.query(`SELECT id FROM challenge_requests WHERE mode='online' AND status IN ('pending','accepted') FOR UPDATE`)).rows;
+      const ids=active.map(r=>Number(r.id));
+      if(ids.length){
+        const bets=(await client.query(`SELECT bettor_id,SUM(amount)::BIGINT AS total FROM challenge_bets WHERE challenge_id=ANY($1::bigint[]) AND status='open' GROUP BY bettor_id`,[ids])).rows;
+        for(const b of bets){
+          await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,b.total]);
+        }
+        await client.query(`UPDATE challenge_bets SET status='refunded',settled_at=NOW(),payout=amount WHERE challenge_id=ANY($1::bigint[]) AND status='open'`,[ids]);
+        await client.query(`DELETE FROM challenge_requests WHERE id=ANY($1::bigint[])`,[ids]);
+      }
+      await client.query(`DELETE FROM challenge_announcements WHERE expires_at>NOW()`);
+      await client.query('INSERT INTO app_migrations(id) VALUES($1)',[challengeRebuildMigration]);
+      await client.query('COMMIT');
+      console.log(`[DB] ${challengeRebuildMigration}: đã dọn sạch lôi đài online cũ${ids.length?` (${ids.length} trận)`:''}.`);
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+  }
+
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
@@ -6132,6 +6304,7 @@ async function ensureChallengeSchemaImpl(){
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_moves JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_moves JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action_token TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_challenge_requests_challenger_status
       ON challenge_requests(challenger_id,status,mode,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_requests_opponent_status
@@ -6397,7 +6570,8 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_hp=$4,opponent_hp=$5,turn_user_id=NULL,round_number=$6,last_actor_id=$7,last_damage=$8,last_action=$9,challenger_damage=$10,opponent_damage=$11,success_chance=1,reward_spirit=$12,reward_item_id=$13,reward_quantity=$14,penalty_text=$15,responded_at=NOW() WHERE id=$1`,[requestId,winner.id,loser.id,attackerIsChallenger?Number(battle.challenger_hp):newDefHp,attackerIsChallenger?newDefHp:Number(battle.opponent_hp),newRound,attacker.id,damage,actionName,challengerDamage,opponentDamage,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text]);
       const betResult=await settleChallengeBets(client,requestId,winner.id);
       await client.query('COMMIT');
-      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,moveId,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
+      res.set('Cache-Control','no-store');
+      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,moveId,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,targetUserId:Number(loser.id),targetHpBefore:oldDefHp,targetHpAfter:0,challengerHp:attackerIsChallenger?Number(battle.challenger_hp):0,opponentHp:attackerIsChallenger?0:Number(battle.opponent_hp),challengerMaxHp:Number(battle.challenger_max_hp)||0,opponentMaxHp:Number(battle.opponent_max_hp)||0,turnUserId:null,lastActorId:Number(winner.id),lastDamage:damage,lastAction:actionName,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
     }
     // Luôn tính HP mới từ đúng phía bị tấn công, sau đó ghi cả hai cột trong cùng transaction.
     // Không cập nhật HP theo client để tránh trường hợp phía đối thủ vẫn giữ HP cũ.
@@ -6419,16 +6593,17 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
           last_actor_id=$6,
           last_damage=$7::numeric,
           last_action=$8,
+          last_action_token=$12,
           challenger_damage=challenger_damage+$9::numeric,
           opponent_damage=opponent_damage+$10::numeric
       WHERE id=$1 AND status='accepted' AND turn_user_id=$11
-    `,[requestId,challengerHp,opponentHp,nextTurn,newRound,attacker.id,damage,actionName,attackerIsChallenger?damage:0,attackerIsChallenger?0:damage,uid]);
+    `,[requestId,challengerHp,opponentHp,nextTurn,newRound,attacker.id,damage,actionName,attackerIsChallenger?damage:0,attackerIsChallenger?0:damage,uid,`${requestId}:${newRound}:${uid}:${moveId}`]);
     if(updateResult.rowCount!==1){
       await client.query('ROLLBACK');
       return res.status(409).json({error:'Lượt đánh đã thay đổi. Hãy đồng bộ lại lôi đài rồi thử lại.'});
     }
     const saved=(await client.query(`
-      SELECT challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action
+      SELECT challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action,last_action_token
       FROM challenge_requests WHERE id=$1 FOR UPDATE
     `,[requestId])).rows[0];
     if(!saved){
@@ -6443,7 +6618,7 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       challengerHp:savedChallengerHp,opponentHp:savedOpponentHp,
       challengerMaxHp:Number(saved.challenger_max_hp)||Number(battle.challenger_max_hp),
       opponentMaxHp:Number(saved.opponent_max_hp)||Number(battle.opponent_max_hp),
-      lastActorId:Number(saved.last_actor_id),lastDamage:Number(saved.last_damage)||0,lastAction:saved.last_action||actionName,
+      lastActorId:Number(saved.last_actor_id),lastDamage:Number(saved.last_damage)||0,lastAction:saved.last_action||actionName,lastActionToken:saved.last_action_token||'',
       targetUserId:Number(defender.id),targetHpBefore,targetHpAfter,
       message:`${attacker.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương. ${defender.display_name} còn ${targetHpAfter.toLocaleString('vi-VN')} HP. Đến lượt ${defender.display_name}.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge action:',e);res.status(500).json({error:'Không thể tung tuyệt chiêu. Giao dịch đã được hoàn tác.'});}
@@ -7028,6 +7203,98 @@ async function recallImmortalPillsToDanMasterOnce(){
   }finally{client.release();}
 }
 
+async function applyV3_7_44DataResetOnce(){
+  // v3.7.44:
+  // 1) Xóa toàn bộ Tiên Đế Đan khỏi Tu Di Giới của mọi môn nhân, trừ Đan Chủ.
+  // 2) Hủy toàn bộ Khiêu Chiến Online đang hoạt động (pending/accepted), hoàn cược.
+  // 3) Đặt chính xác số linh thạch cho Cuu_Vi_Ho và Reytheon.
+  const migrationId='v3.7.44-reset-tien-de-dan-online-challenges-stones';
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    const already=(await client.query('SELECT 1 FROM app_migrations WHERE id=$1',[migrationId])).rows[0];
+    if(already){await client.query('COMMIT');return;}
+
+    const master=(await client.query(`
+      SELECT user_id FROM venue_roles
+      WHERE venue_code='dan-duong' AND COALESCE(active,true)=true
+      ORDER BY applied_at DESC NULLS LAST, user_id
+      LIMIT 1
+      FOR UPDATE
+    `)).rows[0];
+    if(!master){
+      await client.query('ROLLBACK');
+      console.log('[v3.7.44] Chưa có Đan Chủ; migration sẽ thử lại ở lần khởi động sau.');
+      return;
+    }
+    const masterId=Number(master.user_id);
+
+    // --- 1. Xóa mọi Tiên Đế Đan khỏi Tu Di Giới của môn nhân khác ---
+    // min_realm=17 là mốc Tiên Đế trong hệ thống hiện tại; category vẫn được
+    // kiểm tra để tránh đụng vào vật phẩm không phải Tiên Đan.
+    const pillRows=(await client.query(`
+      SELECT i.user_id,i.item_id,i.quantity,ti.name
+      FROM inventory i
+      JOIN treasure_items ti ON ti.id=i.item_id
+      WHERE i.user_id<>$1
+        AND i.quantity>0
+        AND LOWER(TRIM(COALESCE(ti.category,''))) LIKE '%tiên đan%'
+        AND COALESCE(ti.min_realm,0)=17
+      ORDER BY i.user_id,i.item_id
+      FOR UPDATE OF i
+    `,[masterId])).rows;
+    let removedPills=0;
+    for(const row of pillRows){
+      const qty=Math.max(0,Number(row.quantity)||0);
+      if(!qty) continue;
+      await client.query(`UPDATE inventory SET quantity=0,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[Number(row.user_id),Number(row.item_id)]);
+      removedPills+=qty;
+    }
+
+    // --- 2. Hủy toàn bộ Khiêu Chiến Online đang hoạt động ---
+    const active=(await client.query(`
+      SELECT id FROM challenge_requests
+      WHERE mode='online' AND status IN ('pending','accepted')
+      ORDER BY id
+      FOR UPDATE
+    `)).rows;
+    for(const row of active){
+      const bets=(await client.query(`SELECT bettor_id,amount FROM challenge_bets WHERE challenge_id=$1 AND status='open' FOR UPDATE`,[row.id])).rows;
+      for(const bet of bets){
+        const amount=Math.max(0,Number(bet.amount)||0);
+        if(amount>0){
+          await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[bet.bettor_id,amount]);
+          await client.query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data)
+            VALUES($1,'challenge_bet','↩️ Khiêu Chiến Online được hủy','Trận Khiêu Chiến Online đã được hủy để làm sạch dữ liệu. Linh thạch cược đã được hoàn lại.','#challenge',$2)`,
+            [bet.bettor_id,JSON.stringify({action:'challenge_bet_result',challengeId:Number(row.id),payout:amount,result:'refunded'})]);
+        }
+      }
+      await client.query(`DELETE FROM challenge_bets WHERE challenge_id=$1`,[row.id]);
+      await client.query(`UPDATE challenge_requests
+        SET status='rejected',winner_id=NULL,loser_id=NULL,turn_user_id=NULL,responded_at=NOW(),last_action='🧹 Khiêu Chiến Online được hủy để làm sạch dữ liệu'
+        WHERE id=$1`,[row.id]);
+    }
+
+    // --- 3. Đặt chính xác linh thạch ---
+    const targets=[
+      ['Cuu_Vi_Ho',229147161840],
+      ['Reytheon',150896940297]
+    ];
+    for(const [username,stones] of targets){
+      const u=(await client.query(`SELECT id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,[username])).rows[0];
+      if(!u) throw new Error(`Không tìm thấy môn nhân ${username} để đặt linh thạch.`);
+      await client.query(`UPDATE profiles SET spirit_stones=$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[Number(u.id),stones]);
+    }
+
+    await client.query(`INSERT INTO app_migrations(id) VALUES($1)`,[migrationId]);
+    await client.query('COMMIT');
+    console.log(`[v3.7.44] Đã xóa ${removedPills} Tiên Đế Đan khỏi Tu Di Giới của môn nhân khác, hủy ${active.length} Khiêu Chiến Online và cập nhật linh thạch.`);
+  }catch(e){
+    try{await client.query('ROLLBACK')}catch{}
+    throw e;
+  }finally{client.release();}
+}
+
 async function clearActiveOnlineChallengesOnce(){
   const migrationId='v3.7.39-reset-online-challenges-and-moves';
   const client=await dbConnect();
@@ -7085,6 +7352,8 @@ async function initializeDatabaseWithRetry(){
     await ensureChallengeSchema();
     if(shuttingDown||poolClosed)return;
     await clearActiveOnlineChallengesOnce();
+    if(shuttingDown||poolClosed)return;
+    await applyV3_7_44DataResetOnce();
     if(shuttingDown||poolClosed)return;
     await runDatabaseMaintenance();
     dbInitError = null;

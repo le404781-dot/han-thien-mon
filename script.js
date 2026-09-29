@@ -168,6 +168,21 @@ function stopChallengeRealtime(){
  if(window.challengeRealtimeTimer){clearInterval(window.challengeRealtimeTimer);window.challengeRealtimeTimer=null;}
  window.challengeRealtimeBusy=false;
 }
+function animateBattleDamage(side,damage){
+ const root=document.querySelector('.active-battle'); if(!root)return;
+ const fighter=root.querySelector(`[data-battle-fighter="${side}"]`); if(!fighter)return;
+ const old=fighter.querySelector('.battle-damage-float'); if(old)old.remove();
+ const el=document.createElement('span'); el.className='battle-damage-float'; el.textContent=`-${Math.max(0,Math.round(Number(damage)||0)).toLocaleString('vi-VN')} HP`;
+ fighter.appendChild(el); fighter.classList.remove('battle-hit'); void fighter.offsetWidth; fighter.classList.add('battle-hit');
+ setTimeout(()=>el.remove(),900);
+}
+function animateHpBar(side,before,after,max){
+ const root=document.querySelector('.active-battle'); if(!root)return;
+ const bar=root.querySelector(`[data-battle-hp-bar="${side}"]`); if(!bar)return;
+ const b=Math.max(0,Number(before)||0), a=Math.max(0,Number(after)||0), m=Math.max(1,Number(max)||1);
+ if(a>=b)return;
+ bar.animate([{width:`${Math.min(100,b/m*100)}%`},{width:`${Math.min(100,a/m*100)}%`}],{duration:650,easing:'cubic-bezier(.2,.8,.2,1)',fill:'forwards'});
+}
 function updateChallengeLiveDom(b){
  const root=document.querySelector('.active-battle');
  if(!root||!b)return false;
@@ -180,8 +195,17 @@ function updateChallengeLiveDom(b){
   if(bar){bar.style.width=`${p}%`;bar.classList.toggle('danger',p<=25);bar.classList.toggle('warn',p>25&&p<=55);}
   return fighter;
  };
+ const prev=window.__challengeRenderedHp||{};
  setSide('challenger',b.challengerHp,b.challengerMaxHp);
  setSide('opponent',b.opponentHp,b.opponentMaxHp);
+ if(prev.challenger!==undefined&&Number(b.challengerHp)<Number(prev.challenger))animateHpBar('challenger',prev.challenger,b.challengerHp,b.challengerMaxHp);
+ if(prev.opponent!==undefined&&Number(b.opponentHp)<Number(prev.opponent))animateHpBar('opponent',prev.opponent,b.opponentHp,b.opponentMaxHp);
+ if(b.lastActorId&&Number(b.lastDamage)>0){
+   const side=Number(b.lastActorId)===Number(b.challengerId)?'opponent':'challenger';
+   const eventKey=`${b.id}:${b.round}:${b.lastActorId}:${b.lastDamage}`;
+   if(window.__challengeLastDamageEvent!==eventKey){animateBattleDamage(side,b.lastDamage);window.__challengeLastDamageEvent=eventKey;}
+ }
+ window.__challengeRenderedHp={challenger:Number(b.challengerHp),opponent:Number(b.opponentHp)};
  const turn=Number(b.turnUserId||0);
  root.querySelector('[data-battle-fighter="challenger"]')?.classList.toggle('turn',turn===Number(b.challengerId));
  root.querySelector('[data-battle-fighter="opponent"]')?.classList.toggle('turn',turn===Number(b.opponentId));
@@ -197,11 +221,8 @@ async function autoChallengeAttack(battle){
  try{
    const moves=Array.isArray(battle.moveOptions)?battle.moveOptions:[];
    const best=moves.reduce((a,b)=>Number(b.damage||0)>Number(a?.damage||0)?b:a,null);
-   const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:Number(battle.id),moveId:Number(best?.id||3)})});
-   const msg=$('#challengeMsg');
-   if(msg)msg.textContent=x.status==='completed'?`🏆 ${x.message}`:`⚡ ${x.message}`;
-   if(x.status==='completed')setChallengeAuto(false);
-   await Promise.all([loadProfile(),loadChallenges()]);
+   await useUltimate(Number(battle.id),Number(best?.id||3));
+   if(!document.querySelector('.active-battle'))setChallengeAuto(false);
  }catch(e){
    // 409 can simply mean the opponent or another tab already consumed the turn.
    // Let the next realtime poll decide whose turn it is.
@@ -263,9 +284,9 @@ async function loadChallenges(){
     </div>
     <div class="battle-turn-note" data-battle-turn-note>${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
     <div class="battle-last-action" data-battle-last-action ${battle.lastAction?'':'hidden'}>${battle.lastAction?`${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b>`:''}</div>
-    <div class="challenge-moves"><div class="challenge-moves-title"><b>⚔ CHỌN 1 TRONG 3 CHIÊU</b><small>Sát thương đã tính sẵn theo cảnh giới, linh lực, trang bị và chênh lệch cảnh giới.</small></div><div class="challenge-move-grid">${(battle.moveOptions||[]).map(m=>`<button type="button" class="challenge-move ${Number(battle.selectedMoveId||3)===Number(m.id)?'selected':''}" data-id="${battle.id}" data-move-id="${m.id}" ${battle.yourTurn?'':'disabled'}><span class="challenge-move-icon">${esc(m.icon||'⚔️')}</span><span class="challenge-move-copy"><b>${esc(m.name)}</b><small>${esc(m.description||'')}</small></span><strong>-${Number(m.damage||0).toLocaleString('vi-VN')} HP</strong></button>`).join('')}</div></div>
+    <div class="challenge-moves"><div class="challenge-moves-title"><b>⚔ CHỌN CHIÊU — BẤM LÀ RA ĐÒN</b><small>Ba chiêu có sát thương cố định theo trạng thái lôi đài. Con số trên nút chính là HP sẽ bị trừ.</small></div><div class="challenge-move-grid">${(battle.moveOptions||[]).map(m=>`<button type="button" class="challenge-move" data-id="${battle.id}" data-move-id="${m.id}" ${battle.yourTurn?'':'disabled'}><span class="challenge-move-icon">${esc(m.icon||'⚔️')}</span><span class="challenge-move-copy"><b>${esc(m.name)}</b><small>${esc(m.description||'')}</small></span><strong>-${Number(m.damage||0).toLocaleString('vi-VN')} HP</strong><em>▶ RA CHIÊU</em></button>`).join('')}</div></div>
     <div class="battle-actions"><button class="btn primary battle-auto battle-auto-main" data-id="${battle.id}">${window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH'}</button>${battle.spitAllowed&&battle.yourTurn?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn primary battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
-    <div class="battle-action-row"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ RA CHIÊU ĐÃ CHỌN':'⏳ CHỜ ĐỐI THỦ'}</button><small>${window.challengeAutoAttack?'🤖 Tự động sẽ chọn chiêu có sát thương cao nhất khi tới lượt.':'Bật Tự động đánh để máy tự ra chiêu khi đến lượt.'}</small></div>
+    <div class="battle-action-row"><small>${window.challengeAutoAttack?'🤖 Tự động sẽ chọn chiêu có sát thương cao nhất khi tới lượt.':'Chọn một trong 3 nút chiêu để ra đòn ngay khi tới lượt.'}</small></div>
     <small class="battle-rule">Sát thương phụ thuộc Công lực, trang bị, công pháp được chọn và chênh lệch cảnh giới; cảnh giới cao hơn gây sát thương lớn hơn, cảnh giới thấp hơn bị giảm mạnh.</small>
    </div>`:'';
   area.innerHTML=`
@@ -282,11 +303,7 @@ async function loadChallenges(){
   document.querySelectorAll('.challenge-offline').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'offline'));
   document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept'));
   document.querySelectorAll('.challenge-reject').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'reject'));
-  document.querySelectorAll('.challenge-move').forEach(b=>b.onclick=()=>{
-    document.querySelectorAll(`.challenge-move[data-id="${b.dataset.id}"]`).forEach(x=>x.classList.remove('selected'));
-    b.classList.add('selected');
-  });
-  document.querySelectorAll('.battle-ultimate').forEach(b=>b.onclick=()=>useUltimate(Number(b.dataset.id)));
+  document.querySelectorAll('.challenge-move').forEach(b=>b.onclick=()=>{if(!b.disabled)useUltimate(Number(b.dataset.id),Number(b.dataset.moveId));});
   document.querySelectorAll('.battle-auto').forEach(b=>b.onclick=async()=>{
     const enabled=!window.challengeAutoAttack;
     setChallengeAuto(enabled);
@@ -310,11 +327,10 @@ async function loadChallenges(){
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
-async function useUltimate(requestId){
- const b=document.querySelector(`.battle-ultimate[data-id="${requestId}"]`),msg=$('#challengeMsg'); if(b)b.disabled=true;
+async function useUltimate(requestId,moveId){
+ const b=document.querySelector(`.challenge-move[data-id="${requestId}"][data-move-id="${moveId}"]`),msg=$('#challengeMsg'); if(b)b.disabled=true;
  try{
-  const selected=document.querySelector(`.challenge-move.selected[data-id="${requestId}"]`);
-  const moveId=Number(selected?.dataset.moveId||3);
+  moveId=Math.max(1,Math.min(3,Number(moveId)||1));
   const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,moveId})});
   // Server trả lại HP đã ghi xuống DB; dùng kết quả này để không phụ thuộc cache phía client.
   if(Number(x.targetUserId)>0 && Number.isFinite(Number(x.targetHpAfter))){
@@ -323,6 +339,11 @@ async function useUltimate(requestId){
   const betNote=x.betSettlement?.notices?.find(n=>Number(n.bettorId)===Number(currentUser?.id));
   const betText=betNote?.result==='won'?` · 🏆 Cược thắng +${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:(betNote?.result==='refunded'?` · ↩ Hoàn ${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:'');
   msg.textContent=x.status==='completed'?`🏆 ${x.message}${betText}`:`⚡ ${x.message}`;
+  if(Number.isFinite(Number(x.challengerHp))&&Number.isFinite(Number(x.opponentHp))){
+    const live={...(window.__challengeLiveState||{}),...x,id:Number(requestId),status:x.status,turnUserId:x.turnUserId??null,round:Number(x.round||0),lastActorId:x.lastActorId??null,lastDamage:Number(x.lastDamage||0),lastAction:x.lastAction||'',challengerHp:Number(x.challengerHp),opponentHp:Number(x.opponentHp),challengerMaxHp:Number(x.challengerMaxHp||window.__challengeLiveState?.challengerMaxHp||1),opponentMaxHp:Number(x.opponentMaxHp||window.__challengeLiveState?.opponentMaxHp||1)};
+    updateChallengeLiveDom(live); window.__challengeLiveState=live;
+  }
+  await new Promise(r=>setTimeout(r,Math.min(750,Math.max(350,Number(x.damage)>0?650:350))));
   await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard(),loadMailbox()]);
  }catch(e){msg.textContent='❌ '+e.message;await loadChallenges();}
 }
