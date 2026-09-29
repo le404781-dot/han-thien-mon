@@ -3982,31 +3982,25 @@ function bondChanceFor(userSpirit){
 }
 
 
-async function pickTienBanItem(client){
-  // v3.7.21: vật phẩm phẩm cấp cao khó rơi hơn 10 lần. Tiên Phẩm 0,002% vẫn giữ nguyên.
-  const roll=Math.random();
-  const rare=roll < 0.00002;
+function pickByItemValue(rows){
+  if(!rows?.length)return null;
+  // Giá trị càng cao => trọng số càng thấp. Dùng nghịch đảo căn bậc hai
+  // để vật phẩm đắt vẫn còn cơ hội xuất hiện, nhưng rõ ràng khó hơn vật phẩm rẻ.
+  const weights=rows.map(x=>{
+    const price=Math.max(1,Number(x.price)||1);
+    return 1/Math.sqrt(price);
+  });
+  const total=weights.reduce((a,b)=>a+b,0);
+  let r=Math.random()*total;
+  for(let i=0;i<rows.length;i++){r-=weights[i];if(r<=0)return rows[i];}
+  return rows[rows.length-1];
+}
+
+async function pickTienBanItem(client,{tienPhamOnly=false}={}){
   const whereBase=`category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị'`;
-  const sql=rare
-    ? `SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} AND reward_grade='Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`
-    : `SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} AND COALESCE(reward_grade,'')<>'Tiên Phẩm'`;
-  let rows=(await client.query(sql)).rows;
-  let item=null;
-  if(rows.length){
-    const weight=(x)=>{
-      const g=String(x.reward_grade||'Hạ Đẳng');
-      const base=g.includes('Chí Cao')?1:g.includes('Chí Tôn')?2:g.includes('Tiên')?5:g.includes('Cực')?10:g.includes('Thượng')?20:g.includes('Trung')?45:100;
-      return base;
-    };
-    const weights=rows.map(weight),total=weights.reduce((a,b)=>a+b,0);
-    let r=Math.random()*total;
-    for(let i=0;i<rows.length;i++){r-=weights[i];if(r<=0){item=rows[i];break;}}
-    item=item||rows[rows.length-1];
-  }
-  if(!item && rare){
-    item=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} ORDER BY RANDOM() LIMIT 1`)).rows[0];
-  }
-  return {item,rare:rare && Boolean(item && item.reward_grade==='Tiên Phẩm')};
+  const whereTienPham=tienPhamOnly?` AND reward_grade='Tiên Phẩm'`:``;
+  const rows=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase}${whereTienPham}`)).rows;
+  return {item:pickByItemValue(rows),rare:tienPhamOnly};
 }
 
 app.get('/api/tien-ban',auth,async(req,res)=>{
@@ -4052,7 +4046,7 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
     }
 
     const cap=Number(p.storage_capacity)||30;
-    const picked=rareTienPham ? await (async()=>{ const r=await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị' AND reward_grade='Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`); return {item:r.rows[0],rare:Boolean(r.rows[0])}; })() : await pickTienBanItem(client);
+    const picked=await pickTienBanItem(client,{tienPhamOnly:rareTienPham});
     const item=picked.item;
     if(!item){await client.query('ROLLBACK');return res.status(500).json({error:'Tiên Bàn hiện không có vật phẩm để quay.'});}
     const owned=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,item.id])).rows[0]?.quantity||0);
@@ -4094,7 +4088,7 @@ app.post('/api/tien-ban/spin10',auth,async(req,res)=>{
         await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'beast',$2,$3,$4,TRUE,$5)`,[uid,b.id,b.name,b.rarity,unitCost]);
         rewards.push({type:'beast',name:b.name,rarity:b.rarity,description:b.description,realm:b.beast_realm,skill:b.skill,ability:b.ability,power:Number(b.power_bonus||0),special:true});
       }else{
-        const picked=rareTienPham ? await (async()=>{ const r=await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị' AND reward_grade='Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`); return {item:r.rows[0],rare:Boolean(r.rows[0])}; })() : await pickTienBanItem(client);
+        const picked=await pickTienBanItem(client,{tienPhamOnly:rareTienPham});
         const item=picked.item;
         if(!item)throw new Error('Tiên Bàn hiện không có vật phẩm để quay.');
         const owned=Number((await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,item.id])).rows[0]?.quantity||0);
@@ -4369,6 +4363,11 @@ async function ensureEquipmentSchema(){
 }
 
 async function ensureEquipmentSchemaImpl(){
+  // Keep this migration limited to equipment-owned objects. The beast/root
+  // tables are initialized by ensureRuntimeSchema()/ensureBeastArenaSchema().
+  // Duplicating their CREATE/ALTER statements here caused PostgreSQL DDL
+  // lock contention/deadlocks when the Thú Trường and Trang Bị endpoints were
+  // opened concurrently on Render.
   await query(`
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_beast_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_root_id INTEGER;
@@ -4388,35 +4387,9 @@ async function ensureEquipmentSchemaImpl(){
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ALTER COLUMN buyback_price TYPE BIGINT USING COALESCE(buyback_price,0)::BIGINT;
     ALTER TABLE treasure_items ALTER COLUMN buyback_price SET DEFAULT 0;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm TEXT NOT NULL DEFAULT 'Nhất Giai';
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS beast_realm_tier INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS attack INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS defense INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS speed INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS spirit INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS skill TEXT NOT NULL DEFAULT '';
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS default_avatar TEXT;
-    ALTER TABLE spirit_beasts_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS rarity TEXT NOT NULL DEFAULT 'Phàm';
-    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
-    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS support TEXT NOT NULL DEFAULT '';
-    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS ability TEXT NOT NULL DEFAULT '';
-    ALTER TABLE spirit_roots_catalog ADD COLUMN IF NOT EXISTS min_realm INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar TEXT;
-    CREATE TABLE IF NOT EXISTS owned_spirit_beasts (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,beast_id INTEGER NOT NULL REFERENCES spirit_beasts_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,beast_id));
-    ALTER TABLE owned_spirit_beasts ADD COLUMN IF NOT EXISTS avatar TEXT;
-    CREATE TABLE IF NOT EXISTS owned_spirit_roots (id BIGSERIAL PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,root_id INTEGER NOT NULL REFERENCES spirit_roots_catalog(id) ON DELETE CASCADE,quantity INTEGER NOT NULL DEFAULT 1,acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),UNIQUE(user_id,root_id));
-    CREATE INDEX IF NOT EXISTS idx_spirit_roots_min_realm_price ON spirit_roots_catalog(min_realm,price_stones,id);
-    CREATE INDEX IF NOT EXISTS idx_spirit_roots_rarity ON spirit_roots_catalog(rarity,id);
-    CREATE INDEX IF NOT EXISTS idx_owned_spirit_roots_user_positive ON owned_spirit_roots(user_id,root_id) WHERE quantity>0;
-    CREATE INDEX IF NOT EXISTS idx_profiles_equipped_root ON profiles(equipped_root_id) WHERE equipped_root_id IS NOT NULL;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS realm_index INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS grade TEXT NOT NULL DEFAULT 'Hạ Phẩm';
     ALTER TABLE cultivation_techniques ADD COLUMN IF NOT EXISTS power_bonus INTEGER NOT NULL DEFAULT 0;
@@ -6244,9 +6217,8 @@ async function loadUserBattleBeasts(uid){
 
 app.get('/api/beast-arena',auth,async(req,res)=>{
   try{
-    // v3.6.84: Thú Trường phải tự đảm bảo toàn bộ schema phụ thuộc trước khi SELECT.
-    // Điều này đặc biệt quan trọng với PostgreSQL cũ đã chạy các migration trước đây.
-    await ensureEquipmentSchema();
+    // Thú Trường chỉ đảm bảo schema của chính nó. Trang Bị được migrate tuần tự
+    // lúc khởi động để tránh DDL lock/deadlock giữa hai chức năng.
     await ensureBeastArenaSchema();
     const uid=req.session.user_id;
     const [beasts,members,pending,history,activeBattle]=await Promise.all([
@@ -6430,6 +6402,10 @@ async function initializeDatabaseWithRetry(){
   }
   try{
     await initDb();
+    // Finish equipment/beast schema migrations sequentially during startup.
+    // This prevents concurrent HTTP requests from running overlapping DDL on the same tables.
+    await ensureEquipmentSchema();
+    await ensureBeastArenaSchema();
     await ensureVenueRoleSchema();
     await runDatabaseMaintenance();
     dbInitError = null;
