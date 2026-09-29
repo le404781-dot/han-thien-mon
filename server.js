@@ -2098,6 +2098,40 @@ async function initDb() {
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
   }
 
+
+  // v3.7.49: cập nhật linh lực chính xác cho Reytheon.
+  const reytheonSpiritMigration='v3.7.49_set_reytheon_spirit_power_exact';
+  if((await query('SELECT 1 FROM app_migrations WHERE id=$1',[reytheonSpiritMigration])).rowCount===0){
+    await query(`UPDATE profiles p SET spirit_power=$2,updated_at=NOW()
+      FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)`,['Reytheon',2169345368]);
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[reytheonSpiritMigration]);
+    console.log(`[DB] ${reytheonSpiritMigration}: đã đặt linh lực Reytheon = 2.169.345.368.`);
+  }
+
+  // v3.7.49: làm sạch toàn bộ lôi đài Online cũ để chuyển sang giao diện/trạng thái chiến đấu mới.
+  // Các cược đang mở được hoàn lại trong cùng transaction; lịch sử completed/rejected được giữ nguyên.
+  const challengeUiRebuildMigration='v3.7.49_rebuild_online_battle_ui';
+  if((await query('SELECT 1 FROM app_migrations WHERE id=$1',[challengeUiRebuildMigration])).rowCount===0){
+    const client=await dbConnect();
+    try{
+      await client.query('BEGIN');
+      const active=(await client.query(`SELECT id FROM challenge_requests WHERE mode='online' AND status IN ('pending','accepted') FOR UPDATE`)).rows;
+      const ids=active.map(r=>Number(r.id));
+      if(ids.length){
+        const bets=(await client.query(`SELECT bettor_id,SUM(amount)::BIGINT AS total FROM challenge_bets WHERE challenge_id=ANY($1::bigint[]) AND status='open' GROUP BY bettor_id`,[ids])).rows;
+        for(const b of bets){
+          await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[b.bettor_id,b.total]);
+        }
+        await client.query(`UPDATE challenge_bets SET status='refunded',settled_at=NOW(),payout=amount WHERE challenge_id=ANY($1::bigint[]) AND status='open'`,[ids]);
+        await client.query(`DELETE FROM challenge_requests WHERE id=ANY($1::bigint[])`,[ids]);
+      }
+      await client.query(`DELETE FROM challenge_announcements WHERE expires_at>NOW()`);
+      await client.query('INSERT INTO app_migrations(id) VALUES($1)',[challengeUiRebuildMigration]);
+      await client.query('COMMIT');
+      console.log(`[DB] ${challengeUiRebuildMigration}: đã dọn ${ids.length} lôi đài Online cũ.`);
+    }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+  }
+
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);

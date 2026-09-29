@@ -1,0 +1,23 @@
+HÀN THIÊN MÔN v3.7.49
+
+1. Reytheon
+- Đặt linh lực chính xác: 2.169.345.368.
+- Migration: v3.7.49_set_reytheon_spirit_power_exact.
+
+2. Khiêu Chiến Online
+- Làm sạch pending/accepted Online cũ một lần khi triển khai v3.7.49.
+- Cược mở của trận bị dọn được hoàn lại trong cùng transaction.
+- Giữ lịch sử trận đã hoàn thành/từ chối.
+- Giao diện mới hiển thị ảnh đại diện của cả hai môn nhân.
+- Hiển thị cảnh giới, linh lực và thanh HP riêng cho từng người.
+- Ba nút chiêu, mỗi nút hiển thị sát thương HP mà server sẽ áp dụng.
+- Sát thương của 3 chiêu được lưu vào snapshot của trận khi khai mở để hai bên thấy cùng một giá trị.
+- Khi tung chiêu: HP giảm có animation, hiện số -HP, hiệu ứng rung/impact và nhật ký chiêu.
+- Trận kết thúc khi một bên về 0 HP.
+- Giữ khóa lượt ở server/transaction, chống request đánh trùng.
+- Giữ giới hạn 30 lượt/24 giờ, cược, thưởng/phạt và cơ chế đồng thuận.
+- Tự động đánh vẫn có thể bật và tự chọn chiêu sát thương cao nhất khi tới lượt.
+- Bỏ nút Nhổ 1 Ngụm Nước Bọt khỏi giao diện lôi đài mới để trận đấu kết thúc theo HP; API cũ không được gọi từ UI.
+
+3. Cache
+- script.js?v=3.7.49 để tránh trình duyệt iPhone dùng mã cũ.
