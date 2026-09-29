@@ -800,6 +800,13 @@ async function ensureTienBanSchemaImpl(){
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_tien_ban_history_user ON tien_ban_history(user_id,created_at DESC);
+    CREATE TABLE IF NOT EXISTS tien_ban_daily_usage (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      usage_date DATE NOT NULL,
+      spins INTEGER NOT NULL DEFAULT 0 CHECK(spins >= 0),
+      PRIMARY KEY(user_id,usage_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tien_ban_daily_usage_date ON tien_ban_daily_usage(usage_date);
   `);
 }
 async function seedTienBan(){
@@ -1000,6 +1007,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_user_positive ON inventory(user_id) WHE
     CREATE INDEX IF NOT EXISTS idx_alchemy_orders_brew_queue ON alchemy_orders(room_owner_id,status,accepted_by,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_inventory_user_item_positive ON inventory(user_id,item_id) WHERE quantity>0;
     CREATE INDEX IF NOT EXISTS idx_profiles_realm_power ON profiles(realm_tier,spirit_power DESC);
+    CREATE INDEX IF NOT EXISTS idx_profiles_spirit_stones_desc ON profiles(spirit_stones DESC,user_id ASC);
     CREATE INDEX IF NOT EXISTS idx_profiles_updated_at ON profiles(updated_at DESC);
   `);
   // Môn nhân nhận từ Gieo Duyên luôn có ít nhất 1 đơn vị không được bán.
@@ -1039,6 +1047,9 @@ async function runDatabaseMaintenance(){
     await query(`DELETE FROM tavern_sales WHERE created_at < NOW()-INTERVAL '5 minutes'`);
     await query(`DELETE FROM tien_ban_history WHERE created_at < NOW()-INTERVAL '5 minutes'`);
     await query(`DELETE FROM challenge_announcements WHERE expires_at < NOW()-INTERVAL '1 minute'`);
+    await query(`DELETE FROM global_announcements WHERE expires_at < NOW()-INTERVAL '1 minute'`);
+    await query(`UPDATE red_packets SET status='expired' WHERE status='open' AND expires_at < NOW()`);
+    await query(`DELETE FROM tien_ban_daily_usage WHERE usage_date < (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - 7`);
     await query(`DELETE FROM secret_realm_contributions WHERE created_at < NOW()-INTERVAL '5 minutes'`);
     await query(`DELETE FROM secret_realm_runs WHERE created_at < NOW()-INTERVAL '5 minutes'`);
     await query(`DELETE FROM challenge_bets WHERE settled_at IS NOT NULL AND settled_at < NOW()-INTERVAL '5 minutes'`);
@@ -1520,6 +1531,35 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'chat';
+    CREATE TABLE IF NOT EXISTS red_packets (
+      id BIGSERIAL PRIMARY KEY,
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      total_stones BIGINT NOT NULL CHECK(total_stones BETWEEN 10000 AND 10000000),
+      remaining_stones BIGINT NOT NULL CHECK(remaining_stones >= 0),
+      recipient_limit INTEGER NOT NULL CHECK(recipient_limit BETWEEN 1 AND 100),
+      claimed_count INTEGER NOT NULL DEFAULT 0 CHECK(claimed_count >= 0),
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','completed','expired')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()+INTERVAL '10 minutes')
+    );
+    CREATE INDEX IF NOT EXISTS idx_red_packets_active ON red_packets(status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_red_packets_sender_created ON red_packets(sender_id,created_at DESC);
+    CREATE TABLE IF NOT EXISTS red_packet_claims (
+      packet_id BIGINT NOT NULL REFERENCES red_packets(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount BIGINT NOT NULL CHECK(amount > 0),
+      claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(packet_id,user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_red_packet_claims_user ON red_packet_claims(user_id,claimed_at DESC);
+    CREATE TABLE IF NOT EXISTS global_announcements (
+      id BIGSERIAL PRIMARY KEY,
+      kind TEXT NOT NULL DEFAULT 'red_packet',
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_global_announcements_active ON global_announcements(expires_at,id DESC);
     CREATE TABLE IF NOT EXISTS elder_notifications (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       message TEXT NOT NULL,
@@ -4094,13 +4134,30 @@ async function pickTienBanItem(client,{tienPhamOnly=false}={}){
   return {item:pickByItemValue(rows),rare:tienPhamOnly};
 }
 
+const TIEN_BAN_DAILY_LIMIT = 50;
+function htmTodayVn(){ return `(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date`; }
+async function reserveTienBanSpins(client,userId,count){
+  const n=Math.max(1,Number(count)||1);
+  const r=await client.query(`
+    INSERT INTO tien_ban_daily_usage(user_id,usage_date,spins)
+    VALUES($1,(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,$2)
+    ON CONFLICT(user_id,usage_date) DO UPDATE SET spins=tien_ban_daily_usage.spins+$2
+    RETURNING spins
+  `,[userId,n]);
+  const used=Number(r.rows[0]?.spins||0);
+  if(used>TIEN_BAN_DAILY_LIMIT) throw Object.assign(new Error(`Bạn chỉ được quay tối đa ${TIEN_BAN_DAILY_LIMIT} lần Tiên Bàn mỗi ngày. Hôm nay đã dùng ${used-n} lượt.`),{code:'TIEN_BAN_DAILY_LIMIT'});
+  return {used,remaining:Math.max(0,TIEN_BAN_DAILY_LIMIT-used)};
+}
+
 app.get('/api/tien-ban',auth,async(req,res)=>{
   try{
     await ensureTienBanSchema();
     const p=(await query(`SELECT spirit_stones FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
+    const usage=(await query(`SELECT spins FROM tien_ban_daily_usage WHERE user_id=$1 AND usage_date=(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date`,[req.session.user_id])).rows[0];
     const history=(await query(`SELECT reward_type,reward_name,reward_rarity,is_special,cost_stones,created_at
       FROM tien_ban_history WHERE user_id=$1 ORDER BY id DESC LIMIT 12`,[req.session.user_id])).rows;
-    res.json({spiritStones:Number(p?.spirit_stones||0),cost:4500,bulkCost:45000,history});
+    const dailySpins=Math.min(TIEN_BAN_DAILY_LIMIT,Number(usage?.spins||0));
+    res.json({spiritStones:Number(p?.spirit_stones||0),cost:4500,bulkCost:45000,dailyLimit:TIEN_BAN_DAILY_LIMIT,dailySpins,dailyRemaining:Math.max(0,TIEN_BAN_DAILY_LIMIT-dailySpins),history});
   }catch(e){console.error('tien ban:',e);res.status(500).json({error:'Không thể mở Tiên Bàn.'});}
 });
 
@@ -4110,6 +4167,7 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
   try{
     await client.query('BEGIN');
     const uid=req.session.user_id, cost=4500;
+    await reserveTienBanSpins(client,uid,1);
     const p=(await client.query(`SELECT spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
     if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});}
     if(Number(p.spirit_stones)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost.toLocaleString('vi-VN')} linh thạch để quay Tiên Bàn.`});}
@@ -4152,7 +4210,7 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
     await client.query(`INSERT INTO tien_ban_history(user_id,reward_type,reward_id,reward_name,reward_rarity,is_special,cost_stones) VALUES($1,'item',$2,$3,$4,FALSE,$5)`,[uid,item.id,item.name,rarity,cost]);
     await client.query('COMMIT');
     res.json({ok:true,special:false,cost,remainingStones:Number(p.spirit_stones)-cost,reward:{type:'item',id:item.id,name:item.name,category:item.category,description:item.description,rarity,power:Number(item.power_bonus||0),ability:item.ability||''},message:`🎴 Tiên Bàn ban thưởng: ${item.name} ×1.`});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien ban spin:',e);res.status(500).json({error:'Tiên Bàn thất bại. Giao dịch đã được hoàn tác.'});}
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien ban spin:',e);res.status(e?.code==='TIEN_BAN_DAILY_LIMIT'?400:500).json({error:e?.code==='TIEN_BAN_DAILY_LIMIT'?e.message:'Tiên Bàn thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });
 
@@ -4161,6 +4219,7 @@ app.post('/api/tien-ban/spin10',auth,async(req,res)=>{
   try{
     await ensureTienBanSchema(); await client.query('BEGIN');
     const uid=req.session.user_id, rolls=10, unitCost=4500, cost=45000;
+    await reserveTienBanSpins(client,uid,rolls);
     const p=(await client.query(`SELECT spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
     if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});}
     if(Number(p.spirit_stones)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost.toLocaleString('vi-VN')} linh thạch để quay 10 lần.`});}
@@ -5209,6 +5268,78 @@ app.post('/api/chat',auth,async(req,res)=>{
       res.status(201).json({ok:true,...r.rows[0],isElder:Boolean(myRank),elderRank:myRank});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
   } catch(e){console.error('chat send:',e);res.status(500).json({error:'Không thể gửi tin nhắn.'});}
+});
+
+function isHoaThanOrHigher(spirit){ return realmIndexFor(Number(spirit)||0) >= 4; }
+
+app.get('/api/red-packets',auth,async(req,res)=>{
+  try{
+    const rows=(await query(`SELECT rp.id,rp.sender_id,u.display_name AS sender_name,rp.total_stones,rp.remaining_stones,rp.recipient_limit,rp.claimed_count,rp.status,rp.created_at,rp.expires_at,
+      EXISTS(SELECT 1 FROM red_packet_claims c WHERE c.packet_id=rp.id AND c.user_id=$1) AS claimed
+      FROM red_packets rp JOIN users u ON u.id=rp.sender_id
+      WHERE rp.status='open' AND rp.expires_at>NOW() AND rp.remaining_stones>0
+      ORDER BY rp.id DESC LIMIT 20`,[req.session.user_id])).rows;
+    const p=(await query(`SELECT spirit_power FROM profiles WHERE user_id=$1`,[req.session.user_id])).rows[0];
+    res.json({canSend:isHoaThanOrHigher(p?.spirit_power),rows});
+  }catch(e){console.error('red packet load:',e);res.status(500).json({error:'Không thể tải Lì Xì.'});}
+});
+
+app.post('/api/red-packets',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const total=Number(req.body?.totalStones);
+    const recipients=Math.floor(Number(req.body?.recipientCount));
+    if(!Number.isSafeInteger(total)||total<10000||total>10000000)return res.status(400).json({error:'Lì xì phải từ 10.000 đến 10.000.000 linh thạch.'});
+    if(!Number.isInteger(recipients)||recipients<1||recipients>100)return res.status(400).json({error:'Số người nhận phải từ 1 đến 100.'});
+    if(total<recipients)return res.status(400).json({error:'Tổng linh thạch phải đủ để mỗi người nhận ít nhất 1 linh thạch.'});
+    await client.query('BEGIN');
+    const sender=(await client.query(`SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
+    if(!sender||!isHoaThanOrHigher(sender.spirit_power)){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ môn nhân từ Hóa Thần trở lên mới được phát Lì Xì.'});}
+    if(BigInt(sender.spirit_stones||0)<BigInt(total)){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ linh thạch để phát Lì Xì.'});}
+    const eligible=Number((await client.query(`SELECT COUNT(*)::int c FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1`,[req.session.user_id])).rows[0]?.c||0);
+    if(recipients>eligible){await client.query('ROLLBACK');return res.status(400).json({error:`Hiện chỉ có ${eligible} môn nhân khác có thể nhận Lì Xì.`});}
+    const packet=(await client.query(`INSERT INTO red_packets(sender_id,total_stones,remaining_stones,recipient_limit,expires_at) VALUES($1,$2,$2,$3,NOW()+INTERVAL '10 minutes') RETURNING id,total_stones,recipient_limit,created_at,expires_at`,[req.session.user_id,total,recipients])).rows[0];
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,total]);
+    const senderName=(await client.query(`SELECT display_name FROM users WHERE id=$1`,[req.session.user_id])).rows[0]?.display_name||'Một vị tiền bối';
+    const ann=(await client.query(`INSERT INTO global_announcements(kind,message,expires_at) VALUES('red_packet',$1,NOW()+INTERVAL '10 seconds') RETURNING id,message,created_at,expires_at`,[`🧧 ${senderName} vừa phát Lì Xì ${total.toLocaleString('vi-VN')} linh thạch · ${recipients} người nhận · hãy nhanh tay lĩnh lộc!`])).rows[0];
+    await client.query('COMMIT');
+    res.status(201).json({ok:true,packet:{...packet,total_stones:Number(packet.total_stones)},announcement:ann,message:'🧧 Phát Lì Xì thành công. Toàn sơn môn đã nhận thông báo trong 10 giây.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('red packet create:',e);res.status(500).json({error:'Không thể phát Lì Xì. Giao dịch đã được hoàn tác.'});}finally{client.release();}
+});
+
+app.post('/api/red-packets/:id/claim',auth,async(req,res)=>{
+  const client=await pool.connect();
+  try{
+    const packetId=Number(req.params.id); if(!Number.isInteger(packetId)||packetId<=0)return res.status(400).json({error:'Lì Xì không hợp lệ.'});
+    await client.query('BEGIN');
+    const rp=(await client.query(`SELECT * FROM red_packets WHERE id=$1 FOR UPDATE`,[packetId])).rows[0];
+    if(!rp){await client.query('ROLLBACK');return res.status(404).json({error:'Lì Xì không tồn tại.'});}
+    if(Number(rp.sender_id)===Number(req.session.user_id)){await client.query('ROLLBACK');return res.status(400).json({error:'Người phát Lì Xì không thể tự nhận.'});}
+    if(rp.status!=='open'||new Date(rp.expires_at).getTime()<=Date.now()||Number(rp.remaining_stones)<=0||Number(rp.claimed_count)>=Number(rp.recipient_limit)){await client.query('ROLLBACK');return res.status(400).json({error:'Lì Xì đã kết thúc hoặc đã phát hết.'});}
+    const existed=(await client.query(`SELECT amount FROM red_packet_claims WHERE packet_id=$1 AND user_id=$2`,[packetId,req.session.user_id])).rows[0];
+    if(existed){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn đã nhận Lì Xì này rồi.'});}
+    const slotsLeft=Number(rp.recipient_limit)-Number(rp.claimed_count);
+    const remaining=BigInt(rp.remaining_stones);
+    let amount;
+    if(slotsLeft===1){ amount=remaining; }
+    else {
+      const max=remaining-BigInt(slotsLeft-1);
+      const maxNum=Number(max>BigInt(Number.MAX_SAFE_INTEGER)?BigInt(Number.MAX_SAFE_INTEGER):max);
+      amount=BigInt(Math.max(1,Math.floor(Math.random()*maxNum)+1));
+    }
+    const newRemaining=remaining-amount, newCount=Number(rp.claimed_count)+1;
+    await client.query(`INSERT INTO red_packet_claims(packet_id,user_id,amount) VALUES($1,$2,$3)`,[packetId,req.session.user_id,amount.toString()]);
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,amount.toString()]);
+    const status=newCount>=Number(rp.recipient_limit)||newRemaining<=0?'completed':'open';
+    await client.query(`UPDATE red_packets SET remaining_stones=$2::BIGINT,claimed_count=$3,status=$4 WHERE id=$1`,[packetId,newRemaining.toString(),newCount,status]);
+    await client.query('COMMIT');
+    res.json({ok:true,amount:Number(amount),claimedCount:newCount,recipientLimit:Number(rp.recipient_limit),remainingStones:Number(newRemaining),status,message:`🧧 Bạn nhận được ${Number(amount).toLocaleString('vi-VN')} linh thạch từ Lì Xì!`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('red packet claim:',e);res.status(500).json({error:'Không thể nhận Lì Xì. Giao dịch đã được hoàn tác.'});}finally{client.release();}
+});
+
+app.get('/api/global-announcement',auth,async(req,res)=>{
+  try{const r=await query(`SELECT id,kind,message,created_at,expires_at FROM global_announcements WHERE expires_at>NOW() ORDER BY id DESC LIMIT 1`);res.json({announcement:r.rows[0]||null});}
+  catch(e){res.status(500).json({error:'Không thể tải thông báo toàn sơn môn.'});}
 });
 
 app.patch('/api/elder-notification',auth,async(req,res)=>{
