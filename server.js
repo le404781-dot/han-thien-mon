@@ -2202,6 +2202,20 @@ async function initDb() {
     }finally{client.release();}
   }
 
+  // v3.7.50: ép cảnh giới Reytheon chính xác Tiên Đế 12 Tinh.
+  // Migration riêng để vẫn áp dụng được nếu v3.7.49 đã từng chạy trên DB.
+  const reytheon12StarMigration='v3.7.50_reytheon_exact_tien_de_12_star';
+  const reytheon12StarApplied=(await query('SELECT 1 FROM app_migrations WHERE id=$1',[reytheon12StarMigration])).rowCount > 0;
+  if(!reytheon12StarApplied){
+    const rey=await query(`SELECT u.id FROM users u WHERE LOWER(u.username)=LOWER($1) LIMIT 1`,['Reytheon']);
+    if(rey.rowCount){
+      const spirit=clampSpiritPower(RANK_MINS[TIEN_DE_REALM_INDEX] + (12-1)*TIEN_DE_STAR_SIZE);
+      await query(`UPDATE profiles SET spirit_power=$2,rank='Tiên Đế',realm_tier=12,updated_at=NOW() WHERE user_id=$1`,[Number(rey.rows[0].id),spirit]);
+    }
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[reytheon12StarMigration]);
+    console.log(`[DB] ${reytheon12StarMigration}: Reytheon=${rey.rowCount?'Tiên Đế 12 Tinh':'chưa tồn tại'}.`);
+  }
+
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
@@ -5822,15 +5836,9 @@ function ultimateDamage(attacker, defender){
   return Math.max(1,Math.round(baseDamage*realmMultiplier*defenseReduction*variance));
 }
 
-function parseChallengeMoves(value){
-  if(Array.isArray(value))return value;
-  if(value&&typeof value==='object')return value;
-  try{const parsed=JSON.parse(value||'[]');return Array.isArray(parsed)?parsed:[];}catch{return [];}
-}
 function battleSnapshot(row,viewerId){
   const challengerTurn=Number(row.turn_user_id)===Number(row.challenger_id);
   const viewerIsChallenger=Number(viewerId)===Number(row.challenger_id);
-  const moveOptions=parseChallengeMoves(viewerIsChallenger?row.challenger_moves:row.opponent_moves);
   return {
     id:Number(row.id),
     status:row.status,
@@ -5846,50 +5854,9 @@ function battleSnapshot(row,viewerId){
     lastActorId:row.last_actor_id==null?null:Number(row.last_actor_id),
     lastDamage:Number(row.last_damage)||0,
     lastAction:row.last_action||'',
-    startedAt:row.started_at,
-    moveOptions
+    startedAt:row.started_at
   };
 }
-
-function techniqueDamageMultiplier(technique){
-  if(!technique) return 1;
-  const grade=String(technique.grade||'');
-  const gradePct=grade.includes('Thượng')?0.28:grade.includes('Trung')?0.14:0.04;
-  const power=Math.max(0,Number(technique.power_bonus)||0);
-  return 1+gradePct+Math.min(0.45,power/5000);
-}
-
-// Khiêu Chiến Online v3.7.39: 3 chiêu cố định, sát thương deterministic để
-// con số hiển thị trên nút luôn khớp với sát thương server thực sự áp dụng.
-const CHALLENGE_MOVES=[
-  {id:1,name:'Hàn Phong Trảm',icon:'❄️',multiplier:0.72,description:'Nhanh, ổn định · sát thương thấp'},
-  {id:2,name:'Thiên Lôi Phá',icon:'⚡',multiplier:1.00,description:'Cân bằng · sát thương trung bình'},
-  {id:3,name:'Cửu Thiên Diệt',icon:'☄️',multiplier:1.36,description:'Bạo phát · sát thương cao'}
-];
-function challengeMoveDamage(attacker,defender,moveId,equipmentPowerOverride){
-  const move=CHALLENGE_MOVES.find(x=>Number(x.id)===Number(moveId))||CHALLENGE_MOVES[0];
-  const aSpirit=Math.max(0,Number(attacker.spirit_power)||0);
-  const dSpirit=Math.max(0,Number(defender.spirit_power)||0);
-  const aStage=stageFor(aSpirit), dStage=stageFor(dSpirit);
-  const aAttr=attributesFor(aSpirit,attacker.comprehension);
-  const dAttr=attributesFor(dSpirit,defender.comprehension);
-  const equipment=Math.max(0,Number(equipmentPowerOverride ?? attacker.equipment_power)||0);
-  const attackerImmortalBuff=immortalArtifactBuff(attacker);
-  // Tăng dần theo cảnh giới + tầng, đồng thời vẫn chịu ảnh hưởng linh lực/trang bị.
-  const realmGrowth=1 + aStage.realmIndex*0.045 + Math.max(0,aStage.tier-1)*0.012;
-  const base=(110 + aAttr.congLuc*3.15 + aSpirit*0.018 + equipment*0.75)*(1+attackerImmortalBuff.attackPct/100);
-  const realmGap=aStage.realmIndex-dStage.realmIndex;
-  let gapMultiplier=1;
-  if(realmGap>0) gapMultiplier=1+Math.min(1.65,realmGap*0.18);
-  else if(realmGap<0) gapMultiplier=Math.max(0.30,1-Math.min(0.70,Math.abs(realmGap)*0.20));
-  else gapMultiplier=1+Math.max(0,dStage.tier-aStage.tier)*0.025;
-  const defenseReduction=Math.max(0.35,1-(dAttr.phongThu/(dAttr.phongThu+900)))*(1-immortalArtifactBuff(defender).defensePct/200);
-  return Math.max(1,Math.round(base*realmGrowth*gapMultiplier*defenseReduction*move.multiplier));
-}
-function challengeMovePreview(attacker,defender){
-  return CHALLENGE_MOVES.map(m=>({id:m.id,name:m.name,icon:m.icon,description:m.description,damage:challengeMoveDamage(attacker,defender,m.id),multiplier:m.multiplier}));
-}
-
 async function publishChallengeAnnouncement(client,message,durationMs=10000){
   const ms=Math.max(1000,Math.min(30000,Number(durationMs)||10000));
   const r=await client.query(`INSERT INTO challenge_announcements(message,expires_at) VALUES($1,NOW()+($2::int * INTERVAL '1 millisecond')) RETURNING id,message,created_at,expires_at`,[String(message).slice(0,500),ms]);
@@ -6383,46 +6350,6 @@ async function ensureChallengeSchemaImpl(){
   `);
 }
 
-app.get('/api/challenges/online/state',auth,async(req,res)=>{
-  try{
-    await ensureChallengeSchema();
-    const uid=req.session.user_id;
-    const row=(await query(`SELECT cr.id,cr.status,cr.challenger_id,cr.opponent_id,
-        cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,
-        cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,cr.challenger_moves,cr.opponent_moves,
-        cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,
-        cp.spirit_power AS challenger_spirit,
-        ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,
-        op.spirit_power AS opponent_spirit
-      FROM challenge_requests cr
-      JOIN users cu ON cu.id=cr.challenger_id
-      JOIN profiles cp ON cp.user_id=cu.id
-      JOIN users ou ON ou.id=cr.opponent_id
-      JOIN profiles op ON op.user_id=ou.id
-      WHERE cr.status='accepted' AND cr.mode='online'
-        AND (cr.challenger_id=$1 OR cr.opponent_id=$1)
-      ORDER BY cr.id DESC LIMIT 1`,[uid])).rows[0]||null;
-    res.set({'Cache-Control':'no-store, no-cache, must-revalidate, proxy-revalidate','Pragma':'no-cache','Expires':'0'});
-    if(!row)return res.json({activeBattle:null});
-    const challengerSpirit=Number(row.challenger_spirit)||0;
-    const opponentSpirit=Number(row.opponent_spirit)||0;
-    const viewerIsChallenger=Number(uid)===Number(row.challenger_id);
-    const spitAllowed=viewerIsChallenger
-      ? stageFor(challengerSpirit).realmIndex-stageFor(opponentSpirit).realmIndex>=2
-      : stageFor(opponentSpirit).realmIndex-stageFor(challengerSpirit).realmIndex>=2;
-    res.json({activeBattle:{
-      ...battleSnapshot(row,uid),
-      challengerName:row.challenger_name,challengerAvatar:row.challenger_avatar,
-      challengerRank:row.challenger_rank,challengerSpirit,
-      opponentName:row.opponent_name,opponentAvatar:row.opponent_avatar,
-      opponentRank:row.opponent_rank,opponentSpirit,spitAllowed
-    }});
-  }catch(e){
-    console.error('challenge online state:',e);
-    res.status(500).json({error:'Không thể đồng bộ trạng thái lôi đài.'});
-  }
-});
-
 app.get('/api/challenges/announcement',auth,async(req,res)=>{
   try{
     await ensureChallengeSchema();
@@ -6436,9 +6363,9 @@ app.get('/api/challenges',auth,async(req,res)=>{
     await ensureChallengeSchema();
     const uid=req.session.user_id;
     const [users,pending,history,activeRows,publicBattles]=await Promise.all([
-      query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier,p.challenge_debuff_until,p.challenge_debuff_percent,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
+      query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier,p.challenge_debuff_until,p.challenge_debuff_percent,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
              FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name,u.id`,[uid]),
-      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.mode,cr.created_at,u.display_name AS challenger_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
+      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.mode,cr.created_at,u.display_name AS challenger_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
              FROM challenge_requests cr JOIN users u ON u.id=cr.challenger_id JOIN profiles p ON p.user_id=u.id
              WHERE cr.opponent_id=$1 AND cr.status='pending' AND cr.mode='online' ORDER BY cr.created_at DESC LIMIT 20`,[uid]),
       query(`SELECT cr.*,cu.display_name AS challenger_name,ou.display_name AS opponent_name,
@@ -6446,13 +6373,13 @@ app.get('/api/challenges',auth,async(req,res)=>{
              FROM challenge_requests cr JOIN users cu ON cu.id=cr.challenger_id JOIN users ou ON ou.id=cr.opponent_id
              LEFT JOIN treasure_items ri ON ri.id=cr.reward_item_id
              WHERE cr.challenger_id=$1 OR cr.opponent_id=$1 ORDER BY cr.id DESC LIMIT 30`,[uid]),
-      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.status,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,cr.challenger_moves,cr.opponent_moves,
+      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.status,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,
                     cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,cp.spirit_power AS challenger_spirit,
                     ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,op.spirit_power AS opponent_spirit
              FROM challenge_requests cr
              JOIN users cu ON cu.id=cr.challenger_id JOIN profiles cp ON cp.user_id=cu.id
              JOIN users ou ON ou.id=cr.opponent_id JOIN profiles op ON op.user_id=ou.id
-             WHERE cr.status='accepted' AND cr.mode='online' AND (cr.challenger_id=$1 OR cr.opponent_id=$1) ORDER BY cr.id DESC LIMIT 1`,[uid]),
+             WHERE cr.status='accepted' AND (cr.challenger_id=$1 OR cr.opponent_id=$1) ORDER BY cr.id DESC LIMIT 1`,[uid]),
       query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_action,cr.last_damage,cr.started_at,
                     cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,
                     ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,
@@ -6462,7 +6389,7 @@ app.get('/api/challenges',auth,async(req,res)=>{
              FROM challenge_requests cr
              JOIN users cu ON cu.id=cr.challenger_id JOIN profiles cp ON cp.user_id=cu.id
              JOIN users ou ON ou.id=cr.opponent_id JOIN profiles op ON op.user_id=ou.id
-             WHERE cr.status='accepted' AND cr.mode='online' ORDER BY cr.id DESC LIMIT 20`,[])
+             WHERE cr.status='accepted' ORDER BY cr.id DESC LIMIT 20`,[])
     ]);
     const me=(await query(`SELECT spirit_power,spirit_stones,challenge_debuff_until,challenge_debuff_percent,challenge_debuff_text FROM profiles WHERE user_id=$1`,[uid])).rows[0];
     const usage=Number((await query(`SELECT COUNT(*)::int AS c FROM challenge_requests WHERE challenger_id=$1 AND created_at>=NOW()-INTERVAL '24 hours'`,[uid])).rows[0]?.c||0);
@@ -6473,7 +6400,7 @@ app.get('/api/challenges',auth,async(req,res)=>{
 
 app.post('/api/challenges/offline',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await dbConnect();
+  const client=await pool.connect();
   try{
     const uid=req.session.user_id,target=Number(req.body?.userId);
     if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
@@ -6501,7 +6428,7 @@ app.post('/api/challenges/offline',auth,async(req,res)=>{
 
 app.post('/api/challenges/online/request',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await dbConnect();
+  const client=await pool.connect();
   try{
     const uid=req.session.user_id,target=Number(req.body?.userId);
     if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
@@ -6529,7 +6456,7 @@ app.post('/api/challenges/online/request',auth,async(req,res)=>{
 
 app.post('/api/challenges/online/respond',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await dbConnect();
+  const client=await pool.connect();
   try{
     const uid=req.session.user_id,requestId=Number(req.body?.requestId),action=String(req.body?.action||'');
     if(!Number.isInteger(requestId)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu lôi đài không hợp lệ.'});
@@ -6545,27 +6472,22 @@ app.post('/api/challenges/online/respond',auth,async(req,res)=>{
     const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[ids[0],ids[1]])).rows;
     const challenger=rows.find(x=>Number(x.id)===Number(reqRow.challenger_id)), opponent=rows.find(x=>Number(x.id)===Number(reqRow.opponent_id));
     if(!challenger||!opponent){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ chiến đấu.'});}
-    const eqRows=(await client.query(`SELECT p.user_id,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power FROM profiles p WHERE p.user_id IN ($1,$2)`,[challenger.id,opponent.id])).rows;
-    for(const r of eqRows){const target=Number(r.user_id)===Number(challenger.id)?challenger:opponent;target.equipment_power=Number(r.equipment_power)||0;}
-    const challengerMoves=challengeMovePreview(challenger,opponent);
-    const opponentMoves=challengeMovePreview(opponent,challenger);
     const activeA=(await client.query(`SELECT 1 FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) LIMIT 1`,[challenger.id])).rows[0];
     const activeB=(await client.query(`SELECT 1 FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) LIMIT 1`,[opponent.id])).rows[0];
     if(activeA||activeB){await client.query('ROLLBACK');return res.status(409).json({error:'Một trong hai môn nhân đang ở trong lôi đài khác.'});}
     const protection=await consumeDiscipleChallengePermission(client,Number(reqRow.challenger_id),Number(reqRow.opponent_id),true);
     if(!protection.allowed){await client.query('ROLLBACK');return res.status(403).json({error:protection.error,protected:true,mentorId:protection.mentor?.mentor_id,mentorName:protection.mentor?.mentor_name,discipleId:Number(reqRow.opponent_id)});}
     const challengerMax=challengeHealth(challenger), opponentMax=challengeHealth(opponent);
-    await client.query(`UPDATE challenge_requests SET status='accepted',challenger_hp=$2,opponent_hp=$3,challenger_max_hp=$4,opponent_max_hp=$5,turn_user_id=$6,round_number=0,last_actor_id=NULL,last_damage=0,last_action='',challenger_moves=$7::jsonb,opponent_moves=$8::jsonb,started_at=NOW(),responded_at=NOW() WHERE id=$1`,[requestId,challengerMax,opponentMax,challengerMax,opponentMax,challenger.id,JSON.stringify(challengerMoves),JSON.stringify(opponentMoves)]);
+    await client.query(`UPDATE challenge_requests SET status='accepted',challenger_hp=$2,opponent_hp=$3,challenger_max_hp=$4,opponent_max_hp=$5,turn_user_id=$6,round_number=0,last_actor_id=NULL,last_damage=0,last_action='',started_at=NOW(),responded_at=NOW() WHERE id=$1`,[requestId,challengerMax,opponentMax,challengerMax,opponentMax,challenger.id]);
     await client.query('COMMIT');
-    res.set('Cache-Control','no-store');
-    res.json({ok:true,status:'accepted',battle:{id:requestId,challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:challengerMax,opponentHp:opponentMax,challengerMaxHp:challengerMax,opponentMaxHp:opponentMax,turnUserId:Number(challenger.id),yourTurn:Number(challenger.id)===uid,round:0,lastDamage:0,lastAction:'',challengerName:challenger.display_name,opponentName:opponent.display_name,moveOptions:Number(challenger.id)===uid?challengerMoves:opponentMoves},message:`Lôi đài đã khai mở. ${challenger.display_name} ra chiêu trước.`});
+    res.json({ok:true,status:'accepted',battle:{id:requestId,challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:challengerMax,opponentHp:opponentMax,challengerMaxHp:challengerMax,opponentMaxHp:opponentMax,turnUserId:Number(challenger.id),yourTurn:Number(challenger.id)===uid,round:0,lastDamage:0,lastAction:'',challengerName:challenger.display_name,opponentName:opponent.display_name},message:`Lôi đài đã khai mở. ${challenger.display_name} ra chiêu trước.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge respond:',e);res.status(500).json({error:'Lôi đài online thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });
 
 app.post('/api/challenges/online/spit',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await dbConnect();
+  const client=await pool.connect();
   try{
     const uid=req.session.user_id,requestId=Number(req.body?.requestId);
     if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
@@ -6600,9 +6522,9 @@ app.post('/api/challenges/online/spit',auth,async(req,res)=>{
 
 app.post('/api/challenges/online/action',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await dbConnect();
+  const client=await pool.connect();
   try{
-    const uid=req.session.user_id,requestId=Number(req.body?.requestId),moveId=Math.max(1,Math.min(3,Math.floor(Number(req.body?.moveId||req.body?.techniqueId||1))));
+    const uid=req.session.user_id,requestId=Number(req.body?.requestId),techniqueId=Number(req.body?.techniqueId||0);
     if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
     await client.query('BEGIN');
     const battle=(await client.query(`SELECT cr.*,cu.display_name AS challenger_name,ou.display_name AS opponent_name
@@ -6615,20 +6537,21 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[battle.challenger_id,battle.opponent_id])).rows;
     const attacker=rows.find(x=>Number(x.id)===uid), defender=rows.find(x=>Number(x.id)!==uid);
     if(!attacker||!defender){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hai hồ sơ chiến đấu.'});}
-    const moveRow=(Number(attacker.id)===Number(battle.challenger_id)?battle.challenger_moves:battle.opponent_moves);
-    const moveOptions=parseChallengeMoves(moveRow);
-    const selectedMove=moveOptions.find(m=>Number(m.id)===moveId)||moveOptions[0]||null;
-    if(!selectedMove||!Number.isFinite(Number(selectedMove.damage))||Number(selectedMove.damage)<1){await client.query('ROLLBACK');return res.status(409).json({error:'Bộ 3 chiêu của lôi đài không hợp lệ. Trận đấu cần được tạo lại.'});}
-    const damage=Math.max(1,Math.round(Number(selectedMove.damage)));
+    const attackerEq=(await client.query(`SELECT p.equipped_technique_id,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[uid])).rows[0];
+    const defenderEq=(await client.query(`SELECT (SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[defender.id])).rows[0];
+    attacker.equipment_power=Number(attackerEq?.equipment_power)||0; defender.equipment_power=Number(defenderEq?.equipment_power)||0;
+    const chosenTechniqueId=techniqueId>0?techniqueId:Number(attackerEq?.equipped_technique_id)||0;
+    let technique=null;
+    if(chosenTechniqueId>0){
+      technique=(await client.query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1 AND ct.id=$2`,[uid,chosenTechniqueId])).rows[0];
+      if(!technique){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa học công pháp được chọn.'});}
+    }
+    const damage=Math.max(1,Math.round(ultimateDamage(attacker,defender)*techniqueDamageMultiplier(technique)));
     const attackerIsChallenger=Number(attacker.id)===Number(battle.challenger_id);
     const oldDefHp=attackerIsChallenger?Number(battle.opponent_hp):Number(battle.challenger_hp);
-    if(!Number.isFinite(oldDefHp)||oldDefHp<0){
-      await client.query('ROLLBACK');
-      return res.status(409).json({error:'Trạng thái HP của lôi đài không hợp lệ. Lượt đánh chưa bị trừ.'});
-    }
     const newDefHp=Math.max(0,oldDefHp-damage);
     const newRound=Number(battle.round_number||0)+1;
-    const actionName=`${selectedMove.icon||'⚔️'} ${selectedMove.name}`;
+    const actionName=technique?`⚡ Tuyệt Chiêu · ${technique.name}`:'⚡ Tuyệt Chiêu · Hàn Thiên Phá';
     const realmGap=stageFor(Number(attacker.spirit_power)||0).realmIndex-stageFor(Number(defender.spirit_power)||0).realmIndex;
     if(newDefHp<=0){
       const winner=attacker, loser=defender;
@@ -6639,64 +6562,21 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_hp=$4,opponent_hp=$5,turn_user_id=NULL,round_number=$6,last_actor_id=$7,last_damage=$8,last_action=$9,challenger_damage=$10,opponent_damage=$11,success_chance=1,reward_spirit=$12,reward_item_id=$13,reward_quantity=$14,penalty_text=$15,responded_at=NOW() WHERE id=$1`,[requestId,winner.id,loser.id,attackerIsChallenger?Number(battle.challenger_hp):newDefHp,attackerIsChallenger?newDefHp:Number(battle.opponent_hp),newRound,attacker.id,damage,actionName,challengerDamage,opponentDamage,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text]);
       const betResult=await settleChallengeBets(client,requestId,winner.id);
       await client.query('COMMIT');
-      res.set('Cache-Control','no-store');
-      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,moveId,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,targetUserId:Number(loser.id),targetHpBefore:oldDefHp,targetHpAfter:0,challengerHp:attackerIsChallenger?Number(battle.challenger_hp):0,opponentHp:attackerIsChallenger?0:Number(battle.opponent_hp),challengerMaxHp:Number(battle.challenger_max_hp)||0,opponentMaxHp:Number(battle.opponent_max_hp)||0,turnUserId:null,lastActorId:Number(winner.id),lastDamage:damage,lastAction:actionName,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
+      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
     }
-    // Luôn tính HP mới từ đúng phía bị tấn công, sau đó ghi cả hai cột trong cùng transaction.
-    // Không cập nhật HP theo client để tránh trường hợp phía đối thủ vẫn giữ HP cũ.
-    const challengerHp=attackerIsChallenger
-      ? Number(battle.challenger_hp)
-      : newDefHp;
-    const opponentHp=attackerIsChallenger
-      ? newDefHp
-      : Number(battle.opponent_hp);
-    const targetHpBefore=oldDefHp;
-    const targetHpAfter=newDefHp;
+    const challengerHp=attackerIsChallenger?Number(battle.challenger_hp):newDefHp;
+    const opponentHp=attackerIsChallenger?newDefHp:Number(battle.opponent_hp);
     const nextTurn=Number(defender.id);
-    const updateResult=await client.query(`
-      UPDATE challenge_requests
-      SET challenger_hp=$2::numeric,
-          opponent_hp=$3::numeric,
-          turn_user_id=$4,
-          round_number=$5,
-          last_actor_id=$6,
-          last_damage=$7::numeric,
-          last_action=$8,
-          last_action_token=$12,
-          challenger_damage=challenger_damage+$9::numeric,
-          opponent_damage=opponent_damage+$10::numeric
-      WHERE id=$1 AND status='accepted' AND turn_user_id=$11
-    `,[requestId,challengerHp,opponentHp,nextTurn,newRound,attacker.id,damage,actionName,attackerIsChallenger?damage:0,attackerIsChallenger?0:damage,uid,`${requestId}:${newRound}:${uid}:${moveId}`]);
-    if(updateResult.rowCount!==1){
-      await client.query('ROLLBACK');
-      return res.status(409).json({error:'Lượt đánh đã thay đổi. Hãy đồng bộ lại lôi đài rồi thử lại.'});
-    }
-    const saved=(await client.query(`
-      SELECT challenger_hp,opponent_hp,challenger_max_hp,opponent_max_hp,turn_user_id,round_number,last_actor_id,last_damage,last_action,last_action_token
-      FROM challenge_requests WHERE id=$1 FOR UPDATE
-    `,[requestId])).rows[0];
-    if(!saved){
-      await client.query('ROLLBACK');
-      return res.status(409).json({error:'Không thể lưu kết quả lượt đánh.'});
-    }
+    await client.query(`UPDATE challenge_requests SET challenger_hp=$2,opponent_hp=$3,turn_user_id=$4,round_number=$5,last_actor_id=$6,last_damage=$7,last_action=$8,challenger_damage=challenger_damage+$9,opponent_damage=opponent_damage+$10 WHERE id=$1`,[requestId,challengerHp,opponentHp,nextTurn,newRound,attacker.id,damage,actionName,attackerIsChallenger?damage:0,attackerIsChallenger?0:damage]);
     await client.query('COMMIT');
-    const savedChallengerHp=Number(saved.challenger_hp)||0;
-    const savedOpponentHp=Number(saved.opponent_hp)||0;
-    res.set('Cache-Control','no-store');
-    res.json({ok:true,status:'accepted',damage,moveId,realmGap,round:Number(saved.round_number)||newRound,turnUserId:Number(saved.turn_user_id),yourTurn:false,
-      challengerHp:savedChallengerHp,opponentHp:savedOpponentHp,
-      challengerMaxHp:Number(saved.challenger_max_hp)||Number(battle.challenger_max_hp),
-      opponentMaxHp:Number(saved.opponent_max_hp)||Number(battle.opponent_max_hp),
-      lastActorId:Number(saved.last_actor_id),lastDamage:Number(saved.last_damage)||0,lastAction:saved.last_action||actionName,lastActionToken:saved.last_action_token||'',
-      targetUserId:Number(defender.id),targetHpBefore,targetHpAfter,
-      message:`${attacker.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương. ${defender.display_name} còn ${targetHpAfter.toLocaleString('vi-VN')} HP. Đến lượt ${defender.display_name}.`});
+    res.json({ok:true,status:'accepted',damage,realmGap,round:newRound,turnUserId:nextTurn,yourTurn:false,challengerHp,opponentHp,challengerMaxHp:Number(battle.challenger_max_hp),opponentMaxHp:Number(battle.opponent_max_hp),lastActorId:uid,lastAction:actionName,message:`${attacker.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương. Đến lượt ${defender.display_name}.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge action:',e);res.status(500).json({error:'Không thể tung tuyệt chiêu. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });
 
 app.post('/api/challenges/online/leave',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await dbConnect();
+  const client=await pool.connect();
   try{
     const uid=req.session.user_id,requestId=Number(req.body?.requestId);
     if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
