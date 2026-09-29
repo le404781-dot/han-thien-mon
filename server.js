@@ -8,7 +8,7 @@ const app = express();
 // HTTP performance: nén Brotli/Gzip có chọn lọc cho payload đủ lớn.
 // Ngưỡng 1 KB tránh tốn CPU cho response nhỏ; compression tự đàm phán
 // Brotli/Gzip theo Accept-Encoding của trình duyệt.
-app.use(compression({ threshold: 1024, level: 6 }));
+app.use(compression({ threshold: 2048, level: 4 }));
 // Render Web Service: always bind to the injected PORT on all interfaces.
 const PORT = Number(process.env.PORT) || 10000;
 const HOST = '0.0.0.0';
@@ -5198,25 +5198,36 @@ async function sectAuraRankMap(){
   return sectAuraCache.map;
 }
 
+let __leaderboardCache={at:0,rows:null};
 app.get('/api/leaderboard',async(req,res)=>{
   try {
-    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
-      COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
-      COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count,
-      (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
-      FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY achievement_score DESC, u.id ASC LIMIT 50`);
+    const now=Date.now();
+    if(!__leaderboardCache.rows||now-__leaderboardCache.at>5000){
+      const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
+        COALESCE(a.achievement_points,0)::int AS achievement_points,
+        COALESCE(a.achievement_count,0)::int AS achievement_count,
+        (p.spirit_power + COALESCE(a.achievement_points,0)*10)::bigint AS achievement_score
+        FROM users u JOIN profiles p ON p.user_id=u.id
+        LEFT JOIN (SELECT user_id,SUM(points)::bigint AS achievement_points,COUNT(*)::int AS achievement_count FROM achievements GROUP BY user_id) a ON a.user_id=u.id
+        ORDER BY achievement_score DESC,u.id ASC LIMIT 50`);
+      __leaderboardCache={at:now,rows:r.rows};
+    }
     const aura=await sectAuraRankMap();
-    res.json({rows:r.rows.map((x,i)=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex,auraRank:aura.get(Number(x.id))||0,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
+    res.json({rows:__leaderboardCache.rows.map((x,i)=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex,auraRank:aura.get(Number(x.id))||0,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
   } catch(e){res.status(500).json({error:'Không thể tải bảng thành tích.'});}
 });
 
+let __wealthCache={at:0,rows:null};
 app.get('/api/wealth',async(req,res)=>{
   try{
     await ensureRuntimeSchema();
-    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_stones,p.wealth_public,p.spirit_power,p.avatar
-      FROM users u JOIN profiles p ON p.user_id=u.id
-      ORDER BY p.spirit_stones DESC,u.id ASC LIMIT 100`);
-    res.json({rows:r.rows.map((x,i)=>({id:x.id,rankNo:i+1,display_name:x.display_name,title:x.title,rank:x.rank,spirit_power:Number(x.spirit_power)||0,avatar:x.avatar,wealthPublic:Boolean(x.wealth_public),spiritStones:x.wealth_public?Number(x.spirit_stones)||0:null}))});
+    const now=Date.now();
+    if(!__wealthCache.rows||now-__wealthCache.at>5000){
+      __wealthCache={at:now,rows:(await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_stones,p.wealth_public,p.spirit_power,p.avatar
+        FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY p.spirit_stones DESC,u.id ASC LIMIT 100`)).rows};
+    }
+    res.setHeader('Cache-Control','private, max-age=5, stale-while-revalidate=5');
+    res.json({rows:__wealthCache.rows.map((x,i)=>({id:x.id,rankNo:i+1,display_name:x.display_name,title:x.title,rank:x.rank,spirit_power:Number(x.spirit_power)||0,avatar:x.avatar,wealthPublic:Boolean(x.wealth_public),spiritStones:x.wealth_public?Number(x.spirit_stones)||0:null}))});
   }catch(e){res.status(500).json({error:'Không thể tải Bảng Tài Phú.'});}
 });
 

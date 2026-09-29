@@ -22,6 +22,7 @@ const GET_CACHE_TTL={
  '/api/rewards':15000,'/api/presence':10000
 };
 function getCacheTTL(url){const base=String(url).split('?')[0];return GET_CACHE_TTL[base]??3000;}
+function isSectionVisible(id){const el=document.getElementById(id);if(!el||document.hidden)return false;const r=el.getBoundingClientRect();return r.bottom>0&&r.top<window.innerHeight;}
 function invalidateGetCache(){__getCache.clear();}
 async function api(url,opts={}){
  const method=String(opts.method||'GET').toUpperCase();
@@ -368,8 +369,13 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadWealth();await loadTreasure();await loadTienBan();await loadDanCac();await loadDanDuong();await loadDanPhap();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadBlackMarket();await loadTienThai();await loadTienKhiEnhance();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
- catch(e){if(e?.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}else{console.warn('Phiên vẫn được giữ, lỗi tải dữ liệu tạm thời:',e);}}
+ try{
+  const d=await api('/api/me',{headers:authHeaders()});
+  accountUI(d.user);
+  await loadProfile({bootstrap:true});
+  await Promise.allSettled([loadTavern(),loadDisciples(),loadCodex(),loadTienPhap(),loadSpiritRankings(),loadMansion(),loadChat(),loadMailbox(),loadSectPosts(),loadLeaderboard(),loadWealth(),loadTreasure(),loadTienBan(),loadDanCac(),loadDanPhap(),loadDanDuong(),loadDuocDuong(),loadBeastHouse(),loadBeastFace(),loadDuongThu(),loadBeastArena(),loadLinhPhap(),loadTuDi(),loadMarket(),loadBlackMarket(),loadTienThai(),loadTienKhiEnhance(),loadProfessions(),loadQuests(),loadChallenges(),loadArenaLive(),loadData()]);
+  maybeShowTutorial();
+ }catch(e){if(e?.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}else{console.warn('Phiên vẫn được giữ, lỗi tải dữ liệu tạm thời:',e);}}
 }
 function renderGuestAreas(){
  $('#tavernArea').innerHTML=`<div class="empty-state compact"><h3>🥂 Tửu Lâu đang phong ấn</h3><p>Đăng nhập để ứng cử Lâu Chủ, mở bán túy phẩm và giao dịch với đạo hữu.</p><button class="btn primary" onclick="renderAuth('login')">Đăng nhập</button></div>`;
@@ -425,8 +431,8 @@ function startRewardWatcher(){
  rewardWatchTimer=setInterval(()=>{if(document.hidden)return;pollRewardSnapshot(false);},30000);
 }
 
-async function loadProfile(){
- try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();loadDisciples();loadChallenges();loadCodex();loadTienPhap();loadSpiritRankings();loadMansion();if(!Boolean(currentProfile?.mansion?.active))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadDanCac();loadBeastHouse();loadLinhPhap();loadEquipment();loadBicanh();loadProfessions();loadQuests();renderLegendEditor();}
+async function loadProfile(options={}){
+ try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);if(!Boolean(currentProfile?.mansion?.active))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}if(!options.bootstrap){loadFriends();loadDisciples();loadChallenges();loadCodex();loadTienPhap();loadSpiritRankings();loadMansion();if(!Boolean(currentProfile?.mansion?.active))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadDanCac();loadBeastHouse();loadLinhPhap();loadEquipment();loadBicanh();loadProfessions();loadQuests();renderLegendEditor();}}
  catch(e){if(e.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}}
 }
 function renderProfile(p){
@@ -1064,7 +1070,7 @@ async function loadLeaderboard(){
 }
 
 async function loadWealth(){
- try{const [d,p]=await Promise.all([api('/api/wealth'),api('/api/profile')]);const rows=d.rows||[], me=Boolean(p.profile?.wealth_public);$('#wealthArea').innerHTML=`<div class="wealth-control"><div><span class="eyebrow">💎 TÀI PHÚ CÁ NHÂN</span><h3>Hiển thị số lượng linh thạch</h3><p>Mặc định: <b>??? Linh thạch</b>. Chỉ khi tự bật công khai, bảng mới hiển thị con số.</p></div><label class="wealth-switch"><input id="wealthPublicToggle" type="checkbox" ${me?'checked':''}><span>${me?'🌟 Công khai':'🔒 Đang ẩn'}</span></label></div><div class="wealth-table"><div class="wealth-head"><span>#</span><span>Môn nhân</span><span>Cảnh giới</span><span>💎 Linh thạch</span></div>${rows.map(x=>`<div class="wealth-row ${x.rankNo===1?'wealth-top-1':''}"><b class="leader-no ${x.rankNo<=3?'medal':''}">${x.rankNo}</b><div class="leader-name"><span class="mini-avatar">${avatarHtml(x.avatar,'',realmIndexOf(x.rank),0)}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.title)}</small></div></div><span class="rank-chip">${esc(x.rank)}</span><b>${x.wealthPublic?Number(x.spiritStones||0).toLocaleString('vi-VN'):'???'} Linh thạch</b></div>`).join('')||'<div class="empty-state compact"><p>Chưa có môn nhân.</p></div>'}</div><p id="wealthMsg" class="train-msg"></p>`;$('#wealthPublicToggle').onchange=async e=>{try{const x=await api('/api/wealth/privacy',{method:'PATCH',headers:authHeaders(),body:JSON.stringify({public:e.target.checked})});$('#wealthMsg').textContent='✓ '+x.message;await loadWealth();}catch(err){e.target.checked=!e.target.checked;$('#wealthMsg').textContent='❌ '+err.message;}}; }catch(e){$('#wealthArea').innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
+ try{const d=await api('/api/wealth');const rows=d.rows||[], me=Boolean(currentProfile?.wealth_public);$('#wealthArea').innerHTML=`<div class="wealth-control"><div><span class="eyebrow">💎 TÀI PHÚ CÁ NHÂN</span><h3>Hiển thị số lượng linh thạch</h3><p>Mặc định: <b>??? Linh thạch</b>. Chỉ khi tự bật công khai, bảng mới hiển thị con số.</p></div><label class="wealth-switch"><input id="wealthPublicToggle" type="checkbox" ${me?'checked':''}><span>${me?'🌟 Công khai':'🔒 Đang ẩn'}</span></label></div><div class="wealth-table"><div class="wealth-head"><span>#</span><span>Môn nhân</span><span>Cảnh giới</span><span>💎 Linh thạch</span></div>${rows.map(x=>`<div class="wealth-row ${x.rankNo===1?'wealth-top-1':''}"><b class="leader-no ${x.rankNo<=3?'medal':''}">${x.rankNo}</b><div class="leader-name"><span class="mini-avatar">${avatarHtml(x.avatar,'',realmIndexOf(x.rank),0)}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.title)}</small></div></div><span class="rank-chip">${esc(x.rank)}</span><b>${x.wealthPublic?Number(x.spiritStones||0).toLocaleString('vi-VN'):'???'} Linh thạch</b></div>`).join('')||'<div class="empty-state compact"><p>Chưa có môn nhân.</p></div>'}</div><p id="wealthMsg" class="train-msg"></p>`;$('#wealthPublicToggle').onchange=async e=>{try{const x=await api('/api/wealth/privacy',{method:'PATCH',headers:authHeaders(),body:JSON.stringify({public:e.target.checked})});$('#wealthMsg').textContent='✓ '+x.message;await loadWealth();}catch(err){e.target.checked=!e.target.checked;$('#wealthMsg').textContent='❌ '+err.message;}}; }catch(e){$('#wealthArea').innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
 function preparePostImage(file){
@@ -1412,10 +1418,10 @@ function renderAuth(mode){
  const register=mode==='register';
  $('#accountContent').innerHTML=`<div class="auth-title">寒天門</div><div class="auth-sub">Ghi danh môn nhân · Dữ liệu được lưu trong PostgreSQL</div><div class="tabs"><button class="tab ${!register?'active':''}" data-mode="login">Đăng nhập</button><button class="tab ${register?'active':''}" data-mode="register">Đăng ký</button></div><form id="authForm" class="auth-form"><div class="field ${register?'':'hidden'}"><label>Danh xưng</label><input id="displayName" maxlength="40" ${register?'required':''} placeholder="Tên hiển thị"></div><div class="field"><label>Tên tài khoản</label><input id="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="tu_tien_01"></div><div class="field"><label>Mật khẩu</label><input id="password" type="password" required minlength="6" autocomplete="current-password" placeholder="Ít nhất 6 ký tự"></div><button class="btn primary" type="submit">${register?'Ghi danh vào sơn môn':'Nhập môn'}</button><div id="authMsg" class="auth-msg"></div></form>`;
  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>renderAuth(b.dataset.mode));
- $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile();
-// loadProfile đã khởi động các module hồ sơ/công pháp/động phủ/kho chính.
+ $('#authForm').onsubmit=async e=>{e.preventDefault();const msg=$('#authMsg');msg.textContent='Đang xử lý...';const body={username:$('#username').value.trim(),password:$('#password').value};if(register)body.displayName=$('#displayName').value.trim();try{if(register){await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});msg.textContent='Ghi danh thành công. Đang mở cổng nhập môn...';setTimeout(()=>renderAuth('login'),500);}else{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});localStorage.setItem(tokenKey,d.token);accountUI(d.user);$('#accountModal').close();await loadProfile({bootstrap:true});
+// Chỉ tải các module sau khi hồ sơ cơ bản đã sẵn sàng.
 // Chỉ tải các module chưa được khởi động ở đây và chạy song song để giảm thời gian đăng nhập.
-await Promise.all([loadChat(),loadMailbox(),loadSectPosts(),loadLeaderboard(),loadDanDuong(),loadDuocDuong(),loadBeastFace(),loadDuongThu(),loadBeastArena(),loadTuDi(),loadMarket(),loadBlackMarket(),loadData(),loadArenaLive()]);
+await Promise.allSettled([loadChat(),loadMailbox(),loadSectPosts(),loadLeaderboard(),loadDanDuong(),loadDuocDuong(),loadBeastFace(),loadDuongThu(),loadBeastArena(),loadTuDi(),loadMarket(),loadBlackMarket(),loadData(),loadArenaLive(),loadWealth(),loadTienBan(),loadTienKhiEnhance(),loadProfessions(),loadQuests(),loadTavern(),loadChallenges()]);
 maybeShowTutorial();}}catch(err){msg.textContent=err.message;}};
  $('#accountModal').showModal();
 }
@@ -1457,14 +1463,26 @@ $('#menuBtn').onclick=()=>$('#nav').classList.toggle('open');document.querySelec
 if(localStorage.getItem('theme')==='dark'){document.body.classList.add('dark');$('#themeBtn').textContent='☀';}
 if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('color-flow');$('#colorModeBtn').textContent='✨';}
 setupTutorial();
+// Giảm tải GPU/CPU trên thiết bị yếu: tắt animation không cần thiết khi người dùng bật Reduce Motion.
+if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)document.documentElement.classList.add('reduce-motion');
 
 loadData();loadSect();checkSession();startRewardWatcher();
-setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();loadWealth();}},180000);
-setInterval(()=>{if(getToken()&&!document.hidden){loadGlobalAnnouncement();loadRedPackets();}},2000);
-setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},20000);
+setInterval(()=>{
+ if(!getToken()||document.hidden)return;
+ if(isSectionVisible('chat')) loadChat();
+ if(isSectionVisible('members')||isSectionVisible('xuatquan')) loadData();
+ if(isSectionVisible('mailbox')) loadMailbox();
+ if(isSectionVisible('arena-live')) loadArenaLive();
+ if(isSectionVisible('challenge')) loadChallenges();
+ if(isSectionVisible('wealth')) loadWealth();
+},60000);
+// Thông báo toàn sơn môn cần phản hồi nhanh, nhưng tránh 2 request/giây/mỗi người.
+setInterval(()=>{if(getToken()&&!document.hidden)loadGlobalAnnouncement();},5000);
+setInterval(()=>{if(getToken()&&!document.hidden&&isSectionVisible('chat'))loadRedPackets();},5000);
+setInterval(()=>{if(getToken()&&!document.hidden&&isSectionVisible('challenge'))pollChallengeAnnouncement();},20000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
 
-/* v3.7.33 · Fix cache bust cho các chức năng Tiên Bàn / Lì Xì / Tài Phú */
+/* v3.7.34 · Tối ưu tải module + giảm polling + giảm tải GPU */
 /* v3.6.47 · Điều hướng tập trung theo từng chức năng */
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');

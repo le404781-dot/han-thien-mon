@@ -1865,3 +1865,10 @@ body.function-only-focus .tien-khi-enhance-section.focus-active{
 @keyframes wealthHalo{from{transform:translate(-50%,-50%) rotate(0deg) scale(.92)}to{transform:translate(-50%,-50%) rotate(360deg) scale(1.04)}}@keyframes wealthAvatarPulse{0%,100%{transform:scale(1);filter:brightness(1)}50%{transform:scale(1.08);filter:brightness(1.18)}}@keyframes coinOrbit{0%{transform:translateX(-50%) rotate(-5deg) translateY(0)}50%{transform:translateX(-50%) rotate(5deg) translateY(-5px)}100%{transform:translateX(-50%) rotate(-5deg) translateY(0)}}@keyframes redPacketFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-4px) rotate(2deg)}}
 .tien-ban-daily-limit{margin:10px 0;padding:9px 12px;border:1px solid var(--line);background:var(--surface);font-size:.75rem;color:var(--muted);text-align:center}.tien-ban-daily-limit b{color:var(--gold)}
 @media(max-width:620px){.chat-tools{align-items:flex-start}.red-packet-fields{grid-template-columns:1fr}.red-packet-card{grid-template-columns:36px minmax(0,1fr)}.red-packet-card .btn{grid-column:2;justify-self:start}.global-announcement-toast{top:64px;min-width:88vw}.wealth-row.wealth-top-1::before{left:25px}}
+
+/* v3.7.34 · PERFORMANCE */
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+@media (max-width:700px){.mist{display:none!important}.topbar{backdrop-filter:none;-webkit-backdrop-filter:none}dialog::backdrop{backdrop-filter:none;-webkit-backdrop-filter:none}}
+
+/* v3.7.34 · CONTENT-VISIBILITY */
+@media (min-width:701px){.section{content-visibility:auto;contain-intrinsic-size:720px}.members-grid,.gallery-grid,.sect-post-list{contain:layout paint}}
