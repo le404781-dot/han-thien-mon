@@ -2132,6 +2132,15 @@ async function initDb() {
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
   }
 
+
+  // v3.7.50: Reytheon -> Tiên Đế 12 Tinh chính xác.
+  const reytheonRealmMigration='v3.7.50_reytheon_tien_de_12_tinh';
+  if((await query('SELECT 1 FROM app_migrations WHERE id=$1',[reytheonRealmMigration])).rowCount===0){
+    const exactSpirit=RANK_MINS[TIEN_DE_REALM_INDEX]+(12-1)*TIEN_DE_STAR_SIZE;
+    await query(`UPDATE profiles p SET spirit_power=$2,rank='Tiên Đế',realm_tier=12,updated_at=NOW() FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)`,['Reytheon',exactSpirit]);
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[reytheonRealmMigration]);
+    console.log(`[DB] ${reytheonRealmMigration}: Reytheon = Tiên Đế 12 Tinh.`);
+  }
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
@@ -5777,6 +5786,8 @@ function battleSnapshot(row,viewerId){
     lastDamage:Number(row.last_damage)||0,
     lastAction:row.last_action||'',
     startedAt:row.started_at,
+    challengerPos:Number(row.challenger_pos ?? 20),
+    opponentPos:Number(row.opponent_pos ?? 80),
     moveOptions
   };
 }
@@ -6304,6 +6315,8 @@ async function ensureChallengeSchemaImpl(){
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_moves JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_moves JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action_token TEXT NOT NULL DEFAULT '';
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_pos INTEGER NOT NULL DEFAULT 20;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_pos INTEGER NOT NULL DEFAULT 80;
     CREATE INDEX IF NOT EXISTS idx_challenge_requests_challenger_status
       ON challenge_requests(challenger_id,status,mode,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_requests_opponent_status
@@ -6319,7 +6332,7 @@ app.get('/api/challenges/online/state',auth,async(req,res)=>{
     const uid=req.session.user_id;
     const row=(await query(`SELECT cr.id,cr.status,cr.challenger_id,cr.opponent_id,
         cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,
-        cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,cr.challenger_moves,cr.opponent_moves,
+        cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,cr.challenger_moves,cr.opponent_moves,cr.challenger_pos,cr.opponent_pos,
         cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,
         cp.spirit_power AS challenger_spirit,
         ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,
@@ -6376,7 +6389,7 @@ app.get('/api/challenges',auth,async(req,res)=>{
              FROM challenge_requests cr JOIN users cu ON cu.id=cr.challenger_id JOIN users ou ON ou.id=cr.opponent_id
              LEFT JOIN treasure_items ri ON ri.id=cr.reward_item_id
              WHERE cr.challenger_id=$1 OR cr.opponent_id=$1 ORDER BY cr.id DESC LIMIT 30`,[uid]),
-      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.status,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,cr.challenger_moves,cr.opponent_moves,
+      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.status,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,cr.challenger_moves,cr.opponent_moves,cr.challenger_pos,cr.opponent_pos,
                     cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,cp.spirit_power AS challenger_spirit,
                     ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,op.spirit_power AS opponent_spirit
              FROM challenge_requests cr
@@ -6485,10 +6498,10 @@ app.post('/api/challenges/online/respond',auth,async(req,res)=>{
     const protection=await consumeDiscipleChallengePermission(client,Number(reqRow.challenger_id),Number(reqRow.opponent_id),true);
     if(!protection.allowed){await client.query('ROLLBACK');return res.status(403).json({error:protection.error,protected:true,mentorId:protection.mentor?.mentor_id,mentorName:protection.mentor?.mentor_name,discipleId:Number(reqRow.opponent_id)});}
     const challengerMax=challengeHealth(challenger), opponentMax=challengeHealth(opponent);
-    await client.query(`UPDATE challenge_requests SET status='accepted',challenger_hp=$2,opponent_hp=$3,challenger_max_hp=$4,opponent_max_hp=$5,turn_user_id=$6,round_number=0,last_actor_id=NULL,last_damage=0,last_action='',challenger_moves=$7::jsonb,opponent_moves=$8::jsonb,started_at=NOW(),responded_at=NOW() WHERE id=$1`,[requestId,challengerMax,opponentMax,challengerMax,opponentMax,challenger.id,JSON.stringify(challengerMoves),JSON.stringify(opponentMoves)]);
+    await client.query(`UPDATE challenge_requests SET status='accepted',challenger_hp=$2,opponent_hp=$3,challenger_max_hp=$4,opponent_max_hp=$5,turn_user_id=$6,round_number=0,last_actor_id=NULL,last_damage=0,last_action='',challenger_moves=$7::jsonb,opponent_moves=$8::jsonb,challenger_pos=20,opponent_pos=80,started_at=NOW(),responded_at=NOW() WHERE id=$1`,[requestId,challengerMax,opponentMax,challengerMax,opponentMax,challenger.id,JSON.stringify(challengerMoves),JSON.stringify(opponentMoves)]);
     await client.query('COMMIT');
     res.set('Cache-Control','no-store');
-    res.json({ok:true,status:'accepted',battle:{id:requestId,challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:challengerMax,opponentHp:opponentMax,challengerMaxHp:challengerMax,opponentMaxHp:opponentMax,turnUserId:Number(challenger.id),yourTurn:Number(challenger.id)===uid,round:0,lastDamage:0,lastAction:'',challengerName:challenger.display_name,opponentName:opponent.display_name,moveOptions:Number(challenger.id)===uid?challengerMoves:opponentMoves},message:`Lôi đài đã khai mở. ${challenger.display_name} ra chiêu trước.`});
+    res.json({ok:true,status:'accepted',battle:{id:requestId,challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:challengerMax,opponentHp:opponentMax,challengerMaxHp:challengerMax,opponentMaxHp:opponentMax,turnUserId:Number(challenger.id),yourTurn:Number(challenger.id)===uid,round:0,lastDamage:0,lastAction:'',challengerPos:20,opponentPos:80,challengerName:challenger.display_name,opponentName:opponent.display_name,moveOptions:Number(challenger.id)===uid?challengerMoves:opponentMoves},message:`Lôi đài đã khai mở. ${challenger.display_name} ra chiêu trước.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge respond:',e);res.status(500).json({error:'Lôi đài online thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });
@@ -6621,6 +6634,31 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       targetUserId:Number(defender.id),targetHpBefore,targetHpAfter,
       message:`${attacker.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương. ${defender.display_name} còn ${targetHpAfter.toLocaleString('vi-VN')} HP. Đến lượt ${defender.display_name}.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge action:',e);res.status(500).json({error:'Không thể tung tuyệt chiêu. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
+});
+
+
+app.post('/api/challenges/online/move',auth,async(req,res)=>{
+  await ensureChallengeSchema();
+  const client=await dbConnect();
+  try{
+    const uid=req.session.user_id,requestId=Number(req.body?.requestId),direction=String(req.body?.direction||'').toLowerCase();
+    if(!Number.isInteger(requestId)||!['left','right','center'].includes(direction)) return res.status(400).json({error:'Hướng di chuyển không hợp lệ.'});
+    await client.query('BEGIN');
+    const battle=(await client.query(`SELECT * FROM challenge_requests WHERE id=$1 AND mode='online' AND status='accepted' AND (challenger_id=$2 OR opponent_id=$2) FOR UPDATE`,[requestId,uid])).rows[0];
+    if(!battle){await client.query('ROLLBACK');return res.status(404).json({error:'Lôi đài không còn hoạt động.'});}
+    const isC=Number(uid)===Number(battle.challenger_id);
+    let pos=Number(isC?battle.challenger_pos:battle.opponent_pos);
+    if(!Number.isFinite(pos)) pos=isC?20:80;
+    const step=direction==='left'?-10:direction==='right'?10:0;
+    pos=Math.max(10,Math.min(90,direction==='center'?(isC?20:80):pos+step));
+    const col=isC?'challenger_pos':'opponent_pos';
+    await client.query(`UPDATE challenge_requests SET ${col}=$2 WHERE id=$1 AND status='accepted'`,[requestId,pos]);
+    const saved=(await client.query(`SELECT challenger_pos,opponent_pos FROM challenge_requests WHERE id=$1`,[requestId])).rows[0];
+    await client.query('COMMIT');
+    res.set('Cache-Control','no-store');
+    res.json({ok:true,challengerPos:Number(saved.challenger_pos)||20,opponentPos:Number(saved.opponent_pos)||80});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge move:',e);res.status(500).json({error:'Không thể di chuyển trong lôi đài.'});}
   finally{client.release();}
 });
 
