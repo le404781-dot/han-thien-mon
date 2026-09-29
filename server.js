@@ -2096,13 +2096,14 @@ async function initDb() {
           SET spirit_power=$2::BIGINT,
               rank=$3,
               realm_tier=$4::INTEGER,
-              spirit_root_foundation=$5::INTEGER,
+              position=$5,
+              spirit_root_foundation=$6::INTEGER,
               spirit_root_injury_until=NULL,
               updated_at=NOW()
           FROM users u
           WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)
-          RETURNING p.user_id,p.spirit_power,p.rank,p.realm_tier
-        `,[username,clampSpiritPower(spiritPower),rank,tier,fMax]);
+          RETURNING p.user_id,p.spirit_power,p.rank,p.realm_tier,p.position
+        `,[username,clampSpiritPower(spiritPower),rank,tier,defaultPositionFor(realmIndex),fMax]);
         if(result.rowCount!==1) throw new Error(`Không tìm thấy hồ sơ môn nhân: ${username}`);
         repaired.push({username,...result.rows[0]});
       }
