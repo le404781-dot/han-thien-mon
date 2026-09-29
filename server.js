@@ -78,6 +78,9 @@ async function ensureRuntimeSchemaImpl(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_immortal_artifact_buff_value INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_immortal_artifact_spirit_bonus INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS comprehension INTEGER NOT NULL DEFAULT 8;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root_foundation INTEGER NOT NULL DEFAULT 100;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root_injury_until TIMESTAMPTZ;
+    UPDATE profiles SET spirit_root_foundation=COALESCE(NULLIF(spirit_root_foundation,0),100) WHERE spirit_root_injury_until IS NULL;
     CREATE TABLE IF NOT EXISTS immortal_artifact_enhancements (
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE CASCADE,
@@ -491,6 +494,31 @@ function stageFor(spirit) {
   const span=r.max-r.min+1;
   const tier=Math.min(9, Math.floor(((spirit-r.min)*9)/span)+1);
   return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1],maxTier:9};
+}
+
+const SPIRIT_ROOT_FOUNDATION_RECOVERY_MINUTES = 60;
+function foundationMaxForStage(stage){ return Math.max(100,100+Number(stage?.realmIndex||0)*20); }
+async function settleSpiritRootFoundation(client,userId){
+  const row=(await client.query(`SELECT spirit_power,spirit_root_foundation,spirit_root_injury_until FROM profiles WHERE user_id=$1 FOR UPDATE`,[userId])).rows[0];
+  if(!row) return null;
+  const stage=stageFor(Number(row.spirit_power)||0), max=foundationMaxForStage(stage);
+  let current=Number(row.spirit_root_foundation);
+  if(!Number.isFinite(current)) current=max;
+  if(row.spirit_root_injury_until && new Date(row.spirit_root_injury_until)<=new Date()){
+    current=max;
+    await client.query(`UPDATE profiles SET spirit_root_foundation=$2,spirit_root_injury_until=NULL,updated_at=NOW() WHERE user_id=$1`,[userId,max]);
+    return {current:max,max,injured:false,recovered:true};
+  }
+  current=Math.max(0,Math.min(max,current));
+  return {current,max,injured:Boolean(row.spirit_root_injury_until),injuryUntil:row.spirit_root_injury_until||null,recovered:false};
+}
+async function requireSpiritRootHealthy(client,userId){
+  const f=await settleSpiritRootFoundation(client,userId);
+  if(f?.injured){
+    const until=new Date(f.injuryUntil).toLocaleString('vi-VN',{timeZone:'Asia/Ho_Chi_Minh'});
+    throw Object.assign(new Error(`Căn cơ đang bị nội thương. Linh lực bị khóa đến ${until}.`),{statusCode:423,rootInjury:true});
+  }
+  return f;
 }
 function rankFor(spirit) { return RANKS[realmIndexFor(spirit)]; }
 
@@ -2147,6 +2175,25 @@ async function ensureProfile(userId) {
   await query('INSERT INTO profiles(user_id,storage_capacity) VALUES($1,30) ON CONFLICT (user_id) DO UPDATE SET storage_capacity=GREATEST(COALESCE(profiles.storage_capacity,30),30)', [userId]);
   const p=(await query('SELECT spirit_power,spirit_root,spirit_beast,gacha_claimed FROM profiles WHERE user_id=$1',[userId])).rows[0];
   const stage=stageFor(Number(p.spirit_power)||0);
+  const foundationMax=foundationMaxForStage(stage);
+  // Tự kết thúc nội thương khi đủ thời gian hồi phục, để hồ sơ/Tu Di Giới
+  // phản ánh trạng thái mới ngay cả khi môn nhân chưa thực hiện hành động tu luyện.
+  await query(`
+    UPDATE profiles
+    SET spirit_root_foundation=CASE
+          WHEN spirit_root_injury_until IS NOT NULL AND spirit_root_injury_until<=NOW() THEN $2
+          ELSE COALESCE(NULLIF(spirit_root_foundation,0),100)
+        END,
+        spirit_root_injury_until=CASE
+          WHEN spirit_root_injury_until IS NOT NULL AND spirit_root_injury_until<=NOW() THEN NULL
+          ELSE spirit_root_injury_until
+        END,
+        updated_at=CASE
+          WHEN spirit_root_injury_until IS NOT NULL AND spirit_root_injury_until<=NOW() THEN NOW()
+          ELSE updated_at
+        END
+    WHERE user_id=$1
+  `,[userId,foundationMax]);
   // Existing accounts from v2.8 already have a roll; lock it. New accounts get one roll only.
   const claimed = Boolean(p.gacha_claimed) || Boolean(p.spirit_root) || Boolean(p.spirit_beast);
   const rootRarity=p.spirit_root ? inferRootRarity(p.spirit_root) : null;
@@ -2170,9 +2217,11 @@ async function ensureProfile(userId) {
 }
 
 async function settleMansionIncome(client, userId){
+  const foundation=await settleSpiritRootFoundation(client,userId);
   const row=(await client.query(`SELECT um.active,um.last_tick_at,m.spirit_per_hour,m.name,m.grade
     FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1 FOR UPDATE`,[userId])).rows[0];
-  if(!row) return {gain:0,active:false};
+  if(!row) return {gain:0,active:false,foundation};
+  if(foundation?.injured) return {gain:0,active:Boolean(row.active),name:row.name,grade:row.grade,rate:Number(row.spirit_per_hour)||0,foundation};
   if(!row.active){ await client.query(`UPDATE user_mansions SET last_tick_at=NOW() WHERE user_id=$1`,[userId]); return {gain:0,active:false,name:row.name,grade:row.grade,rate:Number(row.spirit_per_hour)||0}; }
   const elapsed=Math.max(0,Date.now()-new Date(row.last_tick_at).getTime());
   const hours=Math.floor(elapsed/3600000);
@@ -2652,6 +2701,7 @@ app.post('/api/tavern/consume',auth,async(req,res)=>{
     const uid=req.session.user_id, productId=Number(req.body?.productId);
     if(!productId)return res.status(400).json({error:'Túy phẩm không hợp lệ.'});
     await client.query('BEGIN');
+    await requireSpiritRootHealthy(client,uid);
     const row=(await client.query(`SELECT i.quantity,p.id,p.name,p.grade,p.buff_min,p.buff_max
       FROM tavern_inventory i JOIN tavern_products p ON p.id=i.product_id
       WHERE i.user_id=$1 AND i.product_id=$2 FOR UPDATE`,[uid,productId])).rows[0];
@@ -2890,6 +2940,8 @@ app.get('/api/profile',auth,async(req,res)=>{
       COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count
       FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[req.session.user_id]);
     const p=r.rows[0];
+    const foundationStage=stageFor(Number(p.spirit_power)||0);
+    p.spirit_root_foundation_max=foundationMaxForStage(foundationStage);
     await ensureAchievements(p.id,p.spirit_power);
     const stage=stageFor(p.spirit_power);
     const eq=(await query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,p.equipped_immortal_technique_id,p.equipped_immortal_artifact_id,p.equipped_immortal_artifact_buff_type,p.equipped_immortal_artifact_buff_value,p.equipped_immortal_artifact_spirit_bonus,
@@ -2934,7 +2986,7 @@ app.get('/api/profile',auth,async(req,res)=>{
 
     if(!isTavernOwner && !allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
     const auraRank=(await sectAuraRankMap()).get(Number(p.id))||0;
-    res.json({profile:{...p,auraRank,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,equippedImmortalTechniqueId:p.equipped_immortal_technique_id?Number(p.equipped_immortal_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null,immortalArtifact:eq.equipped_immortal_artifact_id?{id:eq.equipped_immortal_artifact_id,name:eq.immortal_artifact_name,power:Number(eq.immortal_artifact_power)||0,ability:eq.immortal_artifact_ability,category:eq.immortal_artifact_category,grade:eq.immortal_artifact_grade,avatar:eq.immortal_artifact_avatar,spiritGain:Number(eq.immortal_artifact_spirit_gain)||0,buffType:p.equipped_immortal_artifact_buff_type||'',buffValue:Number(p.equipped_immortal_artifact_buff_value)||0,spiritBonus:Number(p.equipped_immortal_artifact_spirit_bonus)||0}:null,immortal:eq.equipped_immortal_technique_id?{id:eq.equipped_immortal_technique_id,name:eq.immortal_name,power:Number(eq.immortal_power)||0,ability:eq.immortal_ability,grade:eq.immortal_grade}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:999999999}});
+    res.json({profile:{...p,auraRank,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,equippedImmortalTechniqueId:p.equipped_immortal_technique_id?Number(p.equipped_immortal_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null,immortalArtifact:eq.equipped_immortal_artifact_id?{id:eq.equipped_immortal_artifact_id,name:eq.immortal_artifact_name,power:Number(eq.immortal_artifact_power)||0,ability:eq.immortal_artifact_ability,category:eq.immortal_artifact_category,grade:eq.immortal_artifact_grade,avatar:eq.immortal_artifact_avatar,spiritGain:Number(eq.immortal_artifact_spirit_gain)||0,buffType:p.equipped_immortal_artifact_buff_type||'',buffValue:Number(p.equipped_immortal_artifact_buff_value)||0,spiritBonus:Number(p.equipped_immortal_artifact_spirit_bonus)||0}:null,immortal:eq.equipped_immortal_technique_id?{id:eq.equipped_immortal_technique_id,name:eq.immortal_name,power:Number(eq.immortal_power)||0,ability:eq.immortal_ability,grade:eq.immortal_grade}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,foundation:{current:Number(p.spirit_root_foundation??foundationMaxForStage(stage)),max:foundationMaxForStage(stage),injuryUntil:p.spirit_root_injury_until||null},trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:999999999}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -3146,6 +3198,7 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
   try {
     await client.query('BEGIN');
     const userId=req.session.user_id;
+    await requireSpiritRootHealthy(client,userId);
     const mansionState=await settleMansionIncome(client,userId);
     if(mansionState.active){await client.query('ROLLBACK');return res.status(423).json({error:`Động phủ ${mansionState.name} đang khởi động. Vận công bị khóa hoàn toàn cho đến khi bạn ngưng động phủ.`});}
     const today=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
@@ -3175,7 +3228,7 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     await ensureAchievements(userId,spirit);
     const stoneReward=breakthroughRewards.reduce((sum,x)=>sum+Number(x.amount||0),0);
     res.json({gain,spirit,experience:r.rows[0].experience,progress:progressFor(spirit),rank:stage.realm,stage:stage.stage,trainCount:trainCount+1,maxDaily,breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${stage.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
-  } catch(e){try{await client.query('ROLLBACK')}catch{};console.error(e);res.status(500).json({error:'Không thể vận công lúc này.'});} finally{client.release();}
+  } catch(e){try{await client.query('ROLLBACK')}catch{};console.error(e);res.status(e.statusCode||500).json({error:e.message||'Không thể vận công lúc này.',rootInjury:Boolean(e.rootInjury)});} finally{client.release();}
 });
 
 app.post('/api/cultivation/online',auth,async(req,res)=>{
@@ -3185,6 +3238,7 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
     const client=await pool.connect();
     try{
       await client.query('BEGIN');
+    await requireSpiritRootHealthy(client,req.session.user_id);
       const mansionState=await settleMansionIncome(client,req.session.user_id);
       if(mansionState.active){await client.query('COMMIT');return res.status(423).json({mode:'mansion',active:false,locked:true,gain:mansionState.gain,mansion:mansionState.name,message:`Động phủ ${mansionState.name} đang khởi động; tích lũy Online cũng bị khóa cho đến khi ngưng động phủ.`});}
       const p=(await client.query(`SELECT spirit_power,equipped_immortal_artifact_spirit_bonus,last_online_at,last_seen_at,presence_status,online_spirit_date,COALESCE(online_spirit_earned,0)::int AS online_spirit_earned,COALESCE(online_spirit_remainder_seconds,0)::int AS online_spirit_remainder_seconds FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
@@ -3223,7 +3277,7 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       const stoneReward=breakthroughRewards.reduce((sum,x)=>sum+Number(x.amount||0),0);
       res.json({mode:'online',active:presenceFresh,gain,onlineEarned:earned,dailyCap,rate,ratePerSecond:rate/60,ratePerHour:rate*60,realm:ns.realm,realmIndex:ns.realmIndex,stage:ns.stage,remainderSeconds:remainder,elapsedSeconds,secondsPerGain,nextTickSeconds:15,serverTime:Date.now(),onlineLabel:presenceFresh?'Đang xuất quan · tự động tụ linh theo thời gian thực':'Đang bế quan · chờ xuất quan',breakthroughRewards,stoneReward,message:stoneReward?`Đột phá ${ns.realm}! Nhận ${stoneReward.toLocaleString('vi-VN')} linh thạch để mở bí cảnh.`:undefined});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
-  }catch(e){console.error('online cultivation:',e);res.status(500).json({error:'Không thể cập nhật linh lực trực tuyến.'});}
+  }catch(e){console.error('online cultivation:',e);res.status(e.statusCode||500).json({error:e.message||'Không thể cập nhật linh lực trực tuyến.',rootInjury:Boolean(e.rootInjury)});}
 });
 
 
@@ -3383,7 +3437,7 @@ app.get('/api/storage',auth,async(req,res)=>{
     const beasts=(await query(`SELECT o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.power_bonus,c.ability,c.default_avatar FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.id`,[req.session.user_id])).rows;
     const roots=(await query(`SELECT o.root_id,o.quantity,c.name,c.rarity,c.description,c.support,c.power_bonus,c.ability FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.power_bonus DESC,c.id`,[req.session.user_id])).rows;
     const used=r.rows.length+beasts.length+roots.length, capacity=Math.max(1,Number(p?.storage_capacity)||30);
-    res.json({rows:r.rows,beasts,roots,used,capacity,spiritRoot:p?.spirit_root||null,spiritBeast:p?.spirit_beast||null,spiritPower:Number(p?.spirit_power)||0});
+    const fs=stageFor(Number(p?.spirit_power)||0), foundationMax=foundationMaxForStage(fs); res.json({rows:r.rows,beasts,roots,used,capacity,spiritRoot:p?.spirit_root||null,spiritBeast:p?.spirit_beast||null,spiritPower:Number(p?.spirit_power)||0,foundation:{current:Number(p?.spirit_root_foundation??foundationMax),max:foundationMax,injuryUntil:p?.spirit_root_injury_until||null}});
   }catch(e){console.error('storage:',e);res.status(500).json({error:'Không thể mở Tu Di Giới mới.'});}
 });
 
@@ -3399,6 +3453,7 @@ app.post('/api/storage/use',auth,async(req,res)=>{
       WHERE i.user_id=$1 AND ti.id=$2 FOR UPDATE`,[req.session.user_id,itemId]);
     if(!r.rows.length||Number(r.rows[0].quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Số lượng vật phẩm trong Tu Di Giới không đủ.'});}
     const item=r.rows[0];
+    const foundation=await requireSpiritRootHealthy(client,req.session.user_id);
     let gain=Number(item.spirit_gain)||0;
     let buffText='';
     // Tửu Lâu túy phẩm được lưu trong Tu Di Giới nhưng hiệu quả vẫn lấy từ bản gốc.
@@ -3411,13 +3466,29 @@ app.post('/api/storage/use',auth,async(req,res)=>{
       }
     }
     if(gain<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Vật phẩm này không thể sử dụng trực tiếp.'});}
+    let foundationAfter=foundation;
+    const isDanDuoc=String(item.category||'').toLowerCase().includes('đan dược');
+    if(isDanDuoc){
+      const loss=Math.min(foundation.current,Math.max(1,qty));
+      const next=Math.max(0,foundation.current-loss);
+      const injured=next<=0;
+      const until=injured?new Date(Date.now()+SPIRIT_ROOT_FOUNDATION_RECOVERY_MINUTES*60000):null;
+      foundationAfter={current:next,max:foundation.max,injured,injuryUntil:until};
+      if(injured){
+        await client.query(`UPDATE profiles SET spirit_root_foundation=0,spirit_root_injury_until=$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,until]);
+        await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[req.session.user_id,itemId,qty]);
+        await client.query('COMMIT');
+        return res.status(423).json({error:'Căn cơ đã cạn kiệt, phát sinh nội thương. Linh lực bị khóa để hồi phục trong 60 phút.',rootInjury:true,foundation:{current:0,max:foundation.max,injured:true,injuryUntil:until}});
+      }
+      await client.query(`UPDATE profiles SET spirit_root_foundation=$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,next]);
+    }
     const nr=await client.query(`UPDATE profiles SET spirit_power=spirit_power+$2,experience=experience+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,
       [req.session.user_id,gain*qty]);
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,
       [req.session.user_id,itemId,qty]);
     await client.query('COMMIT');
-    res.json({ok:true,item:item.name,quantityUsed:qty,gained:gain*qty,spirit:Number(nr.rows[0].spirit_power),buffText});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('storage use:',e);res.status(500).json({error:'Không thể sử dụng vật phẩm.'});}
+    res.json({ok:true,item:item.name,quantityUsed:qty,gained:gain*qty,spirit:Number(nr.rows[0].spirit_power),buffText,foundation:foundationAfter});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('storage use:',e);res.status(e.statusCode||500).json({error:e.message||'Không thể sử dụng vật phẩm.',rootInjury:Boolean(e.rootInjury)});}
   finally{client.release();}
 });
 
@@ -3912,15 +3983,26 @@ function bondChanceFor(userSpirit){
 
 
 async function pickTienBanItem(client){
-  // Tiên Phẩm: đúng 0,002% mỗi lượt (1/50.000). Các phẩm khác dùng pool còn lại.
+  // v3.7.21: vật phẩm phẩm cấp cao khó rơi hơn 10 lần. Tiên Phẩm 0,002% vẫn giữ nguyên.
   const roll=Math.random();
   const rare=roll < 0.00002;
   const whereBase=`category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị'`;
   const sql=rare
     ? `SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} AND reward_grade='Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`
-    : `SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} AND COALESCE(reward_grade,'')<>'Tiên Phẩm' ORDER BY RANDOM() LIMIT 1`;
-  let item=(await client.query(sql)).rows[0];
-  // Nếu database cũ chưa có vật phẩm Tiên Phẩm, không làm hỏng lượt quay.
+    : `SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} AND COALESCE(reward_grade,'')<>'Tiên Phẩm'`;
+  let rows=(await client.query(sql)).rows;
+  let item=null;
+  if(rows.length){
+    const weight=(x)=>{
+      const g=String(x.reward_grade||'Hạ Đẳng');
+      const base=g.includes('Chí Cao')?1:g.includes('Chí Tôn')?2:g.includes('Tiên')?5:g.includes('Cực')?10:g.includes('Thượng')?20:g.includes('Trung')?45:100;
+      return base;
+    };
+    const weights=rows.map(weight),total=weights.reduce((a,b)=>a+b,0);
+    let r=Math.random()*total;
+    for(let i=0;i<rows.length;i++){r-=weights[i];if(r<=0){item=rows[i];break;}}
+    item=item||rows[rows.length-1];
+  }
   if(!item && rare){
     item=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase} ORDER BY RANDOM() LIMIT 1`)).rows[0];
   }
