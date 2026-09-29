@@ -2072,38 +2072,48 @@ async function initDb() {
     console.log(`[DB] ${spiritStonesCorrectionMigration}: đã đặt lại linh thạch chính xác.`);
   }
 
-  // v3.7.49: chuẩn hóa lại cảnh giới 5 môn nhân theo yêu cầu quản trị mới.
-  // Dùng giá trị tuyệt đối, không dùng GREATEST, để cả trường hợp dữ liệu cũ cao hơn
-  // cũng được đưa về đúng đại cảnh giới/tinh yêu cầu. Đồng thời đồng bộ Căn Cơ theo
-  // cảnh giới mới để không còn lệch giữa spirit_power và thanh Căn Cơ.
-  const realmCorrectionV3749='v3.7.49_set_member_realms_exact';
-  const realmCorrectionV3749Applied=(await query('SELECT 1 FROM app_migrations WHERE id=$1',[realmCorrectionV3749])).rowCount>0;
-  if(!realmCorrectionV3749Applied){
-    const exactRealmRows=[
-      ['ho_linh_15','Tiên Đế',17,1,RANK_MINS[17]],
-      ['Reytheon','Tiên Đế',17,14,RANK_MINS[17]+(14-1)*TIEN_DE_STAR_SIZE],
-      ['Cuu_Vi_Ho','Tiên Đế',17,5,RANK_MINS[17]+(5-1)*TIEN_DE_STAR_SIZE],
-      ['wutati','Thiên Tiên',12,1,RANK_MINS[12]],
-      ['libais','Thiên Tiên',12,1,RANK_MINS[12]]
-    ];
+  // v3.7.50: FORCE-REPAIR cảnh giới môn nhân.
+  // Không phụ thuộc app_migrations: nếu database đang sai thì MỖI lần khởi động
+  // đều kiểm tra và đưa 5 tài khoản về đúng giá trị quản trị yêu cầu.
+  // Đây là sửa trực tiếp bảng profiles — database là nguồn dữ liệu cuối cùng.
+  const realmForceRepairMigration='v3.7.50_force_member_realms_exact';
+  const exactRealmRowsV3750=[
+    ['ho_linh_15','Tiên Đế',17,1,RANK_MINS[17]],
+    ['Reytheon','Tiên Đế',17,14,RANK_MINS[17]+(14-1)*TIEN_DE_STAR_SIZE],
+    ['Cuu_Vi_Ho','Tiên Đế',17,5,RANK_MINS[17]+(5-1)*TIEN_DE_STAR_SIZE],
+    ['wutati','Thiên Tiên',12,1,RANK_MINS[12]],
+    ['libais','Thiên Tiên',12,1,RANK_MINS[12]]
+  ];
+  {
     const client=await dbConnect();
     try{
       await client.query('BEGIN');
-      for(const [username,rank,realmIndex,tier,spiritPower] of exactRealmRows){
+      const repaired=[];
+      for(const [username,rank,realmIndex,tier,spiritPower] of exactRealmRowsV3750){
         const fMax=foundationMaxForStage({realmIndex});
         const result=await client.query(`
           UPDATE profiles p
-          SET spirit_power=$2, rank=$3, realm_tier=$4,
-              spirit_root_foundation=$5,
-              spirit_root_injury_until=NULL, updated_at=NOW()
+          SET spirit_power=$2::BIGINT,
+              rank=$3,
+              realm_tier=$4::INTEGER,
+              spirit_root_foundation=$5::INTEGER,
+              spirit_root_injury_until=NULL,
+              updated_at=NOW()
           FROM users u
           WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)
+          RETURNING p.user_id,p.spirit_power,p.rank,p.realm_tier
         `,[username,clampSpiritPower(spiritPower),rank,tier,fMax]);
         if(result.rowCount!==1) throw new Error(`Không tìm thấy hồ sơ môn nhân: ${username}`);
+        repaired.push({username,...result.rows[0]});
       }
-      await client.query('INSERT INTO app_migrations(id) VALUES($1)',[realmCorrectionV3749]);
+      await client.query(`
+        INSERT INTO app_migrations(id) VALUES($1)
+        ON CONFLICT(id) DO UPDATE SET applied_at=NOW()
+      `,[realmForceRepairMigration]);
       await client.query('COMMIT');
-      console.log(`[DB] ${realmCorrectionV3749}: đã đặt lại cảnh giới + Căn Cơ cho 5 môn nhân.`);
+      __dataCache=null;
+      __dataCacheAt=0;
+      console.log(`[DB] ${realmForceRepairMigration}: đã FORCE-REPAIR cảnh giới 5 môn nhân: ${repaired.map(x=>`${x.username}=${x.rank} ${x.realm_tier} / ${x.spirit_power}`).join(', ')}`);
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
   }
 
