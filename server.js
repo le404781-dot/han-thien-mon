@@ -8,7 +8,7 @@ const app = express();
 // HTTP performance: nén Brotli/Gzip có chọn lọc cho payload đủ lớn.
 // Ngưỡng 1 KB tránh tốn CPU cho response nhỏ; compression tự đàm phán
 // Brotli/Gzip theo Accept-Encoding của trình duyệt.
-app.use(compression({ threshold: 2048, level: 4 }));
+app.use(compression({ threshold: 1024, level: 6 }));
 // Render Web Service: always bind to the injected PORT on all interfaces.
 const PORT = Number(process.env.PORT) || 10000;
 const HOST = '0.0.0.0';
@@ -1073,10 +1073,7 @@ async function ensureAlchemySchema(){
   return __ensureAlchemySchemaPromise;
 }
 async function ensureAlchemySchemaImpl(){
-  // Schema nền của Đan Pháp đã được tạo trong initDb(). Không gọi lại
-  // ensureVenueRoleSchema() khi người chơi chỉ mở Đan Pháp: hàm đó chứa
-  // nhiều DDL/index/trigger dùng chung và có thể khiến GET Đan Pháp bị lỗi
-  // hoặc chờ khóa trên Render. Ở đây chỉ seed dữ liệu Đan Pháp idempotent.
+  await ensureVenueRoleSchema();
   // Seed recipe outputs only after the base treasure catalog exists.
   const recipes=[
     ['Tụ Linh Đan Pháp','Hạ Phẩm','Tăng linh lực · nhập môn','Đan pháp cơ bản, ổn định hỏa hầu.',500,78,0,[['Tụ Linh Hoa',2]]],
@@ -3696,8 +3693,6 @@ app.post('/api/tien-thai/liquidate',auth,async(req,res)=>{
     const itemId=Number(req.body?.itemId), qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));
     if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Tiên Khí không hợp lệ.'});
     await client.query('BEGIN');
-    await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
-    await client.query('SELECT item_id FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[uid,itemId]);
     const row=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.price,ti.category,ti.reward_grade,
       (p.equipped_immortal_artifact_id=ti.id) AS equipped,
       CASE WHEN p.equipped_immortal_artifact_id=ti.id THEN 1 ELSE 0 END AS equipped_quantity
@@ -3705,7 +3700,7 @@ app.post('/api/tien-thai/liquidate',auth,async(req,res)=>{
       JOIN treasure_items ti ON ti.id=i.item_id
       LEFT JOIN profiles p ON p.user_id=i.user_id
       WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%'
-      `,[uid,itemId])).rows[0];
+      FOR UPDATE`,[uid,itemId])).rows[0];
     if(!row){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Tiên Khí trong Tu Di Giới.'});}
     const equippedQty=Number(row.equipped_quantity||0);
     const sellable=Math.max(0,Number(row.quantity||0)-equippedQty);
@@ -3750,14 +3745,12 @@ app.post('/api/black-market/sell',auth,async(req,res)=>{
     await client.query('BEGIN');
     let row;
     if(type==='immortal-artifact'){
-      await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
-      await client.query('SELECT item_id FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[uid,id]);
       row=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.price AS price_stones,ti.power_bonus,ti.reward_grade,ti.category,
         (p.equipped_immortal_artifact_id=ti.id) AS equipped,
         CASE WHEN p.equipped_immortal_artifact_id=ti.id THEN 1 ELSE 0 END AS equipped_quantity
         FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
         LEFT JOIN profiles p ON p.user_id=i.user_id
-        WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%'`,[uid,id])).rows[0];
+        WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' FOR UPDATE`,[uid,id])).rows[0];
     } else if(type==='root'){
       row=(await client.query(`SELECT o.root_id AS id,o.quantity,o.non_sellable_quantity,c.name,c.price_stones,c.power_bonus FROM owned_spirit_roots o JOIN spirit_roots_catalog c ON c.id=o.root_id WHERE o.user_id=$1 AND o.root_id=$2 FOR UPDATE`,[uid,id])).rows[0];
     }else{
@@ -4608,10 +4601,6 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     if(!Number.isInteger(targetId)||targetId<1||!Number.isInteger(coreId)||coreId<1||!Number.isInteger(coreQty)||coreQty<10||coreQty>100){return res.status(400).json({error:'Mỗi lần Cường Hóa cần từ 10 đến 100 phôi Tiên Khí.'});}
     if(!Number.isInteger(catalystQty)||catalystQty<0||catalystQty>1){return res.status(400).json({error:'Thiên Đạo Cường Hóa Thạch chỉ được dùng tối đa 1 cái mỗi lần.'});}
     await client.query('BEGIN');
-    // Lock the profile separately. PostgreSQL does not allow FOR UPDATE on the
-    // nullable side of a LEFT JOIN, so the target read below must not carry a
-    // row-lock clause across the LEFT JOINs to enhancements/profiles.
-    await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
     // Lock inventory rows in a stable item_id order to avoid deadlocks when two
     // concurrent enhancement requests use the same pair of target/core items.
     const lockIds=[targetId,coreId].sort((a,b)=>a-b);
@@ -4619,7 +4608,7 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
     const target=(await client.query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.category,COALESCE(e.enhance_level,0) AS enhance_level,
       (p.equipped_immortal_artifact_id=ti.id) AS equipped
       FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id LEFT JOIN immortal_artifact_enhancements e ON e.user_id=i.user_id AND e.item_id=i.item_id LEFT JOIN profiles p ON p.user_id=i.user_id
-      WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%'`,[uid,targetId])).rows[0];
+      WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' FOR UPDATE`,[uid,targetId])).rows[0];
     if(!target){await client.query('ROLLBACK');return res.status(404).json({error:'Tiên Khí mục tiêu không thuộc sở hữu của bạn.'});}
     const level=Math.max(0,Math.min(9,Number(target.enhance_level)||0));
     if(level>=9){await client.query('ROLLBACK');return res.status(400).json({error:'Tiên Khí đã đạt tối đa +9.'});}
@@ -4662,24 +4651,31 @@ app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
 
 // TRANG BỊ · quản lý Linh Thú, Linh Căn và Pháp Khí sở hữu
 app.get('/api/equipment',auth,async(req,res)=>{
-  // Trang Bị is a read-heavy screen. Never run schema DDL or repair UPDATEs
-  // from this GET route: those writes can wait behind PostgreSQL locks on Render
-  // and leave Safari stuck on "Đang mở Trang Bị...".
-  if(!dbReady) return res.status(503).json({error:'Database đang khởi động. Vui lòng thử lại sau vài giây.'});
-  const userId=Number(req.session.user_id);
-  if(!Number.isInteger(userId)||userId<1) return res.status(401).json({error:'Phiên đăng nhập không hợp lệ.'});
-  try{
+  try{await ensureEquipmentSchema();
+    const userId=req.session.user_id;
+    await ensureProfile(userId);
+    // Heal stale equipment before reading it. This also handles items removed by older migrations.
+    await query(`UPDATE profiles p SET equipped_beast_id=NULL
+      WHERE p.user_id=$1 AND p.equipped_beast_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM owned_spirit_beasts o WHERE o.user_id=p.user_id AND o.beast_id=p.equipped_beast_id AND o.quantity>0)`,[userId]);
+    await query(`UPDATE profiles p SET equipped_root_id=NULL
+      WHERE p.user_id=$1 AND p.equipped_root_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM owned_spirit_roots o WHERE o.user_id=p.user_id AND o.root_id=p.equipped_root_id AND o.quantity>0)`,[userId]);
+    await query(`UPDATE profiles p SET equipped_immortal_artifact_id=NULL
+      WHERE p.user_id=$1 AND p.equipped_immortal_artifact_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+        WHERE i.user_id=p.user_id AND i.item_id=p.equipped_immortal_artifact_id AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%')`,[userId]);
+    await query(`UPDATE profiles p SET equipped_artifact_id=NULL
+      WHERE p.user_id=$1 AND p.equipped_artifact_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+        WHERE i.user_id=p.user_id AND i.item_id=p.equipped_artifact_id AND i.quantity>0)`,[userId]);
+
     const [p,b,r,a,immortalArtifacts,techniques,immortalTechniques]=await Promise.all([
-      query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,
-        p.equipped_technique_id,p.equipped_immortal_technique_id,p.equipped_immortal_artifact_id,
-        p.equipped_immortal_artifact_buff_type,p.equipped_immortal_artifact_buff_value,
-        p.equipped_immortal_artifact_spirit_bonus,
+      query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,p.equipped_immortal_artifact_id,p.equipped_immortal_artifact_buff_type,p.equipped_immortal_artifact_buff_value,p.equipped_immortal_artifact_spirit_bonus,COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) AS equipped_immortal_artifact_enhance_level,
         COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0) +
         COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0) +
-        COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) +
-        COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0) +
-        COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
-        FROM profiles p WHERE p.user_id=$1 LIMIT 1`,[userId]),
+        COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) + COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0) + COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
+        FROM profiles p WHERE p.user_id=$1`,[userId]),
       query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,o.avatar
         FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.power_bonus DESC,c.id`,[userId]),
@@ -4688,15 +4684,10 @@ app.get('/api/equipment',auth,async(req,res)=>{
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.power_bonus DESC,c.id`,[userId]),
       query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.power_bonus,ti.ability,i.avatar
         FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
-        WHERE i.user_id=$1 AND i.quantity>0 AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
+        WHERE i.user_id=$1 AND i.quantity>0
+          AND LOWER(TRIM(ti.category)) IN ('pháp bảo','pháp khí')
         ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
-      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.ability,
-        COALESCE(i.avatar,ti.avatar) AS avatar,(p.equipped_immortal_artifact_id=ti.id) AS equipped,
-        COALESCE(e.enhance_level,0) AS enhance_level
-        FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id
-        LEFT JOIN immortal_artifact_enhancements e ON e.user_id=i.user_id AND e.item_id=i.item_id
-        WHERE i.user_id=$1 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%'
-        ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.min_realm,ti.reward_grade,ti.power_bonus,ti.spirit_gain,ti.ability,COALESCE(i.avatar,ti.avatar) AS avatar,(p.equipped_immortal_artifact_id=ti.id) AS equipped,COALESCE(e.enhance_level,0) AS enhance_level FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id LEFT JOIN immortal_artifact_enhancements e ON e.user_id=i.user_id AND e.item_id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 AND ti.category ILIKE 'Tiên Khí%' ORDER BY ti.power_bonus DESC,ti.id`,[userId]),
       query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability,ut.avatar,(p.equipped_technique_id=ct.id) AS equipped
         FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id
         WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[userId]),
@@ -4704,26 +4695,8 @@ app.get('/api/equipment',auth,async(req,res)=>{
         FROM user_immortal_techniques uit JOIN immortal_techniques it ON it.id=uit.technique_id JOIN profiles p ON p.user_id=uit.user_id
         WHERE uit.user_id=$1 ORDER BY it.realm_index,it.id`,[userId])
     ]);
-    if(!p.rows.length) return res.status(404).json({error:'Chưa tìm thấy hồ sơ môn nhân.'});
-    const eq=p.rows[0];
-    // Return the actual equipped objects as well as their IDs. Older builds only
-    // returned IDs, so the UI could finish loading but still render every slot as
-    // empty. Build these objects from the already-fetched result sets; no extra DB
-    // round trips and no writes are needed here.
-    const equippedBeast=b.rows.find(x=>Number(x.beast_id)===Number(eq.equipped_beast_id));
-    const equippedRoot=r.rows.find(x=>Number(x.root_id)===Number(eq.equipped_root_id));
-    const equippedArtifact=a.rows.find(x=>Number(x.id)===Number(eq.equipped_artifact_id));
-    const equippedImmortalArtifact=immortalArtifacts.rows.find(x=>Number(x.id)===Number(eq.equipped_immortal_artifact_id));
-    eq.beast=equippedBeast?{id:equippedBeast.beast_id,name:equippedBeast.name,power:Number(equippedBeast.power_bonus)||0,ability:equippedBeast.ability||equippedBeast.skill||'',avatar:equippedBeast.avatar||equippedBeast.default_avatar,beastRealmTier:Number(equippedBeast.beast_realm_tier)||1}:null;
-    eq.root=equippedRoot?{id:equippedRoot.root_id,name:equippedRoot.name,power:Number(equippedRoot.power_bonus)||0,ability:equippedRoot.ability||equippedRoot.support||''}:null;
-    eq.artifact=equippedArtifact?{id:equippedArtifact.id,name:equippedArtifact.name,power:Number(equippedArtifact.power_bonus)||0,ability:equippedArtifact.ability||'',avatar:equippedArtifact.avatar}:null;
-    eq.immortalArtifact=equippedImmortalArtifact?{id:equippedImmortalArtifact.id,name:equippedImmortalArtifact.name,power:Number(equippedImmortalArtifact.power_bonus)||0,ability:equippedImmortalArtifact.ability||'',avatar:equippedImmortalArtifact.avatar,spiritGain:Number(equippedImmortalArtifact.spirit_gain)||0,buffType:eq.equipped_immortal_artifact_buff_type||'',buffValue:Number(eq.equipped_immortal_artifact_buff_value)||0,enhanceLevel:Number(equippedImmortalArtifact.enhance_level)||0}:null;
-    res.set('Cache-Control','private, max-age=5');
-    res.json({ok:true,equipped:eq,beasts:b.rows,roots:r.rows,artifacts:a.rows,immortalArtifacts:immortalArtifacts.rows,techniques:techniques.rows,immortalTechniques:immortalTechniques.rows});
-  }catch(e){
-    console.error('equipment:',e?.stack||e);
-    res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});
-  }
+    res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipped_immortal_artifact_id:null,equipped_technique_id:null,equipped_immortal_technique_id:null,equipment_power:0},beasts:b.rows,roots:r.rows,artifacts:a.rows,immortalArtifacts:immortalArtifacts.rows,techniques:techniques.rows,immortalTechniques:immortalTechniques.rows});
+  }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
 app.patch('/api/equipment/avatar',auth,async(req,res)=>{
   try{
@@ -5225,36 +5198,25 @@ async function sectAuraRankMap(){
   return sectAuraCache.map;
 }
 
-let __leaderboardCache={at:0,rows:null};
 app.get('/api/leaderboard',async(req,res)=>{
   try {
-    const now=Date.now();
-    if(!__leaderboardCache.rows||now-__leaderboardCache.at>5000){
-      const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
-        COALESCE(a.achievement_points,0)::int AS achievement_points,
-        COALESCE(a.achievement_count,0)::int AS achievement_count,
-        (p.spirit_power + COALESCE(a.achievement_points,0)*10)::bigint AS achievement_score
-        FROM users u JOIN profiles p ON p.user_id=u.id
-        LEFT JOIN (SELECT user_id,SUM(points)::bigint AS achievement_points,COUNT(*)::int AS achievement_count FROM achievements GROUP BY user_id) a ON a.user_id=u.id
-        ORDER BY achievement_score DESC,u.id ASC LIMIT 50`);
-      __leaderboardCache={at:now,rows:r.rows};
-    }
+    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
+      COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
+      COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count,
+      (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
+      FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY achievement_score DESC, u.id ASC LIMIT 50`);
     const aura=await sectAuraRankMap();
-    res.json({rows:__leaderboardCache.rows.map((x,i)=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex,auraRank:aura.get(Number(x.id))||0,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
+    res.json({rows:r.rows.map((x,i)=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex,auraRank:aura.get(Number(x.id))||0,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
   } catch(e){res.status(500).json({error:'Không thể tải bảng thành tích.'});}
 });
 
-let __wealthCache={at:0,rows:null};
 app.get('/api/wealth',async(req,res)=>{
   try{
     await ensureRuntimeSchema();
-    const now=Date.now();
-    if(!__wealthCache.rows||now-__wealthCache.at>5000){
-      __wealthCache={at:now,rows:(await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_stones,p.wealth_public,p.spirit_power,p.avatar
-        FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY p.spirit_stones DESC,u.id ASC LIMIT 100`)).rows};
-    }
-    res.setHeader('Cache-Control','private, max-age=5, stale-while-revalidate=5');
-    res.json({rows:__wealthCache.rows.map((x,i)=>({id:x.id,rankNo:i+1,display_name:x.display_name,title:x.title,rank:x.rank,spirit_power:Number(x.spirit_power)||0,avatar:x.avatar,wealthPublic:Boolean(x.wealth_public),spiritStones:x.wealth_public?Number(x.spirit_stones)||0:null}))});
+    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_stones,p.wealth_public,p.spirit_power,p.avatar
+      FROM users u JOIN profiles p ON p.user_id=u.id
+      ORDER BY p.spirit_stones DESC,u.id ASC LIMIT 100`);
+    res.json({rows:r.rows.map((x,i)=>({id:x.id,rankNo:i+1,display_name:x.display_name,title:x.title,rank:x.rank,spirit_power:Number(x.spirit_power)||0,avatar:x.avatar,wealthPublic:Boolean(x.wealth_public),spiritStones:x.wealth_public?Number(x.spirit_stones)||0:null}))});
   }catch(e){res.status(500).json({error:'Không thể tải Bảng Tài Phú.'});}
 });
 
@@ -6054,8 +6016,54 @@ async function ensureChallengeSchemaImpl(){
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_damage NUMERIC(14,2) NOT NULL DEFAULT 0;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action TEXT NOT NULL DEFAULT '';
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+    CREATE INDEX IF NOT EXISTS idx_challenge_requests_challenger_status
+      ON challenge_requests(challenger_id,status,mode,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_challenge_requests_opponent_status
+      ON challenge_requests(opponent_id,status,mode,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_challenge_requests_active_mode
+      ON challenge_requests(status,mode,id DESC);
   `);
 }
+
+app.get('/api/challenges/online/state',auth,async(req,res)=>{
+  try{
+    await ensureChallengeSchema();
+    const uid=req.session.user_id;
+    const row=(await query(`SELECT cr.id,cr.status,cr.challenger_id,cr.opponent_id,
+        cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,
+        cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,
+        cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,
+        cp.spirit_power AS challenger_spirit,
+        ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,
+        op.spirit_power AS opponent_spirit
+      FROM challenge_requests cr
+      JOIN users cu ON cu.id=cr.challenger_id
+      JOIN profiles cp ON cp.user_id=cu.id
+      JOIN users ou ON ou.id=cr.opponent_id
+      JOIN profiles op ON op.user_id=ou.id
+      WHERE cr.status='accepted' AND cr.mode='online'
+        AND (cr.challenger_id=$1 OR cr.opponent_id=$1)
+      ORDER BY cr.id DESC LIMIT 1`,[uid])).rows[0]||null;
+    res.set('Cache-Control','no-store');
+    if(!row)return res.json({activeBattle:null});
+    const challengerSpirit=Number(row.challenger_spirit)||0;
+    const opponentSpirit=Number(row.opponent_spirit)||0;
+    const viewerIsChallenger=Number(uid)===Number(row.challenger_id);
+    const spitAllowed=viewerIsChallenger
+      ? stageFor(challengerSpirit).realmIndex-stageFor(opponentSpirit).realmIndex>=2
+      : stageFor(opponentSpirit).realmIndex-stageFor(challengerSpirit).realmIndex>=2;
+    res.json({activeBattle:{
+      ...battleSnapshot(row,uid),
+      challengerName:row.challenger_name,challengerAvatar:row.challenger_avatar,
+      challengerRank:row.challenger_rank,challengerSpirit,
+      opponentName:row.opponent_name,opponentAvatar:row.opponent_avatar,
+      opponentRank:row.opponent_rank,opponentSpirit,spitAllowed
+    }});
+  }catch(e){
+    console.error('challenge online state:',e);
+    res.status(500).json({error:'Không thể đồng bộ trạng thái lôi đài.'});
+  }
+});
 
 app.get('/api/challenges/announcement',auth,async(req,res)=>{
   try{
