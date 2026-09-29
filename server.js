@@ -20,6 +20,7 @@ let backgroundTimers = [];
 let dbMaintenanceTimer = null;
 const DATABASE_URL = String(process.env.DATABASE_URL || '').trim();
 let pool = null;
+let poolClosed = false;
 if (DATABASE_URL) {
   pool = new Pool({
   connectionString: DATABASE_URL,
@@ -32,9 +33,15 @@ if (DATABASE_URL) {
 }
 
 async function query(text, params = []) {
-  if (shuttingDown) throw new Error('Server đang đóng, database tạm ngừng nhận truy vấn.');
+  if (shuttingDown || poolClosed) throw new Error('Server đang đóng, database tạm ngừng nhận truy vấn.');
   if (!pool) throw new Error('DATABASE_URL chưa được cấu hình trên Render.');
   return pool.query(text, params);
+}
+
+async function dbConnect(){
+  if (shuttingDown || poolClosed) throw new Error('Server đang đóng, database tạm ngừng nhận truy vấn.');
+  if (!pool) throw new Error('DATABASE_URL chưa được cấu hình trên Render.');
+  return pool.connect();
 }
 
 // Runtime schema guard: Render/PostgreSQL deployments can keep an older schema
@@ -609,7 +616,7 @@ async function backfillRealmBreakthroughRewards() {
   for(const row of rows){
     const stage=stageFor(Number(row.spirit_power)||0);
     if(stage.realmIndex<=0) continue;
-    const client=await pool.connect();
+    const client=await dbConnect();
     try{ await client.query('BEGIN'); await grantRealmBreakthroughRewards(client,row.user_id,0,stage.realmIndex); await client.query('COMMIT'); }
     catch(e){ try{await client.query('ROLLBACK')}catch{} console.error('realm reward backfill:',e.message); }
     finally{client.release();}
@@ -963,6 +970,15 @@ CREATE INDEX IF NOT EXISTS idx_inventory_user_positive ON inventory(user_id) WHE
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE alchemy_recipes ADD COLUMN IF NOT EXISTS learn_price INTEGER NOT NULL DEFAULT 1000;
+    -- v3.7.40: toàn bộ Tiên Đan trong Đan Pháp bị khóa mặc định; chỉ Đan Chủ được mở khóa.
+    CREATE TABLE IF NOT EXISTS alchemy_shop_settings (
+      id INTEGER PRIMARY KEY CHECK(id=1),
+      immortal_pills_unlocked BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+    );
+    INSERT INTO alchemy_shop_settings(id,immortal_pills_unlocked) VALUES(1,FALSE)
+      ON CONFLICT(id) DO NOTHING;
     CREATE TABLE IF NOT EXISTS alchemy_recipe_ingredients (
       recipe_id INTEGER NOT NULL REFERENCES alchemy_recipes(id) ON DELETE CASCADE,
       item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE RESTRICT,
@@ -2591,7 +2607,7 @@ app.get('/api/venue-role/:venue',auth,async(req,res)=>{
 
 app.post('/api/venue-role/:venue/apply',auth,async(req,res)=>{
   const meta=venueMeta(req.params.venue); if(!meta)return res.status(404).json({error:'Chức vị không hợp lệ.'});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await client.query('BEGIN');
     const uid=req.session.user_id;
@@ -2614,7 +2630,7 @@ app.post('/api/venue-role/:venue/apply',auth,async(req,res)=>{
 
 app.post('/api/venue-role/:venue/transfer',auth,async(req,res)=>{
   const meta=venueMeta(req.params.venue); if(!meta)return res.status(404).json({error:'Chức vị không hợp lệ.'});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await client.query('BEGIN'); const uid=req.session.user_id,targetId=Number(req.body?.targetId);
     if(!targetId||targetId===uid){await client.query('ROLLBACK');return res.status(400).json({error:'Môn nhân nhận chức vị không hợp lệ.'});}
@@ -2678,7 +2694,7 @@ app.post('/api/tavern/apply',auth,async(req,res)=>{
 
 app.post('/api/tavern/transfer',auth,async(req,res)=>{
   if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureTavernSchema();
     const uid=req.session.user_id,targetId=Number(req.body?.targetId);
@@ -2735,7 +2751,7 @@ app.post('/api/tavern/listings/stop',auth,async(req,res)=>{
 
 app.post('/api/tavern/invite',auth,async(req,res)=>{
   if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureTavernSchema();
     const uid=req.session.user_id,buyerId=Number(req.body?.buyerId),productId=Number(req.body?.productId);
@@ -2757,7 +2773,7 @@ app.post('/api/tavern/invite',auth,async(req,res)=>{
 
 app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
   if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureTavernSchema();
     const uid=req.session.user_id,id=Number(req.body?.requestId),action=req.body?.action;
@@ -2805,7 +2821,7 @@ app.post('/api/tavern/invite/respond',auth,async(req,res)=>{
 
 app.post('/api/tavern/consume',auth,async(req,res)=>{
   if(!(await regionAccessFor(req.session.user_id,'tavern'))) return res.status(403).json({error:regionLockMessage('tavern'),regionLocked:true});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureTavernSchema();
     const uid=req.session.user_id, productId=Number(req.body?.productId);
@@ -2833,7 +2849,7 @@ async function processTavernNpcSales(){
       FROM tavern_listings l JOIN tavern_products p ON p.id=l.product_id
       WHERE l.active=true AND l.npc_next_buy_at<=NOW() ORDER BY l.npc_next_buy_at ASC LIMIT 50`)).rows;
     for(const row of due){
-      const client=await pool.connect();
+      const client=await dbConnect();
       try{
         await client.query('BEGIN');
         const locked=(await client.query(`SELECT l.id,l.owner_id,l.product_id,p.name,p.price
@@ -2874,7 +2890,7 @@ app.get('/api/professions',auth,async(req,res)=>{
 });
 
 app.post('/api/professions/learn',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const code=String(req.body?.code||'').trim();
     const def=PROFESSION_DEFINITIONS.find(x=>x.code===code);
@@ -2897,7 +2913,7 @@ app.post('/api/professions/learn',auth,async(req,res)=>{
 });
 
 app.post('/api/professions/claim',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const code=String(req.body?.code||'').trim();
     const def=PROFESSION_DEFINITIONS.find(x=>x.code===code);
@@ -2990,7 +3006,7 @@ app.post('/api/logout',auth,async(req,res)=>{await query("UPDATE profiles SET pr
 // NHẬN LINH THẠCH HẰNG NGÀY · 100 linh thạch / ngày
 // Giao dịch được khóa theo hồ sơ để tránh nhận trùng khi bấm nhiều lần hoặc nhiều tab.
 app.post('/api/spirit-stones/claim',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await client.query('BEGIN');
     await ensureRuntimeSchema();
@@ -3043,7 +3059,7 @@ app.get('/api/profile',auth,async(req,res)=>{
   try {
     await ensureRuntimeSchema();
     await ensureProfile(req.session.user_id);
-    const mansionClient=await pool.connect();
+    const mansionClient=await dbConnect();
     try{await mansionClient.query('BEGIN');await settleMansionIncome(mansionClient,req.session.user_id);await mansionClient.query('COMMIT');}catch(e){try{await mansionClient.query('ROLLBACK')}catch{};throw e;}finally{mansionClient.release();}
     const r=await query(`SELECT u.id,u.username,u.display_name,u.created_at,p.*,
       COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
@@ -3140,7 +3156,7 @@ app.get('/api/tien-phap',auth,async(req,res)=>{
   }catch(e){console.error('tien phap load:',e);res.status(500).json({error:'Không thể mở Tiên Pháp.'});}
 });
 app.post('/api/tien-phap/learn',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureTienPhapSchema(); await client.query('BEGIN');
     const p=(await client.query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
@@ -3182,7 +3198,7 @@ app.get('/api/codex',auth,async(req,res)=>{
 });
 
 app.post('/api/codex/learn',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const id=Number(req.body?.id); if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Công pháp không hợp lệ.'});
     await client.query('BEGIN');
@@ -3216,7 +3232,7 @@ app.post('/api/codex/learn',auth,async(req,res)=>{
 // ─────────────────────────────────────────────────────────────────────────────
 app.get('/api/mansion',auth,async(req,res)=>{
   try{
-    const client=await pool.connect();
+    const client=await dbConnect();
     try{
       await client.query('BEGIN');
       const settled=await settleMansionIncome(client,req.session.user_id);
@@ -3231,7 +3247,7 @@ app.get('/api/mansion',auth,async(req,res)=>{
 });
 
 app.post('/api/mansion/buy',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const id=Number(req.body?.id); if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Động phủ không hợp lệ.'});
     await client.query('BEGIN');
@@ -3254,7 +3270,7 @@ app.post('/api/mansion/buy',auth,async(req,res)=>{
 });
 
 app.post('/api/mansion/toggle',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN'); const owned=(await client.query(`SELECT um.active,m.name FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0]; if(!owned){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn chưa mua động phủ.'});} const settled=await settleMansionIncome(client,req.session.user_id); const active=!Boolean(owned.active); await client.query('UPDATE user_mansions SET active=$2,last_tick_at=NOW() WHERE user_id=$1',[req.session.user_id,active]); await client.query('COMMIT'); res.json({ok:true,active,gain:settled.gain||0,message:active?`Đã khởi động ${owned.name}. Vận công bị khóa hoàn toàn.`:`Đã ngưng ${owned.name}. Có thể vận công trở lại.`});}
   catch(e){try{await client.query('ROLLBACK')}catch{};console.error('mansion toggle:',e);res.status(500).json({error:'Không thể thay đổi trạng thái động phủ.'});}finally{client.release();}
 });
@@ -3272,7 +3288,7 @@ app.get('/api/ascension',auth,async(req,res)=>{
 });
 
 app.post('/api/ascension/tribulation',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await client.query('BEGIN');
     const uid=req.session.user_id;
@@ -3304,7 +3320,7 @@ app.post('/api/ascension/tribulation',auth,async(req,res)=>{
 
 app.post('/api/cultivation/train',auth,async(req,res)=>{
   await ensureRuntimeSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try {
     await client.query('BEGIN');
     const userId=req.session.user_id;
@@ -3345,7 +3361,7 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
   try{
     await ensureProfile(req.session.user_id);
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
-    const client=await pool.connect();
+    const client=await dbConnect();
     try{
       await client.query('BEGIN');
     await requireSpiritRootHealthy(client,req.session.user_id);
@@ -3412,7 +3428,7 @@ app.get('/api/treasury',auth,async(req,res)=>{
 });
 
 app.post('/api/treasury/buy',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const itemId=Number(req.body?.itemId);
     const quantity=Math.max(1,Math.min(99,Math.floor(Number(req.body?.quantity)||1)));
@@ -3484,7 +3500,7 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
 });
 
 app.post('/api/currency/exchange',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const stonesToBuy=Math.max(1,Math.min(100000,Number(req.body?.stones)||0));
     if(!Number.isInteger(stonesToBuy)||stonesToBuy<1)return res.status(400).json({error:'Số linh thạch trao đổi không hợp lệ.'});
@@ -3554,7 +3570,7 @@ app.get('/api/storage',auth,async(req,res)=>{
 });
 
 app.post('/api/storage/use',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const itemId=Number(req.body?.itemId);
     const qty=Math.max(1,Math.min(200,Number(req.body?.quantity)||1));
@@ -3608,7 +3624,7 @@ app.post('/api/storage/use',auth,async(req,res)=>{
 });
 
 app.post('/api/storage/upgrade',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await client.query('BEGIN');
     const r=await client.query(`SELECT storage_capacity,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
@@ -3643,7 +3659,7 @@ app.get('/api/dan-cac',auth,async(req,res)=>{
   }catch(e){console.error('dan cac:',e);res.status(500).json({error:'Không thể mở Đan Các.'});}
 });
 app.post('/api/dan-cac/sell',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const itemId=Number(req.body?.itemId), quantity=Math.max(1,Math.floor(Number(req.body?.quantity)||0));
     if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
@@ -3691,7 +3707,7 @@ app.get('/api/tien-thai',auth,async(req,res)=>{
 });
 
 app.post('/api/tien-thai/liquidate',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id;
     const itemId=Number(req.body?.itemId), qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));
@@ -3742,7 +3758,7 @@ app.get('/api/black-market',auth,async(req,res)=>{
 
 app.post('/api/black-market/sell',auth,async(req,res)=>{
   if(!(await regionAccessFor(req.session.user_id,'black-market'))) return res.status(403).json({error:regionLockMessage('black-market'),regionLocked:true});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,type=['root','beast','immortal-artifact'].includes(req.body?.type)?req.body.type:'root',id=Number(req.body?.id),qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));
     if(!id)return res.status(400).json({error:'Tài sản không hợp lệ.'});
@@ -3816,7 +3832,7 @@ app.get('/api/market',auth,async(req,res)=>{
 });
 
 app.post('/api/market/list',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const itemId=Number(req.body?.itemId), qty=Math.max(1,Math.floor(Number(req.body?.quantity)||0)), price=Math.max(1,Math.floor(Number(req.body?.priceStones)||0));
     if(!Number.isInteger(itemId)||qty<1||price<1)return res.status(400).json({error:'Vật phẩm, số lượng hoặc giá bán không hợp lệ.'});
@@ -3834,7 +3850,7 @@ app.post('/api/market/list',auth,async(req,res)=>{
 });
 
 app.post('/api/market/buy',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const listingId=Number(req.body?.listingId);
     if(!Number.isInteger(listingId)||listingId<1)return res.status(400).json({error:'Tin bán không hợp lệ.'});
@@ -3861,7 +3877,7 @@ app.post('/api/market/buy',auth,async(req,res)=>{
 });
 
 app.post('/api/market/cancel',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const listingId=Number(req.body?.listingId); await client.query('BEGIN');
     const l=(await client.query(`SELECT * FROM market_listings WHERE id=$1 AND seller_id=$2 FOR UPDATE`,[listingId,req.session.user_id])).rows[0];
@@ -3874,7 +3890,7 @@ app.post('/api/market/cancel',auth,async(req,res)=>{
 });
 
 app.post('/api/market/trade',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const recipientId=Number(req.body?.recipientId), offerItemId=Number(req.body?.offerItemId), offerQty=Math.max(1,Math.floor(Number(req.body?.offerQuantity)||0));
     const wantItemId=Number(req.body?.wantItemId), wantQty=Math.max(1,Math.floor(Number(req.body?.wantQuantity)||0));
@@ -3894,7 +3910,7 @@ app.post('/api/market/trade',auth,async(req,res)=>{
 });
 
 app.post('/api/market/trade/respond',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const tradeId=Number(req.body?.tradeId), action=String(req.body?.action||'').toLowerCase();
     if(!Number.isInteger(tradeId)||!['accept','reject','cancel'].includes(action))return res.status(400).json({error:'Yêu cầu trao đổi không hợp lệ.'});
@@ -3936,7 +3952,7 @@ app.post('/api/treasure/buy',auth,async(req,res)=>{ req.url='/api/treasury/buy';
 app.get('/api/tu-di-gioi',auth,async(req,res)=>{ req.url='/api/storage'; return res.redirect(307,'/api/storage'); });
 
 app.post('/api/random-gifts',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await client.query('BEGIN');
     const p=(await client.query(`SELECT gacha_claimed,spirit_root FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];
@@ -3983,17 +3999,33 @@ app.get('/api/dan-phap',auth,async(req,res)=>{
     const immortalPills=(await query(`SELECT id,name,category,description,price,spirit_gain,min_realm,reward_grade,
       COALESCE((SELECT quantity FROM inventory ix WHERE ix.user_id=$1 AND ix.item_id=ti.id),0)::int AS owned
       FROM treasure_items ti WHERE category LIKE '%· Tiên Đan' ORDER BY min_realm,price,id`,[uid])).rows;
+    const immortalPillSetting=(await query(`SELECT immortal_pills_unlocked FROM alchemy_shop_settings WHERE id=1`)).rows[0]||{immortal_pills_unlocked:false};
     const orders=(await query(`SELECT o.id,o.source_type,o.quantity,o.ingredient_value,o.payout,o.status,o.created_at,o.recipe_id,o.room_owner_id,o.accepted_by,ar.manager_user_id,r.name AS recipe_name,u.display_name AS requester_name
       FROM alchemy_orders o JOIN alchemy_recipes r ON r.id=o.recipe_id LEFT JOIN users u ON u.id=o.requester_id LEFT JOIN alchemy_rooms ar ON ar.user_id=o.room_owner_id
       WHERE (o.room_owner_id=$1 OR o.requester_id=$1 OR ar.manager_user_id=$1) AND o.status IN ('pending','accepted') ORDER BY o.created_at DESC LIMIT 30`,[uid])).rows;
     const danMaster=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0];
-    res.json({spiritStones:Number(p.spirit_stones||0),realmIndex:ri,recipes,immortalPills,inventory:inv,room,rooms,furnaces,roomGrades:ALCHEMY_ROOM_GRADES,orders,isDanMaster:Boolean(danMaster&&Number(danMaster.user_id)===Number(uid))});
+    res.json({spiritStones:Number(p.spirit_stones||0),realmIndex:ri,recipes,immortalPills,inventory:inv,room,rooms,furnaces,roomGrades:ALCHEMY_ROOM_GRADES,orders,isDanMaster:Boolean(danMaster&&Number(danMaster.user_id)===Number(uid)),immortalPillsUnlocked:Boolean(immortalPillSetting.immortal_pills_unlocked)});
   }catch(e){console.error('dan phap:',e);res.status(500).json({error:'Không thể mở Đan Pháp.'});}
 });
 
-app.post('/api/dan-phap/buy-tien-dan',auth,async(req,res)=>{const client=await pool.connect();try{
+app.post('/api/dan-phap/tien-dan-lock',auth,async(req,res)=>{
+  const client=await dbConnect();
+  try{
+    await ensureAlchemySchema();
+    const uid=req.session.user_id;
+    const master=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0];
+    if(!master||Number(master.user_id)!==Number(uid)) return res.status(403).json({error:'Chỉ Đan Chủ mới có quyền mở khóa Tiên Đan.'});
+    const unlocked=req.body?.unlocked===true;
+    const r=(await client.query(`UPDATE alchemy_shop_settings SET immortal_pills_unlocked=$1,updated_at=NOW(),updated_by=$2 WHERE id=1 RETURNING immortal_pills_unlocked`,[unlocked,uid])).rows[0];
+    res.json({ok:true,unlocked:Boolean(r.immortal_pills_unlocked),message:unlocked?'Đan Chủ đã mở khóa toàn bộ Tiên Đan trong Đan Pháp.':'Đã khóa mua toàn bộ Tiên Đan trong Đan Pháp.'});
+  }catch(e){console.error('alchemy immortal pill lock:',e);res.status(500).json({error:'Không thể thay đổi khóa Tiên Đan.'});}finally{client.release();}
+});
+
+app.post('/api/dan-phap/buy-tien-dan',auth,async(req,res)=>{const client=await dbConnect();try{
   await ensureAlchemySchema(); await client.query('BEGIN');
   const uid=req.session.user_id,id=Number(req.body?.itemId),quantity=Math.max(1,Math.min(99,Math.floor(Number(req.body?.quantity)||1)));
+  const shopSetting=(await client.query(`SELECT immortal_pills_unlocked FROM alchemy_shop_settings WHERE id=1 FOR UPDATE`)).rows[0];
+  if(!shopSetting?.immortal_pills_unlocked){await client.query('ROLLBACK');return res.status(423).json({error:'Tiên Đan hiện đang bị Đan Chủ khóa mua. Chỉ Đan Chủ mới có quyền mở khóa.'});}
   const item=(await client.query(`SELECT id,name,category,price,min_realm FROM treasure_items WHERE id=$1 AND category LIKE '%· Tiên Đan' FOR UPDATE`,[id])).rows[0];
   if(!item){await client.query('ROLLBACK');return res.status(404).json({error:'Tiên Đan không tồn tại trong Đan Pháp.'});}
   const p=(await client.query(`SELECT spirit_stones,spirit_power,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];
@@ -4009,10 +4041,10 @@ app.post('/api/dan-phap/buy-tien-dan',auth,async(req,res)=>{const client=await p
   res.json({ok:true,item:item.name,quantity,spentStones:total,remainingStones:Number(p.spirit_stones)-total,message:`Đã mua ${item.name} ×${quantity}, chuyển vào Bảng Thuộc Tính.`});
 }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('buy tien dan:',e);res.status(500).json({error:'Mua Tiên Đan thất bại.'});}finally{client.release();}});
 
-app.post('/api/dan-phap/learn',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,id=Number(req.body?.recipeId);const p=(await client.query(`SELECT spirit_stones,spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];const recipe=(await client.query(`SELECT * FROM alchemy_recipes WHERE id=$1 AND active=true FOR UPDATE`,[id])).rows[0];if(!p||!recipe){await client.query('ROLLBACK');return res.status(404).json({error:'Đan Pháp không tồn tại.'});}const ri=stageFor(Number(p.spirit_power)||0).realmIndex;if(ri<Number(recipe.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần đạt ${RANKS[Number(recipe.min_realm)]?.name||'cảnh giới yêu cầu'} mới có thể trao đổi Đan Pháp.`});}const exists=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,id])).rows[0];if(exists){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã sở hữu Đan Pháp này.'});}const cost=Number(recipe.learn_price);if(Number(p.spirit_stones)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost.toLocaleString('vi-VN')} linh thạch.`});}await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,cost]);await client.query(`INSERT INTO alchemy_known_recipes(user_id,recipe_id) VALUES($1,$2)`,[uid,id]);await client.query('COMMIT');res.json({ok:true,message:`Đã trao đổi ${recipe.name} bằng ${cost.toLocaleString('vi-VN')} linh thạch.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy learn:',e);res.status(500).json({error:'Trao đổi Đan Pháp thất bại.'});}finally{client.release();}});
+app.post('/api/dan-phap/learn',auth,async(req,res)=>{const client=await dbConnect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,id=Number(req.body?.recipeId);const p=(await client.query(`SELECT spirit_stones,spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];const recipe=(await client.query(`SELECT * FROM alchemy_recipes WHERE id=$1 AND active=true FOR UPDATE`,[id])).rows[0];if(!p||!recipe){await client.query('ROLLBACK');return res.status(404).json({error:'Đan Pháp không tồn tại.'});}const ri=stageFor(Number(p.spirit_power)||0).realmIndex;if(ri<Number(recipe.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần đạt ${RANKS[Number(recipe.min_realm)]?.name||'cảnh giới yêu cầu'} mới có thể trao đổi Đan Pháp.`});}const exists=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,id])).rows[0];if(exists){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã sở hữu Đan Pháp này.'});}const cost=Number(recipe.learn_price);if(Number(p.spirit_stones)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost.toLocaleString('vi-VN')} linh thạch.`});}await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,cost]);await client.query(`INSERT INTO alchemy_known_recipes(user_id,recipe_id) VALUES($1,$2)`,[uid,id]);await client.query('COMMIT');res.json({ok:true,message:`Đã trao đổi ${recipe.name} bằng ${cost.toLocaleString('vi-VN')} linh thạch.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy learn:',e);res.status(500).json({error:'Trao đổi Đan Pháp thất bại.'});}finally{client.release();}});
 
 app.post('/api/dan-phap/room/rent',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,hours=Math.max(1,Math.min(10,Math.floor(Number(req.body?.hours)||1))),grade=String(req.body?.grade||'Hạ Phẩm');const info=alchemyRoomInfo(grade);const p=(await client.query(`SELECT spirit_stones,spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];if(!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ.'});}const ri=stageFor(Number(p.spirit_power)||0).realmIndex;if(ri<info.minRealm){await client.query('ROLLBACK');return res.status(403).json({error:`Cần đạt ${RANKS[info.minRealm]?.name||'cảnh giới yêu cầu'} mới thuê được Đan Phòng ${grade}.`});}const active=(await client.query(`SELECT * FROM alchemy_rooms WHERE user_id=$1 AND expires_at>NOW() FOR UPDATE`,[uid])).rows[0];if(active){await client.query('ROLLBACK');return res.status(409).json({error:'Đan Phòng hiện vẫn còn thời gian thuê.'});}const total=info.price*hours;if(Number(p.spirit_stones)<total){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${total.toLocaleString('vi-VN')} linh thạch để thuê ${grade} ${hours} giờ.`});}await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,total]);let room=(await client.query(`SELECT id FROM alchemy_rooms WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];if(room){room=(await client.query(`UPDATE alchemy_rooms SET realm_index=$2,room_grade=$3,price_stones=$4,expires_at=NOW()+($5||' hours')::interval,manager_user_id=NULL,updated_at=NOW() WHERE user_id=$1 RETURNING *`,[uid,ri,grade,info.price,hours])).rows[0];}else{room=(await client.query(`INSERT INTO alchemy_rooms(user_id,realm_index,room_grade,price_stones,expires_at,auto_accept_orders) VALUES($1,$2,$3,$4,NOW()+($5||' hours')::interval,FALSE) RETURNING *`,[uid,ri,grade,info.price,hours])).rows[0];}await client.query('COMMIT');res.json({ok:true,room,total,remainingStones:Number(p.spirit_stones)-total});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('rent alchemy room:',e);res.status(500).json({error:'Thuê Đan Phòng thất bại.'});}finally{client.release();}
 });
 
@@ -4031,17 +4063,17 @@ app.post('/api/dan-phap/room/manager',auth,async(req,res)=>{try{await ensureAlch
 app.post('/api/dan-phap/room/auto',auth,async(req,res)=>{
   try{await ensureAlchemySchema();const uid=req.session.user_id,enabled=Boolean(req.body?.enabled);const r=(await query(`UPDATE alchemy_rooms SET auto_accept_orders=$2,updated_at=NOW() WHERE user_id=$1 AND expires_at>NOW() RETURNING auto_accept_orders`,[uid,enabled])).rows[0];if(!r)return res.status(400).json({error:'Bạn chưa có Đan Phòng đang hoạt động.'});res.json({ok:true,enabled:r.auto_accept_orders,message:enabled?'Đã khai phòng: hệ thống tự động nhận đơn.':'Đã đóng chế độ tự động nhận đơn.'});}catch(e){res.status(500).json({error:'Không thể thay đổi chế độ nhận đơn.'});}});
 
-app.post('/api/dan-phap/order',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,recipeId=Number(req.body?.recipeId),quantity=Math.max(1,Math.min(20,Math.floor(Number(req.body?.quantity)||1))),ownerId=Number(req.body?.roomOwnerId)||0;const recipe=(await client.query(`SELECT r.*,COALESCE(SUM(i.quantity*ti.price),0)::int ingredient_value FROM alchemy_recipes r JOIN alchemy_recipe_ingredients i ON i.recipe_id=r.id JOIN treasure_items ti ON ti.id=i.item_id WHERE r.id=$1 AND r.active=true GROUP BY r.id`,[recipeId])).rows[0];if(!recipe){await client.query('ROLLBACK');return res.status(404).json({error:'Đan Pháp không tồn tại.'});}const requesterStage=stageFor(Number((await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1',[uid])).rows[0]?.spirit_power||0));
+app.post('/api/dan-phap/order',auth,async(req,res)=>{const client=await dbConnect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,recipeId=Number(req.body?.recipeId),quantity=Math.max(1,Math.min(20,Math.floor(Number(req.body?.quantity)||1))),ownerId=Number(req.body?.roomOwnerId)||0;const recipe=(await client.query(`SELECT r.*,COALESCE(SUM(i.quantity*ti.price),0)::int ingredient_value FROM alchemy_recipes r JOIN alchemy_recipe_ingredients i ON i.recipe_id=r.id JOIN treasure_items ti ON ti.id=i.item_id WHERE r.id=$1 AND r.active=true GROUP BY r.id`,[recipeId])).rows[0];if(!recipe){await client.query('ROLLBACK');return res.status(404).json({error:'Đan Pháp không tồn tại.'});}const requesterStage=stageFor(Number((await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1',[uid])).rows[0]?.spirit_power||0));
     if(requesterStage.realmIndex<Number(recipe.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần đạt ${RANKS[Number(recipe.min_realm)]?.name||'cảnh giới yêu cầu'} mới có thể gửi đơn.`});}
     if(!ownerId||ownerId===uid){await client.query('ROLLBACK');return res.status(400).json({error:'Hãy chọn Đan Phòng của môn nhân khác.'});}const room=(await client.query(`SELECT r.* FROM alchemy_rooms r WHERE r.user_id=$1 AND r.expires_at>NOW() FOR UPDATE`,[ownerId])).rows[0];if(!room){await client.query('ROLLBACK');return res.status(400).json({error:'Đan Phòng đã hết hạn.'});}const ingredientValue=Number(recipe.ingredient_value)*quantity,payout=alchemyOrderPayout('member',Number(recipe.ingredient_value),quantity),auto=room.auto_accept_orders===true;const ins=(await client.query(`INSERT INTO alchemy_orders(source_type,requester_id,room_owner_id,recipe_id,quantity,ingredient_value,payout,status,accepted_by,accepted_at) VALUES('member',$1,$2,$3,$4,$5,$6,$7,$8,CASE WHEN $8 IS NULL THEN NULL ELSE NOW() END) RETURNING id,created_at`,[uid,ownerId,recipeId,quantity,ingredientValue,payout,auto?'accepted':'pending',auto?ownerId:null])).rows[0];await client.query('COMMIT');if(!auto){await notifyAlchemyOrder({id:ins.id,source_type:'member',recipe_name:recipe.name,quantity,payout},ownerId);if(room.manager_user_id)await notifyAlchemyOrder({id:ins.id,source_type:'member',recipe_name:recipe.name,quantity,payout},room.manager_user_id);}res.json({ok:true,orderId:Number(ins.id),payout,autoAccepted:auto,message:`Đã gửi đơn ${recipe.name} ×${quantity}. Giá linh dược = ${Number(recipe.ingredient_value).toLocaleString('vi-VN')} × ${quantity}; giá gửi đơn môn nhân = 150% = ${payout.toLocaleString('vi-VN')} linh thạch. Luyện thành công nhận 10 viên/1 đơn.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy order:',e);res.status(500).json({error:'Không thể gửi đơn luyện đan.'});}finally{client.release();}});
 
-app.post('/api/dan-phap/order/respond',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();const uid=req.session.user_id,id=Number(req.body?.requestId),action=req.body?.action==='accept'?'accept':'reject';await client.query('BEGIN');const o=(await client.query(`SELECT o.*,r.name AS recipe_name,ar.expires_at,ar.manager_user_id FROM alchemy_orders o JOIN alchemy_recipes r ON r.id=o.recipe_id JOIN alchemy_rooms ar ON ar.user_id=o.room_owner_id WHERE o.id=$1 AND (o.room_owner_id=$2 OR ar.manager_user_id=$2) FOR UPDATE`,[id,uid])).rows[0];if(!o){await client.query('ROLLBACK');return res.status(404).json({error:'Đơn luyện đan không tồn tại.'});}if(o.status!=='pending'){await client.query('ROLLBACK');return res.status(409).json({error:'Đơn này đã được xử lý.'});}if(action==='reject'){await client.query(`UPDATE alchemy_orders SET status='rejected',responded_at=NOW() WHERE id=$1`,[id]);await client.query('COMMIT');if(o.requester_id)await createMailboxNotification(o.requester_id,'alchemy_order','⚗️ Đơn luyện đan bị từ chối',`Đơn ${o.recipe_name} ×${o.quantity} đã bị từ chối.`,'#dan-phap');return res.json({ok:true,message:'Đã từ chối đơn luyện đan.'});}if(new Date(o.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(400).json({error:'Đan Phòng đã hết thời gian thuê.'});}await client.query(`UPDATE alchemy_orders SET status='accepted',accepted_by=$2,accepted_at=NOW(),responded_at=NOW() WHERE id=$1`,[id,uid]);await client.query('COMMIT');res.json({ok:true,message:`Đã nhận đơn ${o.recipe_name} ×${o.quantity}. Hãy đưa linh dược vào lò luyện.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy respond:',e);res.status(500).json({error:'Không thể xử lý đơn luyện đan.'});}finally{client.release();}});
+app.post('/api/dan-phap/order/respond',auth,async(req,res)=>{const client=await dbConnect();try{await ensureAlchemySchema();const uid=req.session.user_id,id=Number(req.body?.requestId),action=req.body?.action==='accept'?'accept':'reject';await client.query('BEGIN');const o=(await client.query(`SELECT o.*,r.name AS recipe_name,ar.expires_at,ar.manager_user_id FROM alchemy_orders o JOIN alchemy_recipes r ON r.id=o.recipe_id JOIN alchemy_rooms ar ON ar.user_id=o.room_owner_id WHERE o.id=$1 AND (o.room_owner_id=$2 OR ar.manager_user_id=$2) FOR UPDATE`,[id,uid])).rows[0];if(!o){await client.query('ROLLBACK');return res.status(404).json({error:'Đơn luyện đan không tồn tại.'});}if(o.status!=='pending'){await client.query('ROLLBACK');return res.status(409).json({error:'Đơn này đã được xử lý.'});}if(action==='reject'){await client.query(`UPDATE alchemy_orders SET status='rejected',responded_at=NOW() WHERE id=$1`,[id]);await client.query('COMMIT');if(o.requester_id)await createMailboxNotification(o.requester_id,'alchemy_order','⚗️ Đơn luyện đan bị từ chối',`Đơn ${o.recipe_name} ×${o.quantity} đã bị từ chối.`,'#dan-phap');return res.json({ok:true,message:'Đã từ chối đơn luyện đan.'});}if(new Date(o.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(400).json({error:'Đan Phòng đã hết thời gian thuê.'});}await client.query(`UPDATE alchemy_orders SET status='accepted',accepted_by=$2,accepted_at=NOW(),responded_at=NOW() WHERE id=$1`,[id,uid]);await client.query('COMMIT');res.json({ok:true,message:`Đã nhận đơn ${o.recipe_name} ×${o.quantity}. Hãy đưa linh dược vào lò luyện.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy respond:',e);res.status(500).json({error:'Không thể xử lý đơn luyện đan.'});}finally{client.release();}});
 
-app.post('/api/dan-phap/brew',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,orderId=Number(req.body?.orderId),recipeId=Number(req.body?.recipeId),furnaceId=Number(req.body?.furnaceId)||0;const o=(await client.query(`SELECT o.*,r.name AS recipe_name,r.success_rate,r.output_item_id,r.min_realm,ar.expires_at,ar.manager_user_id,ar.room_grade FROM alchemy_orders o JOIN alchemy_recipes r ON r.id=o.recipe_id JOIN alchemy_rooms ar ON ar.user_id=o.room_owner_id WHERE o.id=$1 AND o.accepted_by=$2 AND o.status='accepted' FOR UPDATE`,[orderId,uid])).rows[0];if(!o||Number(o.recipe_id)!==recipeId){await client.query('ROLLBACK');return res.status(404).json({error:'Đơn luyện đan không hợp lệ.'});}if(new Date(o.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(400).json({error:'Đan Phòng đã hết hạn.'});}const furnace=(await client.query(`SELECT ti.id,ti.name,ti.category FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category LIKE '%Lò Luyện Đan%' FOR UPDATE`,[uid,furnaceId])).rows[0];if(!furnace){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa chọn hoặc không sở hữu Lò Luyện Đan.'});}const known=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,o.recipe_id])).rows[0];if(!known){await client.query('ROLLBACK');return res.status(403).json({error:'Người luyện phải sở hữu Đan Pháp này.'});}const outputCapacity=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,o.output_item_id])).rows[0];const expectedOutput=Number(o.quantity)*10;if(Number(outputCapacity?.quantity||0)+expectedOutput>200){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới chỉ chứa tối đa 200 viên mỗi loại. Cần còn trống ${expectedOutput} viên đan để nhận đơn.`});}const inv=(await client.query(`SELECT i.item_id,i.quantity,ri.quantity AS need,ti.name FROM alchemy_recipe_ingredients ri JOIN treasure_items ti ON ti.id=ri.item_id LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ri.item_id WHERE ri.recipe_id=$2 FOR UPDATE`,[uid,o.recipe_id])).rows;for(const x of inv)if(Number(x.quantity||0)<Number(x.need)*Number(o.quantity)){await client.query('ROLLBACK');return res.status(400).json({error:`Thiếu ${x.name} ×${Number(x.need)*Number(o.quantity)}.`});}for(const x of inv)await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,x.item_id,Number(x.need)*Number(o.quantity)]);const furnaceGrade=alchemyFurnaceGrade(furnace),successRate=Math.min(100,Number(o.success_rate)+alchemyFurnaceBonus(furnaceGrade)),success=crypto.randomInt(1,101)<=successRate;let reward=0;if(success){reward=Number(o.quantity)*10;await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[uid,o.output_item_id,reward]);}const payout=Number(o.payout),ingredientValue=Number(o.ingredient_value),profit=Math.max(0,payout-ingredientValue),ownerShare=Math.floor(profit*.10),managerShare=Math.floor(profit*.01),workerShare=Math.max(0,profit-ownerShare-managerShare);if(success){if(o.source_type==='member'){const requester=(await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[o.requester_id])).rows[0];if(!requester||Number(requester.spirit_stones)<payout){await client.query('ROLLBACK');return res.status(400).json({error:'Môn nhân đặt đơn không đủ linh thạch để thanh toán.'});}await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2 WHERE user_id=$1`,[o.requester_id,payout]);}const manager=Number(o.manager_user_id||0);const worker=Number(o.accepted_by||uid);await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[worker,ingredientValue+workerShare+(worker===Number(o.room_owner_id)?ownerShare:0)+(manager&&worker===manager?managerShare:0)]);if(worker!==Number(o.room_owner_id))await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[o.room_owner_id,ownerShare]);if(manager&&manager!==worker&&manager!==Number(o.room_owner_id))await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[manager,managerShare]);}else{if(o.source_type==='member'){/* thất bại: linh dược đã tiêu hao, không thu tiền */} }await client.query(`UPDATE alchemy_orders SET status=$2,completed_at=NOW(),responded_at=COALESCE(responded_at,NOW()) WHERE id=$1`,[orderId,success?'completed':'failed']);await client.query('COMMIT');if(o.requester_id)await createMailboxNotification(o.requester_id,'alchemy_order',success?'⚗️ Đơn luyện đan hoàn thành':'⚗️ Luyện đan thất bại',success?`Đơn ${o.recipe_name} ×${o.quantity} đã hoàn thành.`:`Đơn ${o.recipe_name} ×${o.quantity} luyện thất bại, không thu tiền.`,'#dan-phap');res.json({ok:true,success,outputQuantity:reward,payout:success?payout:0,profit,ownerShare,managerShare,workerShare,message:success?`Luyện thành công ${o.recipe_name} ×${reward}.`:`Hỏa hầu lệch nhịp, luyện đan thất bại.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy brew:',e);res.status(500).json({error:'Luyện đan thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}});
+app.post('/api/dan-phap/brew',auth,async(req,res)=>{const client=await dbConnect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,orderId=Number(req.body?.orderId),recipeId=Number(req.body?.recipeId),furnaceId=Number(req.body?.furnaceId)||0;const o=(await client.query(`SELECT o.*,r.name AS recipe_name,r.success_rate,r.output_item_id,r.min_realm,ar.expires_at,ar.manager_user_id,ar.room_grade FROM alchemy_orders o JOIN alchemy_recipes r ON r.id=o.recipe_id JOIN alchemy_rooms ar ON ar.user_id=o.room_owner_id WHERE o.id=$1 AND o.accepted_by=$2 AND o.status='accepted' FOR UPDATE`,[orderId,uid])).rows[0];if(!o||Number(o.recipe_id)!==recipeId){await client.query('ROLLBACK');return res.status(404).json({error:'Đơn luyện đan không hợp lệ.'});}if(new Date(o.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(400).json({error:'Đan Phòng đã hết hạn.'});}const furnace=(await client.query(`SELECT ti.id,ti.name,ti.category FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category LIKE '%Lò Luyện Đan%' FOR UPDATE`,[uid,furnaceId])).rows[0];if(!furnace){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa chọn hoặc không sở hữu Lò Luyện Đan.'});}const known=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,o.recipe_id])).rows[0];if(!known){await client.query('ROLLBACK');return res.status(403).json({error:'Người luyện phải sở hữu Đan Pháp này.'});}const outputCapacity=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,o.output_item_id])).rows[0];const expectedOutput=Number(o.quantity)*10;if(Number(outputCapacity?.quantity||0)+expectedOutput>200){await client.query('ROLLBACK');return res.status(400).json({error:`Tu Di Giới chỉ chứa tối đa 200 viên mỗi loại. Cần còn trống ${expectedOutput} viên đan để nhận đơn.`});}const inv=(await client.query(`SELECT i.item_id,i.quantity,ri.quantity AS need,ti.name FROM alchemy_recipe_ingredients ri JOIN treasure_items ti ON ti.id=ri.item_id LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ri.item_id WHERE ri.recipe_id=$2 FOR UPDATE`,[uid,o.recipe_id])).rows;for(const x of inv)if(Number(x.quantity||0)<Number(x.need)*Number(o.quantity)){await client.query('ROLLBACK');return res.status(400).json({error:`Thiếu ${x.name} ×${Number(x.need)*Number(o.quantity)}.`});}for(const x of inv)await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,x.item_id,Number(x.need)*Number(o.quantity)]);const furnaceGrade=alchemyFurnaceGrade(furnace),successRate=Math.min(100,Number(o.success_rate)+alchemyFurnaceBonus(furnaceGrade)),success=crypto.randomInt(1,101)<=successRate;let reward=0;if(success){reward=Number(o.quantity)*10;await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,[uid,o.output_item_id,reward]);}const payout=Number(o.payout),ingredientValue=Number(o.ingredient_value),profit=Math.max(0,payout-ingredientValue),ownerShare=Math.floor(profit*.10),managerShare=Math.floor(profit*.01),workerShare=Math.max(0,profit-ownerShare-managerShare);if(success){if(o.source_type==='member'){const requester=(await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[o.requester_id])).rows[0];if(!requester||Number(requester.spirit_stones)<payout){await client.query('ROLLBACK');return res.status(400).json({error:'Môn nhân đặt đơn không đủ linh thạch để thanh toán.'});}await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2 WHERE user_id=$1`,[o.requester_id,payout]);}const manager=Number(o.manager_user_id||0);const worker=Number(o.accepted_by||uid);await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[worker,ingredientValue+workerShare+(worker===Number(o.room_owner_id)?ownerShare:0)+(manager&&worker===manager?managerShare:0)]);if(worker!==Number(o.room_owner_id))await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[o.room_owner_id,ownerShare]);if(manager&&manager!==worker&&manager!==Number(o.room_owner_id))await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[manager,managerShare]);}else{if(o.source_type==='member'){/* thất bại: linh dược đã tiêu hao, không thu tiền */} }await client.query(`UPDATE alchemy_orders SET status=$2,completed_at=NOW(),responded_at=COALESCE(responded_at,NOW()) WHERE id=$1`,[orderId,success?'completed':'failed']);await client.query('COMMIT');if(o.requester_id)await createMailboxNotification(o.requester_id,'alchemy_order',success?'⚗️ Đơn luyện đan hoàn thành':'⚗️ Luyện đan thất bại',success?`Đơn ${o.recipe_name} ×${o.quantity} đã hoàn thành.`:`Đơn ${o.recipe_name} ×${o.quantity} luyện thất bại, không thu tiền.`,'#dan-phap');res.json({ok:true,success,outputQuantity:reward,payout:success?payout:0,profit,ownerShare,managerShare,workerShare,message:success?`Luyện thành công ${o.recipe_name} ×${reward}.`:`Hỏa hầu lệch nhịp, luyện đan thất bại.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy brew:',e);res.status(500).json({error:'Luyện đan thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}});
 
-app.post('/api/dan-phap/brew-direct',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,recipeId=Number(req.body?.recipeId),furnaceId=Number(req.body?.furnaceId)||0;const o=(await client.query(`SELECT r.*,ar.expires_at,ar.room_grade FROM alchemy_recipes r JOIN alchemy_rooms ar ON ar.user_id=$1 WHERE r.id=$2 AND r.active=true AND ar.expires_at>NOW()`,[uid,recipeId])).rows[0];if(!o){await client.query('ROLLBACK');return res.status(400).json({error:'Cần thuê Đan Phòng còn hiệu lực và chọn đúng Đan Pháp.'});}const known=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,recipeId])).rows[0];if(!known){await client.query('ROLLBACK');return res.status(403).json({error:'Bạn chưa sở hữu Đan Pháp này. Hãy dùng linh thạch để trao đổi Đan Pháp.'});}const furnace=(await client.query(`SELECT ti.id,ti.name,ti.category FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category LIKE '%Lò Luyện Đan%' FOR UPDATE`,[uid,furnaceId])).rows[0];if(!furnace){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa chọn hoặc không sở hữu Lò Luyện Đan.'});}const inv=(await client.query(`SELECT i.item_id,i.quantity,ri.quantity AS need,ti.name FROM alchemy_recipe_ingredients ri JOIN treasure_items ti ON ti.id=ri.item_id LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ri.item_id WHERE ri.recipe_id=$2 FOR UPDATE`,[uid,recipeId])).rows;for(const x of inv)if(Number(x.quantity||0)<Number(x.need)){await client.query('ROLLBACK');return res.status(400).json({error:`Thiếu ${x.name} ×${Number(x.need)}.`});}for(const x of inv)await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,x.item_id,Number(x.need)]);const fg=alchemyFurnaceGrade(furnace),successRate=Math.min(100,Number(o.success_rate)+alchemyFurnaceBonus(fg)),success=crypto.randomInt(1,101)<=successRate;if(success)await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,10,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+10,updated_at=NOW()`,[uid,o.output_item_id]);await client.query('COMMIT');res.json({ok:true,success,recipe:o.name,furnace:furnace.name,furnaceGrade:fg,successRate,message:success?`🔥 ${furnace.name} luyện thành công ${o.name.replace(' Pháp','')} · nhận 10 đan.`:`🔥 Hỏa hầu nghịch hành · luyện đan thất bại, linh dược đã tiêu hao.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy brew direct:',e);res.status(500).json({error:'Luyện đan thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}});
+app.post('/api/dan-phap/brew-direct',auth,async(req,res)=>{const client=await dbConnect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,recipeId=Number(req.body?.recipeId),furnaceId=Number(req.body?.furnaceId)||0;const o=(await client.query(`SELECT r.*,ar.expires_at,ar.room_grade FROM alchemy_recipes r JOIN alchemy_rooms ar ON ar.user_id=$1 WHERE r.id=$2 AND r.active=true AND ar.expires_at>NOW()`,[uid,recipeId])).rows[0];if(!o){await client.query('ROLLBACK');return res.status(400).json({error:'Cần thuê Đan Phòng còn hiệu lực và chọn đúng Đan Pháp.'});}const known=(await client.query(`SELECT 1 FROM alchemy_known_recipes WHERE user_id=$1 AND recipe_id=$2`,[uid,recipeId])).rows[0];if(!known){await client.query('ROLLBACK');return res.status(403).json({error:'Bạn chưa sở hữu Đan Pháp này. Hãy dùng linh thạch để trao đổi Đan Pháp.'});}const furnace=(await client.query(`SELECT ti.id,ti.name,ti.category FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 AND i.quantity>0 AND ti.category LIKE '%Lò Luyện Đan%' FOR UPDATE`,[uid,furnaceId])).rows[0];if(!furnace){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa chọn hoặc không sở hữu Lò Luyện Đan.'});}const inv=(await client.query(`SELECT i.item_id,i.quantity,ri.quantity AS need,ti.name FROM alchemy_recipe_ingredients ri JOIN treasure_items ti ON ti.id=ri.item_id LEFT JOIN inventory i ON i.user_id=$1 AND i.item_id=ri.item_id WHERE ri.recipe_id=$2 FOR UPDATE`,[uid,recipeId])).rows;for(const x of inv)if(Number(x.quantity||0)<Number(x.need)){await client.query('ROLLBACK');return res.status(400).json({error:`Thiếu ${x.name} ×${Number(x.need)}.`});}for(const x of inv)await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,x.item_id,Number(x.need)]);const fg=alchemyFurnaceGrade(furnace),successRate=Math.min(100,Number(o.success_rate)+alchemyFurnaceBonus(fg)),success=crypto.randomInt(1,101)<=successRate;if(success)await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,10,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+10,updated_at=NOW()`,[uid,o.output_item_id]);await client.query('COMMIT');res.json({ok:true,success,recipe:o.name,furnace:furnace.name,furnaceGrade:fg,successRate,message:success?`🔥 ${furnace.name} luyện thành công ${o.name.replace(' Pháp','')} · nhận 10 đan.`:`🔥 Hỏa hầu nghịch hành · luyện đan thất bại, linh dược đã tiêu hao.`});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('alchemy brew direct:',e);res.status(500).json({error:'Luyện đan thất bại. Giao dịch đã được hoàn tác.'});}finally{client.release();}});
 
-app.post('/api/dan-phap/exchange',auth,async(req,res)=>{const client=await pool.connect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,id=Number(req.body?.itemId),qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));const item=(await client.query(`SELECT ti.id,ti.name,ti.price FROM treasure_items ti JOIN alchemy_recipes ar ON ar.output_item_id=ti.id WHERE ti.id=$1 AND ar.active=true FOR UPDATE`,[id])).rows[0];const inv=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,id])).rows[0];if(!item||!inv||Number(inv.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Đan dược không đủ để trao đổi.'});}const total=Number(item.price)*qty;await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,id,qty]);await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[uid,total]);await client.query('COMMIT');res.json({ok:true,total,message:`Đã trao đổi ${item.name} ×${qty}, nhận ${total.toLocaleString('vi-VN')} linh thạch.`});}catch(e){try{await client.query('ROLLBACK')}catch{}res.status(500).json({error:'Trao đổi đan dược thất bại.'});}finally{client.release();}});
+app.post('/api/dan-phap/exchange',auth,async(req,res)=>{const client=await dbConnect();try{await ensureAlchemySchema();await client.query('BEGIN');const uid=req.session.user_id,id=Number(req.body?.itemId),qty=Math.max(1,Math.floor(Number(req.body?.quantity)||1));const item=(await client.query(`SELECT ti.id,ti.name,ti.price FROM treasure_items ti JOIN alchemy_recipes ar ON ar.output_item_id=ti.id WHERE ti.id=$1 AND ar.active=true FOR UPDATE`,[id])).rows[0];const inv=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[uid,id])).rows[0];if(!item||!inv||Number(inv.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Đan dược không đủ để trao đổi.'});}const total=Number(item.price)*qty;await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,id,qty]);await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[uid,total]);await client.query('COMMIT');res.json({ok:true,total,message:`Đã trao đổi ${item.name} ×${qty}, nhận ${total.toLocaleString('vi-VN')} linh thạch.`});}catch(e){try{await client.query('ROLLBACK')}catch{}res.status(500).json({error:'Trao đổi đan dược thất bại.'});}finally{client.release();}});
 
 app.get('/api/inventory',auth,async(req,res)=>{
   try{const r=await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.power_bonus,ti.ability,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY i.updated_at DESC`,[req.session.user_id]);res.json({rows:r.rows});}
@@ -4066,7 +4098,7 @@ app.get('/api/quests',auth,async(req,res)=>{
 });
 
 app.post('/api/quests/:id/claim',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try {
     const questId=Number(req.params.id); if(!Number.isInteger(questId))return res.status(400).json({error:'Nhiệm vụ không hợp lệ.'});
     const cycleKey=String(Math.floor(Date.now()/300000));
@@ -4168,7 +4200,7 @@ app.get('/api/tien-ban',auth,async(req,res)=>{
 
 app.post('/api/tien-ban/spin',auth,async(req,res)=>{
   await ensureTienBanSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await client.query('BEGIN');
     const uid=req.session.user_id, cost=4500;
@@ -4220,7 +4252,7 @@ app.post('/api/tien-ban/spin',auth,async(req,res)=>{
 });
 
 app.post('/api/tien-ban/spin10',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureTienBanSchema(); await client.query('BEGIN');
     const uid=req.session.user_id, rolls=10, unitCost=4500, cost=45000;
@@ -4277,7 +4309,7 @@ app.get('/api/dan-duong',auth,async(req,res)=>{
 });
 app.post('/api/dan-duong/invite',auth,async(req,res)=>{
   if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,buyerId=Number(req.body?.buyerId),itemId=Number(req.body?.itemId);
     if(!buyerId||buyerId===uid)return res.status(400).json({error:'Môn nhân được mời không hợp lệ.'});
@@ -4296,7 +4328,7 @@ app.post('/api/dan-duong/invite',auth,async(req,res)=>{
 
 app.post('/api/dan-duong/invite/respond',auth,async(req,res)=>{
   if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,id=Number(req.body?.requestId),action=req.body?.action;
     if(!id||!['accept','reject'].includes(action))return res.status(400).json({error:'Phản hồi lời mời không hợp lệ.'});
@@ -4333,7 +4365,7 @@ app.post('/api/dan-duong/invite/respond',auth,async(req,res)=>{
 });
 
 app.post('/api/dan-duong/exchange',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
     const id=Number(req.body?.itemId),qty=clampInt(req.body?.quantity,1,99);
@@ -4370,7 +4402,7 @@ app.get('/api/duoc-duong',auth,async(req,res)=>{
   }catch(e){console.error('duoc duong:',e);res.status(500).json({error:'Không thể mở Dược Đường.'});}
 });
 app.post('/api/duoc-duong/buy',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN');const id=Number(req.body?.itemId),qty=clampInt(req.body?.quantity,1,99);if(!Number.isInteger(id)||id<1){await client.query('ROLLBACK');return res.status(400).json({error:'Dược phẩm không hợp lệ.'});}
     const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND category LIKE 'Dược Đường%' FOR UPDATE`,[id])).rows[0];const p=(await client.query('SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
     if(!item||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy dược phẩm hoặc hồ sơ.'});}
@@ -4385,7 +4417,7 @@ app.post('/api/duoc-duong/buy',auth,async(req,res)=>{
 });
 
 app.get('/api/duong-thu',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN');const uid=req.session.user_id;
     const owned=(await client.query(`SELECT o.beast_id FROM owned_spirit_beasts o WHERE o.user_id=$1 AND o.quantity>0`,[uid])).rows;for(const b of owned)await settleBeastCare(client,uid,Number(b.beast_id));
     const rows=(await client.query(`SELECT o.beast_id,o.quantity,o.unbound_quantity,o.acquisition_type,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.min_realm,bc.happiness,bc.anger,bc.love,bc.dislike,bc.joy,bc.pet_spirit,COALESCE((SELECT json_agg(json_build_object('slot',sbe.slot,'itemId',sbe.item_id,'name',ti.name,'power',ti.beast_gear_power)) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=o.user_id AND sbe.beast_id=o.beast_id),'[]'::json) AS gear FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id JOIN spirit_beast_care bc ON bc.user_id=o.user_id AND bc.beast_id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.id`,[uid])).rows;
@@ -4394,7 +4426,7 @@ app.get('/api/duong-thu',auth,async(req,res)=>{
 });
 
 app.post('/api/duong-thu/bond',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN');const uid=req.session.user_id,id=Number(req.body?.beastId);if(!Number.isInteger(id)||id<1){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thú không hợp lệ.'});}
     const p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0],o=(await client.query('SELECT o.*,c.name FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 FOR UPDATE',[uid,id])).rows[0];if(!o||Number(o.unbound_quantity)<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thú này đã nhận chủ hoặc không có linh thú vô chủ.'});}
     const chance=bondChanceFor(Number(p?.spirit_power)||0),roll=crypto.randomInt(1,101);if(roll>chance){await ensureBeastCareRow(client,uid,id);await client.query('UPDATE spirit_beast_care SET anger=LEAST(100,anger+6),dislike=LEAST(100,dislike+4),joy=GREATEST(0,joy-4),updated_at=NOW() WHERE user_id=$1 AND beast_id=$2',[uid,id]);await client.query('COMMIT');return res.json({ok:false,chance,roll,message:`${o.name} còn cảnh giác, nhận chủ thất bại. Tỷ lệ hiện tại ${chance}%.`});}
@@ -4403,7 +4435,7 @@ app.post('/api/duong-thu/bond',auth,async(req,res)=>{
 });
 
 app.post('/api/duong-thu/feed',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),itemId=Number(req.body?.itemId),qty=clampInt(req.body?.quantity,1,20);if(!Number.isInteger(beastId)||!Number.isInteger(itemId)){await client.query('ROLLBACK');return res.status(400).json({error:'Thông tin cho ăn không hợp lệ.'});}
     const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND category='Dược Đường · Linh thú thức ăn' FOR UPDATE`,[itemId])).rows[0],o=(await client.query('SELECT quantity FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2 AND quantity>0 FOR UPDATE',[uid,beastId])).rows[0];if(!item||!o){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy thức ăn hoặc linh thú.'});}const inv=(await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[uid,itemId])).rows[0];if(!inv||Number(inv.quantity)<qty){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ thức ăn.'});}
     await settleBeastCare(client,uid,beastId);const joy=Number(item.beast_joy_gain||5)*qty;await client.query('UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[uid,itemId,qty]);await client.query(`UPDATE spirit_beast_care SET happiness=LEAST(100,happiness+$3),love=LEAST(100,love+$4),anger=GREATEST(0,anger-$5),dislike=GREATEST(0,dislike-$5),joy=LEAST(100,joy+$4),pet_spirit=pet_spirit+$6,updated_at=NOW() WHERE user_id=$1 AND beast_id=$2`,[uid,beastId,joy,Math.ceil(joy*.6),Math.ceil(joy*.4),Number(item.beast_food_gain||0)*qty]);await client.query('COMMIT');res.json({ok:true,message:`Linh thú đã dùng ${item.name} ×${qty}.`});
@@ -4411,13 +4443,13 @@ app.post('/api/duong-thu/feed',auth,async(req,res)=>{
 });
 
 app.post('/api/duong-thu/puppet',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),itemId=Number(req.body?.itemId);const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND is_khoi_loi=TRUE FOR UPDATE`,[itemId])).rows[0],o=(await client.query('SELECT quantity FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2 AND quantity>0 FOR UPDATE',[uid,beastId])).rows[0];if(!item||!o){await client.query('ROLLBACK');return res.status(404).json({error:'Khôi Lỗi hoặc linh thú không hợp lệ.'});}const inv=(await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[uid,itemId])).rows[0];if(!inv||Number(inv.quantity)<1){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ Khôi Lỗi.'});}await settleBeastCare(client,uid,beastId);const joy=Number(item.beast_joy_gain||10);await client.query('UPDATE inventory SET quantity=quantity-1,updated_at=NOW() WHERE user_id=$1 AND item_id=$2',[uid,itemId]);await client.query(`UPDATE spirit_beast_care SET happiness=LEAST(100,happiness+$3),joy=LEAST(100,joy+$4),anger=GREATEST(0,anger-$5),dislike=GREATEST(0,dislike-$5),pet_spirit=pet_spirit+$6,updated_at=NOW() WHERE user_id=$1 AND beast_id=$2`,[uid,beastId,Math.round(joy*.65),joy,Math.round(joy*.35),Math.round(joy*.5)]);await client.query('COMMIT');res.json({ok:true,message:`Khôi Lỗi ${item.name} khiến linh thú vui mừng.`});}
   catch(e){try{await client.query('ROLLBACK')}catch{};console.error('beast puppet:',e);res.status(500).json({error:'Dùng Khôi Lỗi thất bại.'});}finally{client.release();}
 });
 
 app.post('/api/duong-thu/equip',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),itemId=Number(req.body?.itemId);const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND category='Dược Đường · Linh thú trang bị' FOR UPDATE`,[itemId])).rows[0],o=(await client.query('SELECT c.beast_realm_tier FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.beast_id=$2 AND o.quantity>0 FOR UPDATE',[uid,beastId])).rows[0],p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];if(!item||!o){await client.query('ROLLBACK');return res.status(404).json({error:'Linh thú hoặc trang bị không hợp lệ.'});}const ri=stageFor(Number(p.spirit_power)||0).realmIndex;if(Number(o.beast_realm_tier)<Number(item.beast_gear_min_realm)||ri<Number(item.min_realm)){await client.query('ROLLBACK');return res.status(403).json({error:'Cảnh giới linh thú hoặc môn nhân chưa đủ để dùng trang bị này.'});}const inv=(await client.query('SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE',[uid,itemId])).rows[0];if(!inv||Number(inv.quantity)<1){await client.query('ROLLBACK');return res.status(400).json({error:'Trang bị chưa có trong Tu Di Giới.'});}await client.query(`INSERT INTO spirit_beast_equipment(user_id,beast_id,slot,item_id) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,beast_id,slot) DO UPDATE SET item_id=EXCLUDED.item_id,equipped_at=NOW()`,[uid,beastId,item.beast_gear_slot||'armor',itemId]);await client.query('COMMIT');res.json({ok:true,message:`Đã trang bị ${item.name} cho linh thú.`});}
   catch(e){try{await client.query('ROLLBACK')}catch{};console.error('beast equip:',e);res.status(500).json({error:'Trang bị cho linh thú thất bại.'});}finally{client.release();}
 });
@@ -4464,7 +4496,7 @@ app.get('/api/beast-house',auth,async(req,res)=>{
   }catch(e){console.error('beast house load:',e);res.status(500).json({error:'Không thể mở Thú Đường.'});}
 });
 app.post('/api/beast-house/buy',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN');
     const id=Number(req.body?.id);
     if(!Number.isInteger(id)||id<1){await client.query('ROLLBACK');return res.status(400).json({error:'Linh thú không hợp lệ.'});}
@@ -4489,7 +4521,7 @@ app.get('/api/linh-phap',auth,async(req,res)=>{
   catch(e){console.error('linh phap load:',e);res.status(500).json({error:'Không thể mở Linh Pháp.'});}
 });
 app.post('/api/linh-phap/buy',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN');
     const id=Number(req.body?.id);
     if(!Number.isInteger(id)||id<1){await client.query('ROLLBACK');return res.status(400).json({error:'Linh căn không hợp lệ.'});}
@@ -4559,7 +4591,7 @@ async function ensureEquipmentSchemaImpl(){
 // CÔNG PHÁP TRANG BỊ · đổi công pháp đang sử dụng
 app.post('/api/techniques/equip',auth,async(req,res)=>{
   await ensureEquipmentSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const techniqueId=Number(req.body?.techniqueId);
     if(!Number.isInteger(techniqueId)||techniqueId<1)return res.status(400).json({error:'Công pháp không hợp lệ.'});
@@ -4596,7 +4628,7 @@ app.get('/api/tien-khi-enhance',auth,async(req,res)=>{
 });
 
 app.post('/api/tien-khi-enhance',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureEquipmentSchema();
     const uid=req.session.user_id;
@@ -4727,7 +4759,7 @@ app.patch('/api/equipment/avatar',auth,async(req,res)=>{
 
 app.post('/api/equipment/equip',auth,async(req,res)=>{
   await ensureEquipmentSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await client.query('BEGIN'); const type=String(req.body?.type||''); const id=Number(req.body?.id);
     if(!['beast','root','artifact','immortal-artifact','immortal'].includes(type)||!Number.isInteger(id)||id<1){await client.query('ROLLBACK');return res.status(400).json({error:'Trang bị không hợp lệ.'});}
@@ -4805,7 +4837,7 @@ app.get('/api/linh-thu-bang',async(req,res)=>{
 });
 
 app.post('/api/enhance/roll',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await client.query('BEGIN'); const cost=300; const p=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[req.session.user_id])).rows[0];
     if(Number(p.spirit_power)<cost){await client.query('ROLLBACK');return res.status(400).json({error:`Cần ${cost} linh lực để quay vật phẩm tăng cường.`});}
     const poolItems=[['Linh Phù Cường Hóa',55],['Tinh Thạch Cường Hóa',28],['Huyền Thiết Cường Hóa',12],['Thiên Đạo Cường Hóa Thạch',5]];
@@ -4939,7 +4971,7 @@ app.post('/api/bicanh/contribute',auth,async(req,res)=>{
 });
 
 app.post('/api/bicanh/join',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureBicanhSchema();
     const uid=req.session.user_id, realmId=Number(req.body?.realmId);
@@ -4990,7 +5022,7 @@ app.post('/api/bicanh/invite',auth,async(req,res)=>{
 });
 
 app.post('/api/bicanh/invite/respond',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureBicanhSchema();
     const uid=req.session.user_id, invitationId=Number(req.body?.invitationId), action=String(req.body?.action||'');
@@ -5014,7 +5046,7 @@ app.post('/api/bicanh/invite/respond',auth,async(req,res)=>{
 });
 
 app.post('/api/bicanh/enter',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureBicanhSchema();
     const uid=req.session.user_id, realmId=Number(req.body?.realmId);
@@ -5259,7 +5291,7 @@ app.post('/api/chat',auth,async(req,res)=>{
     if(!message)return res.status(400).json({error:'Tin nhắn không được để trống.'});
     const elders=await topElders(3); const elderMap=new Map(elders.map((x,i)=>[Number(x.id),i+1]));
     const myRank=elderMap.get(Number(req.session.user_id))||0;
-    const client=await pool.connect();
+    const client=await dbConnect();
     try{
       await client.query('BEGIN');
       if(myRank){
@@ -5332,7 +5364,7 @@ app.get('/api/red-packets',auth,async(req,res)=>{
 
 app.post('/api/red-packets',auth,async(req,res)=>{
   await ensureRedPacketSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const total=Number(req.body?.totalStones);
     const recipients=Math.floor(Number(req.body?.recipientCount));
@@ -5356,7 +5388,7 @@ app.post('/api/red-packets',auth,async(req,res)=>{
 
 app.post('/api/red-packets/:id/claim',auth,async(req,res)=>{
   await ensureRedPacketSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const packetId=Number(req.params.id); if(!Number.isInteger(packetId)||packetId<=0)return res.status(400).json({error:'Lì Xì không hợp lệ.'});
     await client.query('BEGIN');
@@ -5509,9 +5541,15 @@ function ultimateDamage(attacker, defender){
   return Math.max(1,Math.round(baseDamage*realmMultiplier*defenseReduction*variance));
 }
 
+function parseChallengeMoves(value){
+  if(Array.isArray(value))return value;
+  if(value&&typeof value==='object')return value;
+  try{const parsed=JSON.parse(value||'[]');return Array.isArray(parsed)?parsed:[];}catch{return [];}
+}
 function battleSnapshot(row,viewerId){
   const challengerTurn=Number(row.turn_user_id)===Number(row.challenger_id);
   const viewerIsChallenger=Number(viewerId)===Number(row.challenger_id);
+  const moveOptions=parseChallengeMoves(viewerIsChallenger?row.challenger_moves:row.opponent_moves);
   return {
     id:Number(row.id),
     status:row.status,
@@ -5527,7 +5565,8 @@ function battleSnapshot(row,viewerId){
     lastActorId:row.last_actor_id==null?null:Number(row.last_actor_id),
     lastDamage:Number(row.last_damage)||0,
     lastAction:row.last_action||'',
-    startedAt:row.started_at
+    startedAt:row.started_at,
+    moveOptions
   };
 }
 
@@ -5537,6 +5576,37 @@ function techniqueDamageMultiplier(technique){
   const gradePct=grade.includes('Thượng')?0.28:grade.includes('Trung')?0.14:0.04;
   const power=Math.max(0,Number(technique.power_bonus)||0);
   return 1+gradePct+Math.min(0.45,power/5000);
+}
+
+// Khiêu Chiến Online v3.7.39: 3 chiêu cố định, sát thương deterministic để
+// con số hiển thị trên nút luôn khớp với sát thương server thực sự áp dụng.
+const CHALLENGE_MOVES=[
+  {id:1,name:'Hàn Phong Trảm',icon:'❄️',multiplier:0.72,description:'Nhanh, ổn định · sát thương thấp'},
+  {id:2,name:'Thiên Lôi Phá',icon:'⚡',multiplier:1.00,description:'Cân bằng · sát thương trung bình'},
+  {id:3,name:'Cửu Thiên Diệt',icon:'☄️',multiplier:1.36,description:'Bạo phát · sát thương cao'}
+];
+function challengeMoveDamage(attacker,defender,moveId,equipmentPowerOverride){
+  const move=CHALLENGE_MOVES.find(x=>Number(x.id)===Number(moveId))||CHALLENGE_MOVES[0];
+  const aSpirit=Math.max(0,Number(attacker.spirit_power)||0);
+  const dSpirit=Math.max(0,Number(defender.spirit_power)||0);
+  const aStage=stageFor(aSpirit), dStage=stageFor(dSpirit);
+  const aAttr=attributesFor(aSpirit,attacker.comprehension);
+  const dAttr=attributesFor(dSpirit,defender.comprehension);
+  const equipment=Math.max(0,Number(equipmentPowerOverride ?? attacker.equipment_power)||0);
+  const attackerImmortalBuff=immortalArtifactBuff(attacker);
+  // Tăng dần theo cảnh giới + tầng, đồng thời vẫn chịu ảnh hưởng linh lực/trang bị.
+  const realmGrowth=1 + aStage.realmIndex*0.045 + Math.max(0,aStage.tier-1)*0.012;
+  const base=(110 + aAttr.congLuc*3.15 + aSpirit*0.018 + equipment*0.75)*(1+attackerImmortalBuff.attackPct/100);
+  const realmGap=aStage.realmIndex-dStage.realmIndex;
+  let gapMultiplier=1;
+  if(realmGap>0) gapMultiplier=1+Math.min(1.65,realmGap*0.18);
+  else if(realmGap<0) gapMultiplier=Math.max(0.30,1-Math.min(0.70,Math.abs(realmGap)*0.20));
+  else gapMultiplier=1+Math.max(0,dStage.tier-aStage.tier)*0.025;
+  const defenseReduction=Math.max(0.35,1-(dAttr.phongThu/(dAttr.phongThu+900)))*(1-immortalArtifactBuff(defender).defensePct/200);
+  return Math.max(1,Math.round(base*realmGrowth*gapMultiplier*defenseReduction*move.multiplier));
+}
+function challengeMovePreview(attacker,defender){
+  return CHALLENGE_MOVES.map(m=>({id:m.id,name:m.name,icon:m.icon,description:m.description,damage:challengeMoveDamage(attacker,defender,m.id),multiplier:m.multiplier}));
 }
 
 async function publishChallengeAnnouncement(client,message,durationMs=10000){
@@ -5715,7 +5785,7 @@ app.post('/api/disciples/request',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id,mentorId=Number(req.body?.mentorId);
     if(!Number.isInteger(mentorId)||mentorId<1||mentorId===uid)return res.status(400).json({error:'Sư phụ không hợp lệ.'});
-    const client=await pool.connect();
+    const client=await dbConnect();
     try{
       await client.query('BEGIN');
       if((await client.query('SELECT 1 FROM mentor_disciples WHERE disciple_id=$1',[uid])).rows.length){await client.query('ROLLBACK');return res.status(409).json({error:'Bạn đã có sư phụ.'});}
@@ -5734,7 +5804,7 @@ app.post('/api/disciples/invite',auth,async(req,res)=>{
   try{
     const uid=req.session.user_id,discipleId=Number(req.body?.discipleId);
     if(!Number.isInteger(discipleId)||discipleId<1||discipleId===uid)return res.status(400).json({error:'Đệ tử được mời không hợp lệ.'});
-    const client=await pool.connect();
+    const client=await dbConnect();
     try{
       await client.query('BEGIN');
       const me=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[uid])).rows[0];
@@ -5756,7 +5826,7 @@ app.post('/api/disciples/invite',auth,async(req,res)=>{
 });
 
 app.post('/api/disciples/respond',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,id=Number(req.body?.requestId),action=String(req.body?.action||'');
     if(!Number.isInteger(id)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu không hợp lệ.'});
@@ -5775,7 +5845,7 @@ app.post('/api/disciples/respond',auth,async(req,res)=>{
 });
 
 app.post('/api/disciples/invite/respond',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,id=Number(req.body?.requestId),action=String(req.body?.action||'');
     if(!Number.isInteger(id)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu không hợp lệ.'});
@@ -5815,7 +5885,7 @@ app.post('/api/disciples/permission',auth,async(req,res)=>{
 });
 
 app.post('/api/disciples/permission/respond',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,id=Number(req.body?.requestId),action=String(req.body?.action||'');
     if(!Number.isInteger(id)||!['approve','reject'].includes(action))return res.status(400).json({error:'Yêu cầu không hợp lệ.'});
@@ -5828,7 +5898,7 @@ app.post('/api/disciples/permission/respond',auth,async(req,res)=>{
 });
 
 app.post('/api/disciples/gift',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id;
     const target=Number(req.body?.discipleId);
@@ -6020,6 +6090,8 @@ async function ensureChallengeSchemaImpl(){
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_damage NUMERIC(14,2) NOT NULL DEFAULT 0;
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS last_action TEXT NOT NULL DEFAULT '';
     ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS challenger_moves JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE challenge_requests ADD COLUMN IF NOT EXISTS opponent_moves JSONB NOT NULL DEFAULT '[]'::jsonb;
     CREATE INDEX IF NOT EXISTS idx_challenge_requests_challenger_status
       ON challenge_requests(challenger_id,status,mode,created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_challenge_requests_opponent_status
@@ -6035,7 +6107,7 @@ app.get('/api/challenges/online/state',auth,async(req,res)=>{
     const uid=req.session.user_id;
     const row=(await query(`SELECT cr.id,cr.status,cr.challenger_id,cr.opponent_id,
         cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,
-        cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,
+        cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,cr.challenger_moves,cr.opponent_moves,
         cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,
         cp.spirit_power AS challenger_spirit,
         ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,
@@ -6092,7 +6164,7 @@ app.get('/api/challenges',auth,async(req,res)=>{
              FROM challenge_requests cr JOIN users cu ON cu.id=cr.challenger_id JOIN users ou ON ou.id=cr.opponent_id
              LEFT JOIN treasure_items ri ON ri.id=cr.reward_item_id
              WHERE cr.challenger_id=$1 OR cr.opponent_id=$1 ORDER BY cr.id DESC LIMIT 30`,[uid]),
-      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.status,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,
+      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.status,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_actor_id,cr.last_damage,cr.last_action,cr.started_at,cr.challenger_moves,cr.opponent_moves,
                     cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,cp.spirit_power AS challenger_spirit,
                     ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,op.spirit_power AS opponent_spirit
              FROM challenge_requests cr
@@ -6119,7 +6191,7 @@ app.get('/api/challenges',auth,async(req,res)=>{
 
 app.post('/api/challenges/offline',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,target=Number(req.body?.userId);
     if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
@@ -6147,7 +6219,7 @@ app.post('/api/challenges/offline',auth,async(req,res)=>{
 
 app.post('/api/challenges/online/request',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,target=Number(req.body?.userId);
     if(!Number.isInteger(target)||target<1||target===uid)return res.status(400).json({error:'Đối thủ không hợp lệ.'});
@@ -6175,7 +6247,7 @@ app.post('/api/challenges/online/request',auth,async(req,res)=>{
 
 app.post('/api/challenges/online/respond',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,requestId=Number(req.body?.requestId),action=String(req.body?.action||'');
     if(!Number.isInteger(requestId)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu lôi đài không hợp lệ.'});
@@ -6191,22 +6263,27 @@ app.post('/api/challenges/online/respond',auth,async(req,res)=>{
     const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[ids[0],ids[1]])).rows;
     const challenger=rows.find(x=>Number(x.id)===Number(reqRow.challenger_id)), opponent=rows.find(x=>Number(x.id)===Number(reqRow.opponent_id));
     if(!challenger||!opponent){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ chiến đấu.'});}
+    const eqRows=(await client.query(`SELECT p.user_id,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power FROM profiles p WHERE p.user_id IN ($1,$2)`,[challenger.id,opponent.id])).rows;
+    for(const r of eqRows){const target=Number(r.user_id)===Number(challenger.id)?challenger:opponent;target.equipment_power=Number(r.equipment_power)||0;}
+    const challengerMoves=challengeMovePreview(challenger,opponent);
+    const opponentMoves=challengeMovePreview(opponent,challenger);
     const activeA=(await client.query(`SELECT 1 FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) LIMIT 1`,[challenger.id])).rows[0];
     const activeB=(await client.query(`SELECT 1 FROM challenge_requests WHERE status='accepted' AND (challenger_id=$1 OR opponent_id=$1) LIMIT 1`,[opponent.id])).rows[0];
     if(activeA||activeB){await client.query('ROLLBACK');return res.status(409).json({error:'Một trong hai môn nhân đang ở trong lôi đài khác.'});}
     const protection=await consumeDiscipleChallengePermission(client,Number(reqRow.challenger_id),Number(reqRow.opponent_id),true);
     if(!protection.allowed){await client.query('ROLLBACK');return res.status(403).json({error:protection.error,protected:true,mentorId:protection.mentor?.mentor_id,mentorName:protection.mentor?.mentor_name,discipleId:Number(reqRow.opponent_id)});}
     const challengerMax=challengeHealth(challenger), opponentMax=challengeHealth(opponent);
-    await client.query(`UPDATE challenge_requests SET status='accepted',challenger_hp=$2,opponent_hp=$3,challenger_max_hp=$4,opponent_max_hp=$5,turn_user_id=$6,round_number=0,last_actor_id=NULL,last_damage=0,last_action='',started_at=NOW(),responded_at=NOW() WHERE id=$1`,[requestId,challengerMax,opponentMax,challengerMax,opponentMax,challenger.id]);
+    await client.query(`UPDATE challenge_requests SET status='accepted',challenger_hp=$2,opponent_hp=$3,challenger_max_hp=$4,opponent_max_hp=$5,turn_user_id=$6,round_number=0,last_actor_id=NULL,last_damage=0,last_action='',challenger_moves=$7::jsonb,opponent_moves=$8::jsonb,started_at=NOW(),responded_at=NOW() WHERE id=$1`,[requestId,challengerMax,opponentMax,challengerMax,opponentMax,challenger.id,JSON.stringify(challengerMoves),JSON.stringify(opponentMoves)]);
     await client.query('COMMIT');
-    res.json({ok:true,status:'accepted',battle:{id:requestId,challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:challengerMax,opponentHp:opponentMax,challengerMaxHp:challengerMax,opponentMaxHp:opponentMax,turnUserId:Number(challenger.id),yourTurn:Number(challenger.id)===uid,round:0,lastDamage:0,lastAction:'',challengerName:challenger.display_name,opponentName:opponent.display_name},message:`Lôi đài đã khai mở. ${challenger.display_name} ra chiêu trước.`});
+    res.set('Cache-Control','no-store');
+    res.json({ok:true,status:'accepted',battle:{id:requestId,challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:challengerMax,opponentHp:opponentMax,challengerMaxHp:challengerMax,opponentMaxHp:opponentMax,turnUserId:Number(challenger.id),yourTurn:Number(challenger.id)===uid,round:0,lastDamage:0,lastAction:'',challengerName:challenger.display_name,opponentName:opponent.display_name,moveOptions:Number(challenger.id)===uid?challengerMoves:opponentMoves},message:`Lôi đài đã khai mở. ${challenger.display_name} ra chiêu trước.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge respond:',e);res.status(500).json({error:'Lôi đài online thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });
 
 app.post('/api/challenges/online/spit',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,requestId=Number(req.body?.requestId);
     if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
@@ -6241,9 +6318,9 @@ app.post('/api/challenges/online/spit',auth,async(req,res)=>{
 
 app.post('/api/challenges/online/action',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
-    const uid=req.session.user_id,requestId=Number(req.body?.requestId),techniqueId=Number(req.body?.techniqueId||0);
+    const uid=req.session.user_id,requestId=Number(req.body?.requestId),moveId=Math.max(1,Math.min(3,Math.floor(Number(req.body?.moveId||req.body?.techniqueId||1))));
     if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
     await client.query('BEGIN');
     const battle=(await client.query(`SELECT cr.*,cu.display_name AS challenger_name,ou.display_name AS opponent_name
@@ -6256,21 +6333,11 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[battle.challenger_id,battle.opponent_id])).rows;
     const attacker=rows.find(x=>Number(x.id)===uid), defender=rows.find(x=>Number(x.id)!==uid);
     if(!attacker||!defender){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hai hồ sơ chiến đấu.'});}
-    const attackerEq=(await client.query(`SELECT p.equipped_technique_id,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[uid])).rows[0];
-    const defenderEq=(await client.query(`SELECT (SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1`,[defender.id])).rows[0];
-    attacker.equipment_power=Number(attackerEq?.equipment_power)||0; defender.equipment_power=Number(defenderEq?.equipment_power)||0;
-    const chosenTechniqueId=techniqueId>0?techniqueId:Number(attackerEq?.equipped_technique_id)||0;
-    let technique=null;
-    if(chosenTechniqueId>0){
-      technique=(await client.query(`SELECT ct.id,ct.name,ct.grade,ct.power_bonus,ct.ability FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id WHERE ut.user_id=$1 AND ct.id=$2`,[uid,chosenTechniqueId])).rows[0];
-      if(!technique){await client.query('ROLLBACK');return res.status(400).json({error:'Bạn chưa học công pháp được chọn.'});}
-    }
-    const rawDamage=ultimateDamage(attacker,defender)*techniqueDamageMultiplier(technique);
-    if(!Number.isFinite(rawDamage)){
-      await client.query('ROLLBACK');
-      return res.status(409).json({error:'Không thể xác định sát thương của chiêu. Lượt đánh chưa bị trừ.'});
-    }
-    const damage=Math.max(1,Math.round(rawDamage));
+    const moveRow=(Number(attacker.id)===Number(battle.challenger_id)?battle.challenger_moves:battle.opponent_moves);
+    const moveOptions=parseChallengeMoves(moveRow);
+    const selectedMove=moveOptions.find(m=>Number(m.id)===moveId)||moveOptions[0]||null;
+    if(!selectedMove||!Number.isFinite(Number(selectedMove.damage))||Number(selectedMove.damage)<1){await client.query('ROLLBACK');return res.status(409).json({error:'Bộ 3 chiêu của lôi đài không hợp lệ. Trận đấu cần được tạo lại.'});}
+    const damage=Math.max(1,Math.round(Number(selectedMove.damage)));
     const attackerIsChallenger=Number(attacker.id)===Number(battle.challenger_id);
     const oldDefHp=attackerIsChallenger?Number(battle.opponent_hp):Number(battle.challenger_hp);
     if(!Number.isFinite(oldDefHp)||oldDefHp<0){
@@ -6279,7 +6346,7 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
     }
     const newDefHp=Math.max(0,oldDefHp-damage);
     const newRound=Number(battle.round_number||0)+1;
-    const actionName=technique?`⚡ Tuyệt Chiêu · ${technique.name}`:'⚡ Tuyệt Chiêu · Hàn Thiên Phá';
+    const actionName=`${selectedMove.icon||'⚔️'} ${selectedMove.name}`;
     const realmGap=stageFor(Number(attacker.spirit_power)||0).realmIndex-stageFor(Number(defender.spirit_power)||0).realmIndex;
     if(newDefHp<=0){
       const winner=attacker, loser=defender;
@@ -6290,7 +6357,7 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
       await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_hp=$4,opponent_hp=$5,turn_user_id=NULL,round_number=$6,last_actor_id=$7,last_damage=$8,last_action=$9,challenger_damage=$10,opponent_damage=$11,success_chance=1,reward_spirit=$12,reward_item_id=$13,reward_quantity=$14,penalty_text=$15,responded_at=NOW() WHERE id=$1`,[requestId,winner.id,loser.id,attackerIsChallenger?Number(battle.challenger_hp):newDefHp,attackerIsChallenger?newDefHp:Number(battle.opponent_hp),newRound,attacker.id,damage,actionName,challengerDamage,opponentDamage,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text]);
       const betResult=await settleChallengeBets(client,requestId,winner.id);
       await client.query('COMMIT');
-      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
+      return res.json({ok:true,status:'completed',winnerId:Number(winner.id),winner:winner.display_name,loser:loser.display_name,damage,moveId,realmGap,round:newRound,reward,penalty:loss,betSettlement:betResult,message:`${winner.display_name} tung ${actionName}, gây ${damage.toLocaleString('vi-VN')} sát thương và kết thúc lôi đài.`});
     }
     // Luôn tính HP mới từ đúng phía bị tấn công, sau đó ghi cả hai cột trong cùng transaction.
     // Không cập nhật HP theo client để tránh trường hợp phía đối thủ vẫn giữ HP cũ.
@@ -6332,7 +6399,7 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
     const savedChallengerHp=Number(saved.challenger_hp)||0;
     const savedOpponentHp=Number(saved.opponent_hp)||0;
     res.set('Cache-Control','no-store');
-    res.json({ok:true,status:'accepted',damage,realmGap,round:Number(saved.round_number)||newRound,turnUserId:Number(saved.turn_user_id),yourTurn:false,
+    res.json({ok:true,status:'accepted',damage,moveId,realmGap,round:Number(saved.round_number)||newRound,turnUserId:Number(saved.turn_user_id),yourTurn:false,
       challengerHp:savedChallengerHp,opponentHp:savedOpponentHp,
       challengerMaxHp:Number(saved.challenger_max_hp)||Number(battle.challenger_max_hp),
       opponentMaxHp:Number(saved.opponent_max_hp)||Number(battle.opponent_max_hp),
@@ -6345,7 +6412,7 @@ app.post('/api/challenges/online/action',auth,async(req,res)=>{
 
 app.post('/api/challenges/online/leave',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,requestId=Number(req.body?.requestId);
     if(!Number.isInteger(requestId)||requestId<1)return res.status(400).json({error:'Lôi đài không hợp lệ.'});
@@ -6391,7 +6458,7 @@ app.get('/api/arena/live',auth,async(req,res)=>{
 
 app.post('/api/challenges/bet',auth,async(req,res)=>{
   await ensureChallengeSchema();
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id,challengeId=Number(req.body?.challengeId),betOnUserId=Number(req.body?.betOnUserId),amount=Math.floor(Number(req.body?.amount)||0);
     if(!Number.isInteger(challengeId)||challengeId<1||!Number.isInteger(betOnUserId)||betOnUserId<1||amount<1)return res.status(400).json({error:'Thông tin đặt cược không hợp lệ.'});
@@ -6454,7 +6521,7 @@ app.post('/api/friends/request',auth,async(req,res)=>{
 });
 
 app.post('/api/friends/respond',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     const uid=req.session.user_id, requestId=Number(req.body?.requestId), action=String(req.body?.action||'');
     if(!Number.isInteger(requestId)||!['accept','reject'].includes(action))return res.status(400).json({error:'Yêu cầu không hợp lệ.'});
@@ -6618,7 +6685,7 @@ app.get('/api/beast-arena',auth,async(req,res)=>{
 });
 
 app.post('/api/beast-arena/offline',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await ensureBeastArenaSchema();await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),npcId=String(req.body?.npcId||'');
     await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
     const used24=await usageCount24h(client,'beast_arena_usage','user_id',uid);
@@ -6637,7 +6704,7 @@ app.post('/api/beast-arena/offline',auth,async(req,res)=>{
 });
 
 app.post('/api/beast-arena/divine',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await ensureBeastArenaSchema();await client.query('BEGIN');const uid=req.session.user_id,beastId=Number(req.body?.beastId),skillId=Math.max(1,Math.min(3,Number(req.body?.skillId)||1)),npcId=String(req.body?.npcId||'thien-ho');
     await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
     const used24=await usageCount24h(client,'beast_arena_usage','user_id',uid);
@@ -6654,7 +6721,7 @@ app.post('/api/beast-arena/divine',auth,async(req,res)=>{
 });
 
 app.post('/api/beast-arena/online/request',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{await ensureBeastArenaSchema();await client.query('BEGIN');const uid=req.session.user_id,target=Number(req.body?.targetUserId),beastId=Number(req.body?.beastId),skillId=Math.max(1,Math.min(3,Number(req.body?.skillId)||1));
     await client.query('SELECT user_id FROM profiles WHERE user_id=$1 FOR UPDATE',[uid]);
     const used24=await usageCount24h(client,'beast_arena_usage','user_id',uid);
@@ -6667,7 +6734,7 @@ app.post('/api/beast-arena/online/request',auth,async(req,res)=>{
 });
 
 app.post('/api/beast-arena/online/respond',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureBeastArenaSchema(); await client.query('BEGIN');
     const uid=req.session.user_id,requestId=Number(req.body?.requestId),action=String(req.body?.action||'');
@@ -6692,7 +6759,7 @@ app.post('/api/beast-arena/online/respond',auth,async(req,res)=>{
 });
 
 app.post('/api/beast-arena/online/turn',auth,async(req,res)=>{
-  const client=await pool.connect();
+  const client=await dbConnect();
   try{
     await ensureBeastArenaSchema(); await client.query('BEGIN');
     const uid=req.session.user_id,requestId=Number(req.body?.requestId),skillId=Math.max(1,Math.min(3,Number(req.body?.skillId)||1));
@@ -6783,9 +6850,25 @@ function stopBackgroundJobs(){
   backgroundJobsStarted=false;
 }
 
+async function lockImmortalPillsOnce(){
+  const migrationId='v3.7.40-lock-immortal-pills';
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    const already=(await client.query('SELECT 1 FROM app_migrations WHERE id=$1',[migrationId])).rows[0];
+    if(already){await client.query('COMMIT');return;}
+    await client.query(`INSERT INTO alchemy_shop_settings(id,immortal_pills_unlocked) VALUES(1,FALSE) ON CONFLICT(id) DO NOTHING`);
+    await client.query(`UPDATE alchemy_shop_settings SET immortal_pills_unlocked=FALSE,updated_at=NOW(),updated_by=NULL WHERE id=1`);
+    await client.query(`INSERT INTO app_migrations(id) VALUES($1)`,[migrationId]);
+    await client.query('COMMIT');
+    console.log('[ALCHEMY] v3.7.40 đã khóa mua toàn bộ Tiên Đan; chỉ Đan Chủ mới có thể mở khóa.');
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}
+  finally{client.release();}
+}
+
 async function clearActiveOnlineChallengesOnce(){
-  const migrationId='v3.7.38-clear-online-challenges-and-repair';
-  const client=await pool.connect();
+  const migrationId='v3.7.39-reset-online-challenges-and-moves';
+  const client=await dbConnect();
   try{
     await client.query('BEGIN');
     const already=(await client.query('SELECT 1 FROM app_migrations WHERE id=$1',[migrationId])).rows[0];
@@ -6805,13 +6888,13 @@ async function clearActiveOnlineChallengesOnce(){
     }
     await client.query(`INSERT INTO app_migrations(id) VALUES($1)`,[migrationId]);
     await client.query('COMMIT');
-    if(active.length)console.log(`[CHALLENGE] Đã hủy ${active.length} lôi đài online cũ và hoàn cược.`);
+    if(active.length)console.log(`[CHALLENGE] v3.7.39 đã hủy ${active.length} lôi đài online cũ và hoàn cược.`);
   }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}
   finally{client.release();}
 }
 
 async function initializeDatabaseWithRetry(){
-  if(shuttingDown) return;
+  if(shuttingDown||poolClosed) return;
   if(!DATABASE_URL){
     dbReady=false;
     dbInitError='DATABASE_URL chưa được cấu hình trên Render.';
@@ -6819,14 +6902,25 @@ async function initializeDatabaseWithRetry(){
     return;
   }
   try{
+    if(shuttingDown||poolClosed)return;
     await initDb();
+    if(shuttingDown||poolClosed)return;
     // Finish equipment/beast schema migrations sequentially during startup.
     // This prevents concurrent HTTP requests from running overlapping DDL on the same tables.
     await ensureEquipmentSchema();
+    if(shuttingDown||poolClosed)return;
     await ensureBeastArenaSchema();
+    if(shuttingDown||poolClosed)return;
     await ensureVenueRoleSchema();
+    if(shuttingDown||poolClosed)return;
+    await ensureAlchemySchema();
+    if(shuttingDown||poolClosed)return;
+    await lockImmortalPillsOnce();
+    if(shuttingDown||poolClosed)return;
     await ensureChallengeSchema();
+    if(shuttingDown||poolClosed)return;
     await clearActiveOnlineChallengesOnce();
+    if(shuttingDown||poolClosed)return;
     await runDatabaseMaintenance();
     dbInitError = null;
     dbReady = true;
@@ -6860,7 +6954,7 @@ async function gracefulShutdown(signal){
         setTimeout(finish,8000).unref();
       });
     }catch{}
-    try{if(pool) await pool.end();}catch(e){console.error('[DB] pool.end:',e.message);}
+    try{if(pool && !poolClosed){poolClosed=true; await pool.end();}}catch(e){console.error('[DB] pool.end:',e.message);}
     process.exit(0);
   })();
   return shutdownPromise;
