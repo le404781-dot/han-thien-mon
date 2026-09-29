@@ -1090,7 +1090,7 @@ async function ensureAlchemySchemaImpl(){
     await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm) VALUES($1,'Đan Pháp · Đan dược',$2,$3,$4,$5) ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,price=EXCLUDED.price,spirit_gain=EXCLUDED.spirit_gain,min_realm=EXCLUDED.min_realm`,[outName,desc,exchange,0,minRealm]);
     const item=(await query('SELECT id FROM treasure_items WHERE name=$1',[outName])).rows[0];
     const learnPrice=({'Hạ Phẩm':2000,'Trung Phẩm':8000,'Thượng Phẩm':30000,'Cực Phẩm':100000,'Tiên Phẩm':500000}[grade]||2000);
-    const r=(await query(`INSERT INTO alchemy_recipes(name,grade,function_name,description,exchange_price,learn_price,success_rate,min_realm,output_item_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(name) DO UPDATE SET grade=EXCLUDED.grade,function_name=EXCLUDED.function_name,description=EXCLUDED.description,exchange_price=EXCLUDED.exchange_price,learn_price=EXCLUDED.learn_price,success_rate=EXCLUDED.success_rate,min_realm=EXCLUDED.min_realm,output_item_id=EXCLUDED.output_item_id RETURNING id`,[name,grade,fn,desc,exchange,learnPrice,success,minRealm,item?.id||null])).rows[0];
+    const r=(await query(`INSERT INTO alchemy_recipes(name,grade,function_name,description,exchange_price,learn_price,success_rate,min_realm,output_item_id) VALUES($1::text,$2::text,$3::text,$4::text,$5::integer,$6::integer,$7::integer,$8::integer,$9::integer) ON CONFLICT(name) DO UPDATE SET grade=EXCLUDED.grade,function_name=EXCLUDED.function_name,description=EXCLUDED.description,exchange_price=EXCLUDED.exchange_price,learn_price=EXCLUDED.learn_price,success_rate=EXCLUDED.success_rate,min_realm=EXCLUDED.min_realm,output_item_id=EXCLUDED.output_item_id RETURNING id`,[name,grade,fn,desc,exchange,learnPrice,success,minRealm,item?.id||null])).rows[0];
     await query('DELETE FROM alchemy_recipe_ingredients WHERE recipe_id=$1',[r.id]);
     for(const [ingName,qty] of ings){const ing=(await query('SELECT id FROM treasure_items WHERE name=$1',[ingName])).rows[0]; if(ing) await query('INSERT INTO alchemy_recipe_ingredients(recipe_id,item_id,quantity) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[r.id,ing.id,qty]);}
   }
@@ -1112,7 +1112,7 @@ async function ensureAlchemySchemaImpl(){
   ];
   for(const [name,category,description,price,spiritGain,minRealm,grade] of immortalPills){
     await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm,reward_grade,buyback_price)
-      VALUES($1,$2,$3,$4,$5,$6,$7,GREATEST(1,FLOOR($4*0.45)))
+      VALUES($1,$2,$3,$4::integer,$5::integer,$6::integer,$7::text,GREATEST(1,FLOOR(($4::numeric)*0.45))::integer)
       ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,price=EXCLUDED.price,spirit_gain=EXCLUDED.spirit_gain,min_realm=EXCLUDED.min_realm,reward_grade=EXCLUDED.reward_grade,buyback_price=EXCLUDED.buyback_price`,
       [name,category,description,price,spiritGain,minRealm,grade]);
   }
@@ -5941,7 +5941,7 @@ app.post('/api/mailbox/read',auth,async(req,res)=>{try{const id=Number(req.body?
 // Guard này chạy trước các API lôi đài để tránh SELECT vào cột chưa tồn tại.
 
 let __ensureChallengeSchemaPromise=null;
-const CHALLENGE_LIMIT_24H = 15;
+const CHALLENGE_LIMIT_24H = 30;
 const BEAST_ARENA_LIMIT_24H = 5;
 async function usageCount24h(client, table, column, userId){
   const allowedTables={challenge_requests:'challenge_requests',beast_arena_requests:'beast_arena_requests',beast_arena_usage:'beast_arena_usage'};
@@ -6770,6 +6770,33 @@ function startBackgroundJobs(){
   processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e));
 }
 
+async function clearActiveOnlineChallengesOnce(){
+  const migrationId='v3.7.37-clear-online-challenges';
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const already=(await client.query('SELECT 1 FROM app_migrations WHERE id=$1',[migrationId])).rows[0];
+    if(already){await client.query('COMMIT');return;}
+    const active=(await client.query(`SELECT id FROM challenge_requests WHERE mode='online' AND status IN ('pending','accepted') ORDER BY id FOR UPDATE`)).rows;
+    for(const row of active){
+      const bets=(await client.query(`SELECT bettor_id,amount FROM challenge_bets WHERE challenge_id=$1 AND status='open' FOR UPDATE`,[row.id])).rows;
+      for(const bet of bets){
+        const amount=Math.max(0,Number(bet.amount)||0);
+        if(amount>0){
+          await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[bet.bettor_id,amount]);
+          await client.query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data) VALUES($1,'challenge_bet','↩️ Lôi đài được hủy','Lôi đài đang sửa lỗi đã được hủy. Linh thạch cược đã được hoàn lại.','#challenge',$2)`,[bet.bettor_id,JSON.stringify({action:'challenge_bet_result',challengeId:Number(row.id),payout:amount,result:'refunded'})]);
+        }
+      }
+      await client.query(`DELETE FROM challenge_bets WHERE challenge_id=$1`,[row.id]);
+      await client.query(`UPDATE challenge_requests SET status='rejected',winner_id=NULL,loser_id=NULL,turn_user_id=NULL,responded_at=NOW(),last_action='🛠 Lôi đài được hủy để nâng cấp Khiêu Chiến Online' WHERE id=$1`,[row.id]);
+    }
+    await client.query(`INSERT INTO app_migrations(id) VALUES($1)`,[migrationId]);
+    await client.query('COMMIT');
+    if(active.length)console.log(`[CHALLENGE] Đã hủy ${active.length} lôi đài online cũ và hoàn cược.`);
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}
+  finally{client.release();}
+}
+
 async function initializeDatabaseWithRetry(){
   if(!DATABASE_URL){
     dbReady=false;
@@ -6784,6 +6811,8 @@ async function initializeDatabaseWithRetry(){
     await ensureEquipmentSchema();
     await ensureBeastArenaSchema();
     await ensureVenueRoleSchema();
+    await ensureChallengeSchema();
+    await clearActiveOnlineChallengesOnce();
     await runDatabaseMaintenance();
     dbInitError = null;
     dbReady = true;

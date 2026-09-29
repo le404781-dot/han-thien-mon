@@ -179,6 +179,21 @@ function updateChallengeLiveDom(b){
  if(last){if(b.lastAction){last.hidden=false;last.innerHTML=`${esc(b.lastAction)} · <b>-${Number(b.lastDamage||0).toLocaleString('vi-VN')} HP</b>`;}else{last.hidden=true;last.textContent='';}}
  return true;
 }
+async function autoChallengeAttack(battle){
+ if(!battle||!battle.yourTurn||window.challengeAutoAttack!==true||window.challengeAutoAttackBusy)return;
+ window.challengeAutoAttackBusy=true;
+ try{
+   const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:Number(battle.id),techniqueId:0})});
+   const msg=$('#challengeMsg');
+   if(msg)msg.textContent=x.status==='completed'?`🏆 ${x.message}`:`⚡ ${x.message}`;
+   if(x.status==='completed')window.challengeAutoAttack=false;
+   await Promise.all([loadProfile(),loadChallenges()]);
+ }catch(e){
+   // 409 can simply mean the opponent or another tab already consumed the turn.
+   // Let the next realtime poll decide whose turn it is.
+ }finally{window.challengeAutoAttackBusy=false;}
+}
+
 async function pollChallengeRealtime(){
  if(window.challengeRealtimeBusy||document.hidden||!getToken())return;
  window.challengeRealtimeBusy=true;
@@ -186,6 +201,7 @@ async function pollChallengeRealtime(){
   const d=await api('/api/challenges/online/state',{headers:authHeaders()});
   const b=d.activeBattle||null;
   if(!b){
+   window.challengeAutoAttack=false;
    if(window.__challengeLastState){window.__challengeLastState=null;await loadChallenges();}
    return;
   }
@@ -201,6 +217,7 @@ async function pollChallengeRealtime(){
    for(const key of __getCache.keys()){if(String(key).startsWith('/api/challenges|'))__getCache.delete(key);}
    await loadChallenges();
   }
+  if(b.yourTurn && window.challengeAutoAttack===true) await autoChallengeAttack(b);
  }catch(e){
   // Poll nền thất bại không làm gián đoạn trận đang hiển thị.
  }finally{window.challengeRealtimeBusy=false;}
@@ -210,7 +227,7 @@ async function loadChallenges(){
  const area=$('#challengeArea'); if(!area||!getToken())return;
  try{
   const d=await api('/api/challenges',{headers:authHeaders()});
-  const users=d.users||[], pending=d.pending||[], history=d.history||[], me=d.me||{}, battle=d.activeBattle||null, publicBattles=d.activeBattles||[], usage=d.usage||{used:0,limit:5,remaining:5,windowHours:24};
+  const users=d.users||[], pending=d.pending||[], history=d.history||[], me=d.me||{}, battle=d.activeBattle||null, publicBattles=d.activeBattles||[], usage=d.usage||{used:0,limit:30,remaining:30,windowHours:24};
   const challengeLimitReached=Number(usage.remaining)<=0;
   const debuffActive=me.challenge_debuff_until&&new Date(me.challenge_debuff_until)>new Date();
   const pct=(hp,max)=>Math.min(100,Math.max(0,Math.round((Number(hp||0)/Math.max(1,Number(max||1)))*100)));
@@ -233,7 +250,7 @@ async function loadChallenges(){
     <div class="battle-turn-note" data-battle-turn-note>${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
     <div class="battle-last-action" data-battle-last-action ${battle.lastAction?'':'hidden'}>${battle.lastAction?`${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b>`:''}</div>
     ${battle.yourTurn?`<div class="ultimate-choice"><label>⚔ CHỌN RA CHIÊU</label><select id="battleTechniqueSelect">${(currentProfile?.techniques||[]).map(t=>`<option value="${t.id}" ${t.equipped?'selected':''}>${esc(t.name)} · ${esc(t.grade)} · ⚔+${Number(t.power_bonus||0).toLocaleString('vi-VN')}</option>`).join('') || '<option value="0">⚡ Hàn Thiên Phá</option>'}</select><small>Có thể đổi chiêu trước mỗi lượt. Công pháp đang trang bị được chọn mặc định; hệ số sát thương được máy chủ kiểm tra lại.</small></div>`:''}
-    <div class="battle-actions"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ TUNG TUYỆT CHIÊU':'⏳ CHỜ ĐỐI THỦ'}</button>${battle.spitAllowed&&battle.yourTurn?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn ghost battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
+    <div class="battle-actions"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ TUNG TUYỆT CHIÊU':'⏳ CHỜ ĐỐI THỦ'}</button>${battle.spitAllowed&&battle.yourTurn?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn ${window.challengeAutoAttack?'primary':'ghost'} battle-auto" data-id="${battle.id}">${window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH'}</button><button class="btn ghost battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
     <small class="battle-rule">Sát thương phụ thuộc Công lực, trang bị, công pháp được chọn và chênh lệch cảnh giới; cảnh giới cao hơn gây sát thương lớn hơn, cảnh giới thấp hơn bị giảm mạnh.</small>
    </div>`:'';
   area.innerHTML=`
@@ -250,6 +267,16 @@ async function loadChallenges(){
   document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept'));
   document.querySelectorAll('.challenge-reject').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'reject'));
   document.querySelectorAll('.battle-ultimate').forEach(b=>b.onclick=()=>useUltimate(Number(b.dataset.id)));
+  document.querySelectorAll('.battle-auto').forEach(b=>b.onclick=async()=>{
+    window.challengeAutoAttack=window.challengeAutoAttack!==true;
+    b.textContent=window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH';
+    b.classList.toggle('primary',window.challengeAutoAttack);
+    b.classList.toggle('ghost',!window.challengeAutoAttack);
+    if(window.challengeAutoAttack){
+      const live=window.__challengeLiveState;
+      if(live?.yourTurn) await autoChallengeAttack(live);
+    }
+  });
   document.querySelectorAll('.battle-spit').forEach(b=>b.onclick=()=>useSpit(Number(b.dataset.id)));
   document.querySelectorAll('.battle-leave').forEach(b=>b.onclick=()=>leaveBattle(Number(b.dataset.id)));
   document.querySelectorAll('.challenge-bet').forEach(b=>b.onclick=()=>placeChallengeBet(Number(b.dataset.id)));
@@ -1026,7 +1053,7 @@ async function loadDuongThu(){
 async function loadBeastArena(){
  const area=$('#beastArenaArea'); if(!area||!getToken())return;
  try{
-  const d=await api('/api/beast-arena',{headers:authHeaders()}); const beasts=d.beasts||[],members=d.members||[],npcs=d.npcs||[],pending=d.pending||[],history=d.history||[],activeBattle=d.activeBattle||null,usage=d.usage||{used:0,limit:5,remaining:5,windowHours:24};
+  const d=await api('/api/beast-arena',{headers:authHeaders()}); const beasts=d.beasts||[],members=d.members||[],npcs=d.npcs||[],pending=d.pending||[],history=d.history||[],activeBattle=d.activeBattle||null,usage=d.usage||{used:0,limit:30,remaining:30,windowHours:24};
   const beastLimitReached=Number(usage.remaining)<=0;
   const typeOf=b=>b.beast_type||b.type||'Linh';
   const skillsFor=b=>{const t=typeOf(b);const pools={Kim:['Kim Cương · Phá Giáp','Thiên Kim · Kiếm Vũ'],Mộc:['Thanh Mộc · Sinh Trưởng','Mộc Linh · Quấn Thân'],Thủy:['Thủy Nguyệt · Triều Dâng','Hàn Thủy · Băng Kích'],Hỏa:['Xích Viêm · Phần Thiên','Hỏa Vũ · Liệt Bạo'],Thổ:['Hậu Thổ · Sơn Nhạc','Địa Trấn · Phong Ấn'],Phong:['Thanh Phong · Loạn Vũ','Phong Nhận · Thiên Trảm'],Lôi:['Tử Lôi · Thiên Phạt','Lôi Động · Bạo Kích'],Băng:['Hàn Nguyệt · Băng Phong','Băng Phách · Tuyệt Sát'],Ảo:['Huyễn Cảnh · Mê Tâm','Ảo Ảnh · Phân Thân'],Long:['Long Uy · Chấn Thiên','Long Viêm · Phần Giới'],Linh:['Linh Quang · Trấn Áp','Linh Khí · Hộ Thể']}[t]||['Tuyệt Kỹ · Liệt Kích','Tuyệt Kỹ · Phá Hồn'];return [b.skill||'Thiên Phú Linh Thú',pools[0],pools[1]]};
