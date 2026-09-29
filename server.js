@@ -1907,6 +1907,66 @@ async function initDb() {
 
   await query('INSERT INTO profiles(user_id) SELECT id FROM users ON CONFLICT (user_id) DO NOTHING');
 
+  // v3.7.46: thu hồi toàn bộ Tiên Đan khỏi môn nhân thường, chỉ giữ cho Đan Chủ;
+  // đồng thời phục hồi đầy Căn Cơ cho toàn bộ môn nhân theo cảnh giới hiện tại.
+  const v3746 = 'v3.7.46_reclaim_immortal_pills_restore_foundation';
+  const v3746Applied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[v3746])).rowCount > 0;
+  if(!v3746Applied){
+    const client = await dbConnect();
+    try{
+      await client.query('BEGIN');
+      // Xác định Đan Chủ hiện tại. Nếu chưa có chức vị, không xóa Tiên Đan của bất kỳ ai
+      // để tránh thu hồi nhầm dữ liệu quản trị.
+      const master = (await client.query(`
+        SELECT vr.user_id
+        FROM venue_roles vr
+        WHERE vr.venue_code='dan-duong'
+          AND COALESCE(vr.active,true)=true
+        ORDER BY vr.applied_at DESC NULLS LAST, vr.user_id
+        LIMIT 1
+        FOR UPDATE
+      `)).rows[0];
+      if(!master){
+        await client.query('ROLLBACK');
+        console.warn('[DB] v3.7.46: chưa xác định được Đan Chủ; bỏ qua migration để thử lại lần sau.');
+      } else {
+        // Chỉ thu hồi Tiên Đan của các môn nhân khác; không đụng tới inventory của Đan Chủ.
+        await client.query(`
+          DELETE FROM inventory i
+          USING treasure_items ti
+          WHERE i.item_id=ti.id
+            AND i.user_id<>$1
+            AND i.quantity>0
+            AND (
+              ti.category ILIKE '%Tiên Đan%'
+              OR ti.category ILIKE '%Tiên đan%'
+              OR ti.category ILIKE 'Đan dược · Tiên Đan%'
+            )
+        `,[master.user_id]);
+
+        // Nạp đầy Căn Cơ cho toàn bộ môn nhân, đồng thời xóa trạng thái nội thương.
+        const foundationRows=(await client.query('SELECT user_id,spirit_power FROM profiles FOR UPDATE')).rows;
+        for(const fp of foundationRows){
+          const fStage=stageFor(Number(fp.spirit_power)||0);
+          const fMax=foundationMaxForStage(fStage);
+          await client.query(`
+            UPDATE profiles
+            SET spirit_root_foundation=$2,
+                spirit_root_injury_until=NULL,
+                updated_at=NOW()
+            WHERE user_id=$1
+          `,[fp.user_id,fMax]);
+        }
+        await client.query('INSERT INTO app_migrations(id) VALUES($1)',[v3746]);
+        await client.query('COMMIT');
+        console.log(`[DB] ${v3746}: đã thu hồi Tiên Đan khỏi môn nhân khác (giữ Đan Chủ ${master.user_id}) và phục hồi Căn Cơ cho ${foundationRows.length} môn nhân.`);
+      }
+    }catch(e){
+      try{await client.query('ROLLBACK')}catch{}
+      throw e;
+    }finally{client.release();}
+  }
+
   // v3.7.29: nạp đầy Căn Cơ cho toàn bộ môn nhân một lần.
   // Mức đầy được tính theo cảnh giới hiện tại (không dùng một giá trị cố định),
   // đồng thời xóa trạng thái Nội Thương đang tồn tại để tất cả môn nhân bắt đầu
