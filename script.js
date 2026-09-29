@@ -16,9 +16,21 @@ const realmIndexOf=name=>Math.max(0,REALM_NAMES.indexOf(String(name||'')));
 
 const __inflightGets=new Map();
 const __getCache=new Map();
+window.challengeAutoAttack=localStorage.getItem('htm_challenge_auto_attack')==='1';
+window.challengeAutoAttackBusy=false;
+function setChallengeAuto(enabled){
+ window.challengeAutoAttack=Boolean(enabled);
+ try{localStorage.setItem('htm_challenge_auto_attack',window.challengeAutoAttack?'1':'0');}catch{}
+ document.querySelectorAll('.battle-auto').forEach(b=>{
+  b.textContent=window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH';
+  b.classList.toggle('primary',window.challengeAutoAttack);
+  b.classList.toggle('ghost',!window.challengeAutoAttack);
+ });
+}
+
 const GET_CACHE_TTL={
  '/api/data':10000,'/api/profile':5000,'/api/chat':4000,'/api/mailbox':5000,
- '/api/challenges':1500,'/api/challenges/announcement':5000,'/api/arena/live':2500,
+ '/api/challenges':1500,'/api/challenges/online/state':0,'/api/challenges/announcement':5000,'/api/arena/live':2500,
  '/api/rewards':15000,'/api/presence':10000
 };
 function getCacheTTL(url){const base=String(url).split('?')[0];return GET_CACHE_TTL[base]??3000;}
@@ -152,11 +164,84 @@ async function challengeMember(targetId, mode, msgEl){
  finally{if(btn)btn.disabled=false;}
 }
 
+function stopChallengeRealtime(){
+ if(window.challengeRealtimeTimer){clearInterval(window.challengeRealtimeTimer);window.challengeRealtimeTimer=null;}
+ window.challengeRealtimeBusy=false;
+}
+function updateChallengeLiveDom(b){
+ const root=document.querySelector('.active-battle');
+ if(!root||!b)return false;
+ const setSide=(side,hp,maxHp)=>{
+  const label=root.querySelector(`[data-battle-hp-label="${side}"]`);
+  const bar=root.querySelector(`[data-battle-hp-bar="${side}"]`);
+  const fighter=root.querySelector(`[data-battle-fighter="${side}"]`);
+  const cur=Math.max(0,Number(hp)||0), max=Math.max(1,Number(maxHp)||1), p=Math.min(100,Math.max(0,Math.round(cur/max*100)));
+  if(label)label.textContent=`${Math.round(cur).toLocaleString('vi-VN')} / ${Math.round(max).toLocaleString('vi-VN')}`;
+  if(bar){bar.style.width=`${p}%`;bar.classList.toggle('danger',p<=25);bar.classList.toggle('warn',p>25&&p<=55);}
+  return fighter;
+ };
+ setSide('challenger',b.challengerHp,b.challengerMaxHp);
+ setSide('opponent',b.opponentHp,b.opponentMaxHp);
+ const turn=Number(b.turnUserId||0);
+ root.querySelector('[data-battle-fighter="challenger"]')?.classList.toggle('turn',turn===Number(b.challengerId));
+ root.querySelector('[data-battle-fighter="opponent"]')?.classList.toggle('turn',turn===Number(b.opponentId));
+ const note=root.querySelector('[data-battle-turn-note]');
+ if(note)note.innerHTML=Number(b.turnUserId)===Number(currentUser?.id)?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...';
+ const last=root.querySelector('[data-battle-last-action]');
+ if(last){if(b.lastAction){last.hidden=false;last.innerHTML=`${esc(b.lastAction)} · <b>-${Number(b.lastDamage||0).toLocaleString('vi-VN')} HP</b>`;}else{last.hidden=true;last.textContent='';}}
+ return true;
+}
+async function autoChallengeAttack(battle){
+ if(!battle||!battle.yourTurn||window.challengeAutoAttack!==true||window.challengeAutoAttackBusy)return;
+ window.challengeAutoAttackBusy=true;
+ try{
+   const moves=Array.isArray(battle.moveOptions)?battle.moveOptions:[];
+   const best=moves.reduce((a,b)=>Number(b.damage||0)>Number(a?.damage||0)?b:a,null);
+   const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:Number(battle.id),moveId:Number(best?.id||3)})});
+   const msg=$('#challengeMsg');
+   if(msg)msg.textContent=x.status==='completed'?`🏆 ${x.message}`:`⚡ ${x.message}`;
+   if(x.status==='completed')setChallengeAuto(false);
+   await Promise.all([loadProfile(),loadChallenges()]);
+ }catch(e){
+   // 409 can simply mean the opponent or another tab already consumed the turn.
+   // Let the next realtime poll decide whose turn it is.
+ }finally{window.challengeAutoAttackBusy=false;}
+}
+
+async function pollChallengeRealtime(){
+ if(window.challengeRealtimeBusy||document.hidden||!getToken())return;
+ window.challengeRealtimeBusy=true;
+ try{
+  const d=await api('/api/challenges/online/state',{headers:authHeaders()});
+  const b=d.activeBattle||null;
+  if(!b){
+   setChallengeAuto(false);
+   if(window.__challengeLastState){window.__challengeLastState=null;await loadChallenges();}
+   return;
+  }
+  const sig=[b.id,b.status,b.round,b.turnUserId,b.challengerHp,b.opponentHp,b.lastActorId,b.lastAction].join('|');
+  const previous=window.__challengeLastState||'';
+  const prevParts=previous?previous.split('|'):[];
+  const turnChanged=Boolean(previous)&&String(prevParts[3])!==String(b.turnUserId);
+  const battleChanged=Boolean(previous)&&String(prevParts[0])!==String(b.id);
+  const statusChanged=Boolean(previous)&&String(prevParts[1])!==String(b.status);
+  window.__challengeLastState=sig;
+  window.__challengeLiveState=b;
+  if(!previous||battleChanged||turnChanged||statusChanged||!updateChallengeLiveDom(b)){
+   for(const key of __getCache.keys()){if(String(key).startsWith('/api/challenges|'))__getCache.delete(key);}
+   await loadChallenges();
+  }
+  if(b.yourTurn && window.challengeAutoAttack===true) await autoChallengeAttack(b);
+ }catch(e){
+  // Poll nền thất bại không làm gián đoạn trận đang hiển thị.
+ }finally{window.challengeRealtimeBusy=false;}
+}
+
 async function loadChallenges(){
  const area=$('#challengeArea'); if(!area||!getToken())return;
  try{
   const d=await api('/api/challenges',{headers:authHeaders()});
-  const users=d.users||[], pending=d.pending||[], history=d.history||[], me=d.me||{}, battle=d.activeBattle||null, publicBattles=d.activeBattles||[], usage=d.usage||{used:0,limit:5,remaining:5,windowHours:24};
+  const users=d.users||[], pending=d.pending||[], history=d.history||[], me=d.me||{}, battle=d.activeBattle||null, publicBattles=d.activeBattles||[], usage=d.usage||{used:0,limit:30,remaining:30,windowHours:24};
   const challengeLimitReached=Number(usage.remaining)<=0;
   const debuffActive=me.challenge_debuff_until&&new Date(me.challenge_debuff_until)>new Date();
   const pct=(hp,max)=>Math.min(100,Math.max(0,Math.round((Number(hp||0)/Math.max(1,Number(max||1)))*100)));
@@ -164,22 +249,23 @@ async function loadChallenges(){
   const battleHtml=battle?`<div class="challenge-block active-battle">
     <div class="challenge-subhead"><span class="eyebrow">🔥 LÔI ĐÀI ONLINE ĐANG DIỄN RA</span><b>Vòng ${Number(battle.round||0)}</b></div>
     <div class="battle-arena">
-      <article class="battle-fighter ${Number(battle.turnUserId)===Number(battle.challengerId)?'turn':''}">
+      <article data-battle-fighter="challenger" class="battle-fighter ${Number(battle.turnUserId)===Number(battle.challengerId)?'turn':''}">
        <div class="battle-fighter-top"><span class="challenge-avatar">${esc(battle.challengerAvatar||'⚔')}</span><div><b>${esc(battle.challengerName||'Người khiêu chiến')}</b><small>${esc(battle.challengerRank||'')} · ${Number(battle.challengerSpirit||0).toLocaleString('vi-VN')} linh lực</small></div></div>
-       <div class="battle-hp-head"><span>❤️ HP</span><b>${Math.round(battle.challengerHp).toLocaleString('vi-VN')} / ${Math.round(battle.challengerMaxHp).toLocaleString('vi-VN')}</b></div>
-       <div class="battle-hp"><i class="${hpColor(battle.challengerHp,battle.challengerMaxHp)}" style="width:${pct(battle.challengerHp,battle.challengerMaxHp)}%"></i></div>
+       <div class="battle-hp-head"><span>❤️ HP</span><b data-battle-hp-label="challenger">${Math.round(battle.challengerHp).toLocaleString('vi-VN')} / ${Math.round(battle.challengerMaxHp).toLocaleString('vi-VN')}</b></div>
+       <div class="battle-hp"><i data-battle-hp-bar="challenger" class="${hpColor(battle.challengerHp,battle.challengerMaxHp)}" style="width:${pct(battle.challengerHp,battle.challengerMaxHp)}%"></i></div>
       </article>
       <div class="battle-vs">VS</div>
-      <article class="battle-fighter ${Number(battle.turnUserId)===Number(battle.opponentId)?'turn':''}">
+      <article data-battle-fighter="opponent" class="battle-fighter ${Number(battle.turnUserId)===Number(battle.opponentId)?'turn':''}">
        <div class="battle-fighter-top"><span class="challenge-avatar">${esc(battle.opponentAvatar||'⚔')}</span><div><b>${esc(battle.opponentName||'Đối thủ')}</b><small>${esc(battle.opponentRank||'')} · ${Number(battle.opponentSpirit||0).toLocaleString('vi-VN')} linh lực</small></div></div>
-       <div class="battle-hp-head"><span>❤️ HP</span><b>${Math.round(battle.opponentHp).toLocaleString('vi-VN')} / ${Math.round(battle.opponentMaxHp).toLocaleString('vi-VN')}</b></div>
-       <div class="battle-hp"><i class="${hpColor(battle.opponentHp,battle.opponentMaxHp)}" style="width:${pct(battle.opponentHp,battle.opponentMaxHp)}%"></i></div>
+       <div class="battle-hp-head"><span>❤️ HP</span><b data-battle-hp-label="opponent">${Math.round(battle.opponentHp).toLocaleString('vi-VN')} / ${Math.round(battle.opponentMaxHp).toLocaleString('vi-VN')}</b></div>
+       <div class="battle-hp"><i data-battle-hp-bar="opponent" class="${hpColor(battle.opponentHp,battle.opponentMaxHp)}" style="width:${pct(battle.opponentHp,battle.opponentMaxHp)}%"></i></div>
       </article>
     </div>
-    <div class="battle-turn-note">${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
-    ${battle.lastAction?`<div class="battle-last-action">${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b></div>`:''}
-    ${battle.yourTurn?`<div class="ultimate-choice"><label>⚡ Tuyệt Chiêu</label><select id="battleTechniqueSelect">${(currentProfile?.techniques||[]).map(t=>`<option value="${t.id}" ${t.equipped?'selected':''}>${esc(t.name)} · ${esc(t.grade)} · ⚔+${Number(t.power_bonus||0).toLocaleString('vi-VN')}</option>`).join('') || '<option value="0">⚡ Hàn Thiên Phá</option>'}</select><small>Công pháp đang trang bị được chọn mặc định. Mỗi công pháp có hệ số sát thương riêng.</small></div>`:''}
-    <div class="battle-actions"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ TUNG TUYỆT CHIÊU':'⏳ CHỜ ĐỐI THỦ'}</button>${battle.spitAllowed&&battle.yourTurn?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn ghost battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
+    <div class="battle-turn-note" data-battle-turn-note>${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
+    <div class="battle-last-action" data-battle-last-action ${battle.lastAction?'':'hidden'}>${battle.lastAction?`${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b>`:''}</div>
+    <div class="challenge-moves"><div class="challenge-moves-title"><b>⚔ CHỌN 1 TRONG 3 CHIÊU</b><small>Sát thương đã tính sẵn theo cảnh giới, linh lực, trang bị và chênh lệch cảnh giới.</small></div><div class="challenge-move-grid">${(battle.moveOptions||[]).map(m=>`<button type="button" class="challenge-move ${Number(battle.selectedMoveId||3)===Number(m.id)?'selected':''}" data-id="${battle.id}" data-move-id="${m.id}" ${battle.yourTurn?'':'disabled'}><span class="challenge-move-icon">${esc(m.icon||'⚔️')}</span><span class="challenge-move-copy"><b>${esc(m.name)}</b><small>${esc(m.description||'')}</small></span><strong>-${Number(m.damage||0).toLocaleString('vi-VN')} HP</strong></button>`).join('')}</div></div>
+    <div class="battle-actions"><button class="btn primary battle-auto battle-auto-main" data-id="${battle.id}">${window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH'}</button>${battle.spitAllowed&&battle.yourTurn?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn primary battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
+    <div class="battle-action-row"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ RA CHIÊU ĐÃ CHỌN':'⏳ CHỜ ĐỐI THỦ'}</button><small>${window.challengeAutoAttack?'🤖 Tự động sẽ chọn chiêu có sát thương cao nhất khi tới lượt.':'Bật Tự động đánh để máy tự ra chiêu khi đến lượt.'}</small></div>
     <small class="battle-rule">Sát thương phụ thuộc Công lực, trang bị, công pháp được chọn và chênh lệch cảnh giới; cảnh giới cao hơn gây sát thương lớn hơn, cảnh giới thấp hơn bị giảm mạnh.</small>
    </div>`:'';
   area.innerHTML=`
@@ -191,21 +277,49 @@ async function loadChallenges(){
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">🎯 CHỌN ĐỐI THỦ</span><b>${users.length} môn nhân</b></div><div class="challenge-list">${users.length?users.map(x=>`<article class="challenge-card"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${Number(x.challenge_debuff_percent||0)>0?`<small class="debuff-mini">☠ Đang chịu debuff ${x.challenge_debuff_percent}%</small>`:''}</div><div class="challenge-card-actions"><button class="btn small primary challenge-online" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>⚔ Online</button><button class="btn small ghost challenge-offline" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>🌓 Offline</button></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có môn nhân khác để khiêu chiến.</p></div>`}</div></div>
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📜 CHIẾN TÍCH</span><b>${history.length} trận gần đây</b></div><div class="challenge-history">${history.length?history.map(h=>{const meId=Number(currentUser?.id),won=Number(h.winner_id)===meId,pendingStatus=h.status==='pending',activeStatus=h.status==='accepted';return `<article class="challenge-history-row"><span>${h.mode==='online'?'⚔':'🌓'}</span><div><b>${won?'🏆 Thắng':h.status==='rejected'?'Từ chối':activeStatus?'⚔ Đang giao chiến':pendingStatus?'⌛ Chờ':'💀 Thất bại'}</b><small>${esc(Number(h.challenger_id)===meId?h.opponent_name:h.challenger_name)} · ${new Date(h.created_at).toLocaleString('vi-VN')}</small></div><div class="challenge-result-text">${won?`+${Number(h.reward_spirit||0).toLocaleString('vi-VN')} linh lực${h.reward_item_name?` · ${esc(h.reward_item_name)} ×${h.reward_quantity}`:''}`:esc(h.penalty_text||'')}</div></article>`}).join(''):`<div class="empty-state compact"><p>Chưa có chiến tích.</p></div>`}</div></div>
    <p id="challengeMsg" class="train-msg"></p>`;
+  if(battle){window.__challengeLiveState=battle; setChallengeAuto(window.challengeAutoAttack===true);}
   document.querySelectorAll('.challenge-online').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'online'));
   document.querySelectorAll('.challenge-offline').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'offline'));
   document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept'));
   document.querySelectorAll('.challenge-reject').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'reject'));
+  document.querySelectorAll('.challenge-move').forEach(b=>b.onclick=()=>{
+    document.querySelectorAll(`.challenge-move[data-id="${b.dataset.id}"]`).forEach(x=>x.classList.remove('selected'));
+    b.classList.add('selected');
+  });
   document.querySelectorAll('.battle-ultimate').forEach(b=>b.onclick=()=>useUltimate(Number(b.dataset.id)));
+  document.querySelectorAll('.battle-auto').forEach(b=>b.onclick=async()=>{
+    const enabled=!window.challengeAutoAttack;
+    setChallengeAuto(enabled);
+    if(enabled){
+      const live=window.__challengeLiveState||battle;
+      if(live) window.__challengeLiveState=live;
+      if(live?.yourTurn) await autoChallengeAttack(live);
+    }
+  });
   document.querySelectorAll('.battle-spit').forEach(b=>b.onclick=()=>useSpit(Number(b.dataset.id)));
   document.querySelectorAll('.battle-leave').forEach(b=>b.onclick=()=>leaveBattle(Number(b.dataset.id)));
   document.querySelectorAll('.challenge-bet').forEach(b=>b.onclick=()=>placeChallengeBet(Number(b.dataset.id)));
+  const hasOnlineBattle=Boolean(d.activeBattle);
+  if(hasOnlineBattle){
+   window.__challengeLastState=[d.activeBattle.id,d.activeBattle.status,d.activeBattle.round,d.activeBattle.turnUserId,d.activeBattle.challengerHp,d.activeBattle.opponentHp,d.activeBattle.lastActorId,d.activeBattle.lastAction].join('|');
+   if(!window.challengeRealtimeTimer)window.challengeRealtimeTimer=setInterval(pollChallengeRealtime,2000);
+  }else{
+   window.__challengeLastState=null;
+   stopChallengeRealtime();
+  }
  }catch(e){area.innerHTML=`<div class="empty-state compact">${esc(e.message)}</div>`;}
 }
 
 async function useUltimate(requestId){
  const b=document.querySelector(`.battle-ultimate[data-id="${requestId}"]`),msg=$('#challengeMsg'); if(b)b.disabled=true;
  try{
-  const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,techniqueId:Number($('#battleTechniqueSelect')?.value||0)})});
+  const selected=document.querySelector(`.challenge-move.selected[data-id="${requestId}"]`);
+  const moveId=Number(selected?.dataset.moveId||3);
+  const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,moveId})});
+  // Server trả lại HP đã ghi xuống DB; dùng kết quả này để không phụ thuộc cache phía client.
+  if(Number(x.targetUserId)>0 && Number.isFinite(Number(x.targetHpAfter))){
+    window.__challengeLastServerAction={requestId:Number(requestId),targetUserId:Number(x.targetUserId),targetHpAfter:Number(x.targetHpAfter),targetHpBefore:Number(x.targetHpBefore||0),round:Number(x.round||0)};
+  }
   const betNote=x.betSettlement?.notices?.find(n=>Number(n.bettorId)===Number(currentUser?.id));
   const betText=betNote?.result==='won'?` · 🏆 Cược thắng +${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:(betNote?.result==='refunded'?` · ↩ Hoàn ${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:'');
   msg.textContent=x.status==='completed'?`🏆 ${x.message}${betText}`:`⚡ ${x.message}`;
@@ -249,7 +363,13 @@ async function respondChallenge(requestId,action){
  try{
   const x=await api('/api/challenges/online/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,action})});
   msg.textContent=action==='reject'?`🏳️ ${x.message}`:`⚔ ${x.message}`;
+  if(action==='accept' && x.battle){
+    window.__challengeLiveState={...x.battle,status:'accepted'};
+    window.__challengeLastState=[x.battle.id,'accepted',x.battle.round,x.battle.turnUserId,x.battle.challengerHp,x.battle.opponentHp,x.battle.lastActorId||0,x.battle.lastAction||''].join('|');
+    if(!window.challengeRealtimeTimer)window.challengeRealtimeTimer=setInterval(pollChallengeRealtime,2000);
+  }
   await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
+  if(action==='accept' && window.challengeAutoAttack && window.__challengeLiveState?.yourTurn) await autoChallengeAttack(window.__challengeLiveState);
  }catch(e){msg.textContent='❌ '+e.message;}
 }
 
