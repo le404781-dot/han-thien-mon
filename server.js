@@ -7028,98 +7028,6 @@ async function recallImmortalPillsToDanMasterOnce(){
   }finally{client.release();}
 }
 
-async function applyV3_7_44DataResetOnce(){
-  // v3.7.44:
-  // 1) Xóa toàn bộ Tiên Đế Đan khỏi Tu Di Giới của mọi môn nhân, trừ Đan Chủ.
-  // 2) Hủy toàn bộ Khiêu Chiến Online đang hoạt động (pending/accepted), hoàn cược.
-  // 3) Đặt chính xác số linh thạch cho Cuu_Vi_Ho và Reytheon.
-  const migrationId='v3.7.44-reset-tien-de-dan-online-challenges-stones';
-  const client=await dbConnect();
-  try{
-    await client.query('BEGIN');
-    const already=(await client.query('SELECT 1 FROM app_migrations WHERE id=$1',[migrationId])).rows[0];
-    if(already){await client.query('COMMIT');return;}
-
-    const master=(await client.query(`
-      SELECT user_id FROM venue_roles
-      WHERE venue_code='dan-duong' AND COALESCE(active,true)=true
-      ORDER BY applied_at DESC NULLS LAST, user_id
-      LIMIT 1
-      FOR UPDATE
-    `)).rows[0];
-    if(!master){
-      await client.query('ROLLBACK');
-      console.log('[v3.7.44] Chưa có Đan Chủ; migration sẽ thử lại ở lần khởi động sau.');
-      return;
-    }
-    const masterId=Number(master.user_id);
-
-    // --- 1. Xóa mọi Tiên Đế Đan khỏi Tu Di Giới của môn nhân khác ---
-    // min_realm=17 là mốc Tiên Đế trong hệ thống hiện tại; category vẫn được
-    // kiểm tra để tránh đụng vào vật phẩm không phải Tiên Đan.
-    const pillRows=(await client.query(`
-      SELECT i.user_id,i.item_id,i.quantity,ti.name
-      FROM inventory i
-      JOIN treasure_items ti ON ti.id=i.item_id
-      WHERE i.user_id<>$1
-        AND i.quantity>0
-        AND LOWER(TRIM(COALESCE(ti.category,''))) LIKE '%tiên đan%'
-        AND COALESCE(ti.min_realm,0)=17
-      ORDER BY i.user_id,i.item_id
-      FOR UPDATE OF i
-    `,[masterId])).rows;
-    let removedPills=0;
-    for(const row of pillRows){
-      const qty=Math.max(0,Number(row.quantity)||0);
-      if(!qty) continue;
-      await client.query(`UPDATE inventory SET quantity=0,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[Number(row.user_id),Number(row.item_id)]);
-      removedPills+=qty;
-    }
-
-    // --- 2. Hủy toàn bộ Khiêu Chiến Online đang hoạt động ---
-    const active=(await client.query(`
-      SELECT id FROM challenge_requests
-      WHERE mode='online' AND status IN ('pending','accepted')
-      ORDER BY id
-      FOR UPDATE
-    `)).rows;
-    for(const row of active){
-      const bets=(await client.query(`SELECT bettor_id,amount FROM challenge_bets WHERE challenge_id=$1 AND status='open' FOR UPDATE`,[row.id])).rows;
-      for(const bet of bets){
-        const amount=Math.max(0,Number(bet.amount)||0);
-        if(amount>0){
-          await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)::BIGINT+$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[bet.bettor_id,amount]);
-          await client.query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data)
-            VALUES($1,'challenge_bet','↩️ Khiêu Chiến Online được hủy','Trận Khiêu Chiến Online đã được hủy để làm sạch dữ liệu. Linh thạch cược đã được hoàn lại.','#challenge',$2)`,
-            [bet.bettor_id,JSON.stringify({action:'challenge_bet_result',challengeId:Number(row.id),payout:amount,result:'refunded'})]);
-        }
-      }
-      await client.query(`DELETE FROM challenge_bets WHERE challenge_id=$1`,[row.id]);
-      await client.query(`UPDATE challenge_requests
-        SET status='rejected',winner_id=NULL,loser_id=NULL,turn_user_id=NULL,responded_at=NOW(),last_action='🧹 Khiêu Chiến Online được hủy để làm sạch dữ liệu'
-        WHERE id=$1`,[row.id]);
-    }
-
-    // --- 3. Đặt chính xác linh thạch ---
-    const targets=[
-      ['Cuu_Vi_Ho',229147161840],
-      ['Reytheon',150896940297]
-    ];
-    for(const [username,stones] of targets){
-      const u=(await client.query(`SELECT id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,[username])).rows[0];
-      if(!u) throw new Error(`Không tìm thấy môn nhân ${username} để đặt linh thạch.`);
-      await client.query(`UPDATE profiles SET spirit_stones=$2::BIGINT,updated_at=NOW() WHERE user_id=$1`,[Number(u.id),stones]);
-    }
-
-    await client.query(`INSERT INTO app_migrations(id) VALUES($1)`,[migrationId]);
-    await client.query('COMMIT');
-    console.log(`[v3.7.44] Đã xóa ${removedPills} Tiên Đế Đan khỏi Tu Di Giới của môn nhân khác, hủy ${active.length} Khiêu Chiến Online và cập nhật linh thạch.`);
-  }catch(e){
-    try{await client.query('ROLLBACK')}catch{}
-    throw e;
-  }finally{client.release();}
-}
-
 async function clearActiveOnlineChallengesOnce(){
   const migrationId='v3.7.39-reset-online-challenges-and-moves';
   const client=await dbConnect();
@@ -7177,8 +7085,6 @@ async function initializeDatabaseWithRetry(){
     await ensureChallengeSchema();
     if(shuttingDown||poolClosed)return;
     await clearActiveOnlineChallengesOnce();
-    if(shuttingDown||poolClosed)return;
-    await applyV3_7_44DataResetOnce();
     if(shuttingDown||poolClosed)return;
     await runDatabaseMaintenance();
     dbInitError = null;
