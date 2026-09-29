@@ -2049,15 +2049,33 @@ async function initDb() {
     await query('INSERT INTO app_migrations(id) VALUES($1)',[realmCorrectionMigration]);
     console.log(`[DB] ${realmCorrectionMigration}: đã chỉnh cảnh giới chính xác cho 5 môn nhân.`);
   }
-  // v3.7.45: loại bỏ hoàn toàn Tiên Đế Hồng Mông Đan khỏi hệ thống.
-  // Xóa cả catalog và mọi tồn kho/reward tham chiếu thông qua FK phù hợp.
-  // Migration chạy đúng một lần để không tái tạo vật phẩm ở các lần restart.
-  const removeHongMengDanMigration = 'v3.7.45_remove_tien_de_hong_mong_dan';
-  const removeHongMengDanApplied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[removeHongMengDanMigration])).rowCount > 0;
-  if(!removeHongMengDanApplied){
-    await query(`DELETE FROM treasure_items WHERE name='Tiên Đế Hồng Mông Đan'`);
+  // v3.7.54: XÓA VĨNH VIỄN Tiên Đế Hồng Mông Đan.
+  // Dọn cả catalog, inventory và các bảng tham chiếu có FK RESTRICT trước khi xóa.
+  // Chạy mỗi lần khởi động để nếu dữ liệu cũ bị khôi phục/seed lại thì cũng bị thu hồi ngay.
+  const removeHongMengDanMigration = 'v3.7.54_remove_tien_de_hong_mong_dan_permanent';
+  const hongMengIds = (await query(`SELECT id FROM treasure_items WHERE LOWER(TRIM(name))=LOWER(TRIM($1))`,['Tiên Đế Hồng Mông Đan'])).rows.map(r=>Number(r.id)).filter(Number.isFinite);
+  if(hongMengIds.length){
+    const client = await dbConnect();
+    try{
+      await client.query('BEGIN');
+      // Các bảng có thể chặn DELETE bằng FK RESTRICT.
+      await client.query(`DELETE FROM alchemy_recipe_ingredients WHERE item_id = ANY($1::bigint[])`,[hongMengIds]);
+      // Xóa mọi tồn kho của toàn bộ môn nhân trước khi xóa catalog.
+      await client.query(`DELETE FROM inventory WHERE item_id = ANY($1::bigint[])`,[hongMengIds]);
+      // Dọn các bản ghi nâng cấp/trang bị tham chiếu trực tiếp.
+      await client.query(`DELETE FROM immortal_artifact_enhancements WHERE item_id = ANY($1::bigint[])`,[hongMengIds]);
+      await client.query(`DELETE FROM spirit_beast_equipment WHERE item_id = ANY($1::bigint[])`,[hongMengIds]);
+      // Các FK ON DELETE SET NULL/CASCADE còn lại sẽ tự xử lý khi xóa catalog.
+      await client.query(`DELETE FROM treasure_items WHERE id = ANY($1::bigint[])`,[hongMengIds]);
+      await client.query('COMMIT');
+      console.log(`[DB] ${removeHongMengDanMigration}: đã xóa ${hongMengIds.length} bản ghi Tiên Đế Hồng Mông Đan và toàn bộ tồn kho/tham chiếu.`);
+    }catch(e){
+      try{await client.query('ROLLBACK')}catch{}
+      throw e;
+    }finally{client.release();}
+  }
+  if((await query('SELECT 1 FROM app_migrations WHERE id=$1',[removeHongMengDanMigration])).rowCount===0){
     await query('INSERT INTO app_migrations(id) VALUES($1)',[removeHongMengDanMigration]);
-    console.log(`[DB] ${removeHongMengDanMigration}: đã xóa hoàn toàn Tiên Đế Hồng Mông Đan khỏi web.`);
   }
 
   // v3.7.45: đặt chính xác linh thạch cho 2 môn nhân theo yêu cầu quản trị.
