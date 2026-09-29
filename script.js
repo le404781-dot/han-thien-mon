@@ -15,6 +15,77 @@ const REALM_NAMES=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Th�
 const realmIndexOf=name=>Math.max(0,REALM_NAMES.indexOf(String(name||'')));
 const isRealmAdmin=()=>String(currentUser?.username||'').toLowerCase()==='thienha_666';
 
+// v3.7.53 · MENU QUYỀN RIÊNG THIENHA_666
+function updateRealmAdminMenu(){
+ const nav=document.querySelector('#nav');
+ if(!nav)return;
+ let link=document.getElementById('realmAdminNav');
+ const allowed=isRealmAdmin();
+ if(allowed){
+  if(!link){
+   link=document.createElement('a');
+   link.id='realmAdminNav';
+   link.href='#realm-admin';
+   link.textContent='⚜️ Điều Chỉnh Cảnh Giới';
+   link.title='Quyền riêng của @thienha_666';
+   nav.appendChild(link);
+  }
+  link.classList.remove('hidden');
+  link.onclick=(e)=>{e.preventDefault();nav.classList.remove('open');openRealmAdminCenter();};
+ }else if(link){
+  link.remove();
+ }
+}
+
+async function openRealmAdminCenter(){
+ if(!isRealmAdmin())return;
+ const modal=$('#memberModal'),content=$('#modalContent');
+ if(!modal||!content)return;
+ content.innerHTML='<div class="realm-admin-center"><div class="realm-admin-head"><div><span class="eyebrow">⚜️ QUYỀN RIÊNG · @thienha_666</span><h2>Điều Chỉnh Cảnh Giới</h2><p>Chọn môn nhân khác để thay đổi cảnh giới. Tài khoản của bạn không thể tự chỉnh chính mình.</p></div></div><div id="realmAdminList" class="realm-admin-list"><div class="empty-state compact">Đang tải danh sách môn nhân...</div></div></div>';
+ modal.showModal();
+ try{
+  const d=await api('/api/admin/realm-control',{headers:authHeaders()});
+  if(!isRealmAdmin())return;
+  const list=$('#realmAdminList');
+  const realms=Array.isArray(d.realms)?d.realms:[];
+  const members=Array.isArray(d.members)?d.members:[];
+  if(!members.length){list.innerHTML='<div class="empty-state compact"><h3>Chưa có môn nhân khác</h3></div>';return;}
+  const tierOptions=(ri,current)=>{
+   const r=realms.find(x=>Number(x.index)===Number(ri));
+   const max=Number(r?.maxTier)||9;
+   return Array.from({length:max},(_,i)=>{
+    const t=i+1;
+    let label=`Tầng ${t}`;
+    if(Number(ri)===17) label=t===99?'Cửu Cửu Tinh':`${t} Tinh`;
+    else if(Number(ri)===18){const names=['Nhất','Nhị','Tam','Tứ','Ngũ','Lục','Thất','Bát','Cửu'];label=`${names[i]||t} Tầng`;}
+    return `<option value="${t}" ${t===Number(current)?'selected':''}>${esc(label)}</option>`;
+   }).join('');
+  };
+  list.innerHTML=members.map(m=>{
+   const ri=Number(m.realmIndex)||0, ti=Number(m.realm_tier||m.realmTier)||1;
+   return `<article class="realm-admin-row" data-user-id="${Number(m.id)}"><div class="realm-admin-member"><span class="realm-admin-avatar">⚔️</span><div><b>${esc(m.display_name||m.username)}</b><small>@${esc(m.username)} · hiện tại: ${esc(m.stage||m.rank||'Luyện Khí')} ${ti}</small></div></div><div class="realm-admin-controls"><select class="realm-admin-row-realm" aria-label="Cảnh giới">${realms.map(r=>`<option value="${Number(r.index)}" ${Number(r.index)===ri?'selected':''}>${esc(r.name)}</option>`).join('')}</select><select class="realm-admin-row-tier" aria-label="Tầng">${tierOptions(ri,ti)}</select><button class="btn small primary realm-admin-row-apply">⚡ Cập nhật</button><span class="realm-admin-row-msg"></span></div></article>`;
+  }).join('');
+  list.querySelectorAll('.realm-admin-row').forEach(row=>{
+   const realmSel=row.querySelector('.realm-admin-row-realm'),tierSel=row.querySelector('.realm-admin-row-tier'),apply=row.querySelector('.realm-admin-row-apply'),msg=row.querySelector('.realm-admin-row-msg');
+   const refreshTiers=()=>{const ri=Number(realmSel.value);tierSel.innerHTML=tierOptions(ri,1);};
+   realmSel.addEventListener('change',refreshTiers);
+   apply.addEventListener('click',async()=>{
+    const userId=Number(row.dataset.userId),realmIndex=Number(realmSel.value),tier=Number(tierSel.value);
+    apply.disabled=true;msg.textContent='Đang cập nhật...';
+    try{
+     const x=await api('/api/admin/realm-control/'+userId,{method:'PATCH',headers:authHeaders(),body:JSON.stringify({realmIndex,tier})});
+     msg.textContent='✅ Đã cập nhật';
+     await Promise.all([loadData(),loadProfile(),loadLeaderboard()]);
+     const fresh=await api('/api/admin/realm-control',{headers:authHeaders()});
+     const target=(fresh.members||[]).find(v=>Number(v.id)===userId);
+     if(target){const newRi=Number(target.realmIndex)||0,newTi=Number(target.realm_tier)||1;realmSel.value=String(newRi);tierSel.innerHTML=tierOptions(newRi,newTi);}
+    }catch(e){msg.textContent='❌ '+(e?.message||'Thất bại');}
+    finally{apply.disabled=false;}
+   });
+  });
+ }catch(e){content.querySelector('#realmAdminList').innerHTML=`<div class="empty-state compact"><h3>Không thể tải chức năng</h3><p>${esc(e?.message||'Lỗi máy chủ')}</p></div>`;}
+}
+
 const __inflightGets=new Map();
 const __getCache=new Map();
 window.challengeAutoAttack=localStorage.getItem('htm_challenge_auto_attack')==='1';
@@ -534,6 +605,7 @@ function setupTutorial(){
 function accountUI(user){
  if(user){currentUser=user;$('#userBadge').textContent='☯ '+user.displayName;$('#userBadge').classList.remove('hidden');$('#accountBtn').textContent='Hồ sơ';}
  else{currentUser=null;$('#userBadge').classList.add('hidden');$('#accountBtn').textContent='☯ Đăng nhập';}
+ updateRealmAdminMenu();
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}

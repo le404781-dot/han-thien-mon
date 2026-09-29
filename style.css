@@ -1879,3 +1879,20 @@ body.function-only-focus .tien-khi-enhance-section.focus-active{
 @media(max-width:760px){.challenge-move-grid{grid-template-columns:1fr}.challenge-move{min-height:88px}.challenge-move strong{font-size:1.05rem}.battle-damage-float{right:8px}}
 
 .realm-admin-panel{margin-top:18px;padding:15px;border:1px solid var(--gold);background:color-mix(in srgb,var(--surface) 88%,var(--gold) 12%)}.realm-admin-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}.realm-admin-head b{font-size:.72rem;color:var(--red)}.realm-admin-fields{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:10px}.realm-admin-fields select{min-width:0;padding:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);border-radius:6px}@media(max-width:620px){.realm-admin-fields{grid-template-columns:1fr 1fr}.realm-admin-fields .btn{grid-column:1/-1;width:100%}}
+
+/* v3.7.53 · Quyền riêng @thienha_666 trên thanh menu */
+#realmAdminNav{font-weight:900!important;color:var(--gold)!important;border:1px solid color-mix(in srgb,var(--gold) 45%,transparent);background:color-mix(in srgb,var(--gold) 8%,transparent)}
+#realmAdminNav:hover,#realmAdminNav:focus-visible{color:var(--red)!important;background:color-mix(in srgb,var(--gold) 16%,transparent)!important}
+.realm-admin-center{padding:30px 34px}
+.realm-admin-center .realm-admin-head h2{margin:2px 0 5px}
+.realm-admin-center .realm-admin-head p{color:var(--muted);font-size:.82rem;margin:0 0 20px}
+.realm-admin-list{display:grid;gap:10px;max-height:65vh;overflow:auto;padding-right:3px}
+.realm-admin-row{border:1px solid var(--line);background:var(--bg);padding:12px;display:grid;gap:10px}
+.realm-admin-member{display:flex;align-items:center;gap:10px}
+.realm-admin-avatar{width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--gold);background:var(--surface);border-radius:7px}
+.realm-admin-member b{display:block}
+.realm-admin-member small{display:block;color:var(--muted);font-size:.7rem}
+.realm-admin-controls{display:grid;grid-template-columns:1fr 1fr auto minmax(70px,1fr);gap:7px;align-items:center}
+.realm-admin-controls select{min-width:0;padding:9px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text)}
+.realm-admin-row-msg{font-size:.72rem;color:var(--red);font-weight:800}
+@media(max-width:620px){.realm-admin-center{padding:24px 18px}.realm-admin-controls{grid-template-columns:1fr 1fr}.realm-admin-controls .realm-admin-row-apply{grid-column:1/-1;width:100%}.realm-admin-row-msg{grid-column:1/-1}}
