@@ -697,19 +697,21 @@ async function loadTreasure(){
   const realmNames=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao'];
   const currentRealmIndex=realmNames.indexOf(String(d.realm||''));
   area.innerHTML=`<div class="treasure-wallet"><span>☯ Linh lực hiện có · 💎 Linh thạch</span><strong>${Number(d.spiritPower).toLocaleString('vi-VN')} · ${Number(d.spiritStones||0).toLocaleString('vi-VN')}</strong><small>${esc(d.realm)} · ${esc(d.tierName||(`Tầng ${d.tier}/9`))} · 100 linh lực = 1 linh thạch</small></div>
-  <div class="stone-exchange"><div><span class="eyebrow">🏯 TÀNG BẢO CÁC 2.1</span><h3>Pháp khí · Đan dược · Dược Phường · Linh vật trong cùng một kho</h3><p>Toàn bộ vật phẩm của Dược Đường đã được tích hợp vào Tàng Bảo Các. Mua xong vật phẩm chuyển thẳng vào Tu Di Giới; đan dược có thể dùng trực tiếp, thức ăn/Khôi Lỗi/trang bị linh thú dùng tại Dưỡng Thú.</p></div><span class="tag">☯ Giao dịch thống nhất</span></div>
+  <div class="stone-exchange"><div><span class="eyebrow">🏯 TÀNG BẢO CÁC 2.1</span><h3>Pháp khí · Đan dược · Dược Phường · Linh vật trong cùng một kho</h3><p>Toàn bộ vật phẩm của Dược Đường đã được tích hợp vào Tàng Bảo Các. Mua xong vật phẩm chuyển thẳng vào Tu Di Giới; đan dược có thể dùng trực tiếp, thức ăn/Khôi Lỗi/trang bị linh thú dùng tại Dưỡng Thú.</p>${d.immortalPillsUnlocked?'':'<div class="tag">🔒 Toàn bộ Tiên Đan đang bị Đan Chủ khóa mua — chỉ Đan Chủ mới có quyền mở khóa.</div>'}</div><span class="tag">☯ Giao dịch thống nhất</span></div>
   <div class="stone-exchange-box"><div><b>🔄 Đổi linh lực → linh thạch</b><small>100 linh lực = 1 linh thạch</small></div><input id="exchangeStonesQty" type="number" min="1" max="100000" value="10"><button id="exchangeStonesBtn" class="btn small primary">Đổi linh thạch</button></div>
   <div class="treasure-grid">${d.items.map(i=>{
     const stones=Number(d.spiritStones||0), price=Number(i.price||0), owned=Number(i.quantity||0);
     const requiredRealmIndex=Number(i.min_realm)||0;
-    const locked=currentRealmIndex<requiredRealmIndex;
+    const isImmortalPill=/tiên đan/i.test(String(i.category||''));
+    const pillLocked=isImmortalPill && !d.immortalPillsUnlocked;
+    const locked=currentRealmIndex<requiredRealmIndex || pillLocked;
     const can= !locked && stones>=price;
     const isDuoc=String(i.category||'').startsWith('Dược Đường');
     const isFood=i.category==='Dược Đường · Linh thú thức ăn';
     const isPuppet=Boolean(i.is_khoi_loi);
     const isGear=Boolean(i.beast_gear_slot);
     const icon=isFood?'🍖':isPuppet?'🪆':isGear?'🛡️':i.category==='Đan dược'?'◈':i.category==='Linh thú'?'🐉':'⚔';
-    const text=locked?'🔒 Cần '+esc(realmNames[requiredRealmIndex]||'cảnh giới cao hơn'):can?'💎 Mua':'Thiếu '+Number(Math.max(0,price-stones)).toLocaleString('vi-VN')+' linh thạch';
+    const text=pillLocked?'🔒 Đan Chủ chưa mở khóa':currentRealmIndex<requiredRealmIndex?'🔒 Cần '+esc(realmNames[requiredRealmIndex]||'cảnh giới cao hơn'):can?'💎 Mua':'Thiếu '+Number(Math.max(0,price-stones)).toLocaleString('vi-VN')+' linh thạch';
     const use=owned>0 && Number(i.spirit_gain||0)>0 ? `<button class="btn small treasure-use-item" data-id="${i.id}">Hấp thụ số lượng</button>` : '';
     const beastAction=owned>0 && (isFood||isPuppet||isGear) ? `<button class="btn small treasure-open-beast" type="button">🐉 Dùng tại Dưỡng Thú</button>` : '';
     return `<article class="treasure-card ${locked?'locked':''} ${isDuoc?'treasure-duoc-card':''}"><span class="item-seal">${icon}</span><div><span class="eyebrow">${esc(isDuoc?i.category.replace('Dược Đường · ','💊 '):i.category)}</span><h3>${esc(i.name)}</h3><p>${esc(i.description)}</p>${i.beast_food_gain?`<small>🐉 +${Number(i.beast_food_gain)} linh lực linh thú · 💗 +${Number(i.beast_joy_gain||0)} niềm vui</small>`:''}${isPuppet?`<small>🪆 Khôi Lỗi · +${Number(i.beast_joy_gain||0)} niềm vui</small>`:''}${isGear?`<small>⚔ +${Number(i.beast_gear_power||0)} linh thú · yêu cầu ${esc(realmNames[Number(i.beast_gear_min_realm)]||'cảnh giới cao hơn')}</small>`:''}<small>Đang có: ${owned} · Giá: 💎 ${price.toLocaleString('vi-VN')} linh thạch</small><div class="duoc-buy"><input class="treasure-qty" data-id="${i.id}" type="number" min="1" max="200" value="1" ${locked?'disabled':''}><button class="btn small primary buy-item" data-id="${i.id}" ${locked||!can?'disabled':''}>${text}</button>${use}${beastAction}</div></div></article>`;

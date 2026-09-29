@@ -3422,8 +3422,12 @@ app.get('/api/treasury',auth,async(req,res)=>{
       FROM treasure_items ti
       LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
       ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
+    const pillSetting=(await query(`SELECT immortal_pills_unlocked FROM alchemy_shop_settings WHERE id=1`)).rows[0]||{immortal_pills_unlocked:false};
+    const danMaster=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]||null;
     res.json({spiritPower:Number(p?.spirit_power)||0,spiritStones:Number(p?.spirit_stones)||0,
-      storageCapacity:Number(p?.storage_capacity)||30,realm:stage.realm,tier:stage.tier,items});
+      storageCapacity:Number(p?.storage_capacity)||30,realm:stage.realm,tier:stage.tier,items,
+      immortalPillsUnlocked:Boolean(pillSetting.immortal_pills_unlocked),
+      isDanMaster:Boolean(danMaster&&Number(danMaster.user_id)===Number(req.session.user_id))});
   }catch(e){console.error('treasury:',e);res.status(500).json({error:'Không thể mở Tàng Bảo Các mới.'});}
 });
 
@@ -3438,6 +3442,16 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
       FROM treasure_items WHERE id=$1 FOR UPDATE`,[itemId]);
     if(!itemR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy vật phẩm.'});}
     const item=itemR.rows[0];
+    // Tiên Đan trong Tàng Bảo Các dùng chung khóa với Đan Pháp.
+    // Chỉ Đan Chủ mới có quyền mở khóa thông qua /api/dan-phap/tien-dan-lock.
+    const isImmortalPill=String(item.category||'').trim().toLowerCase().endsWith('tiên đan');
+    if(isImmortalPill){
+      const pillSetting=(await client.query(`SELECT immortal_pills_unlocked FROM alchemy_shop_settings WHERE id=1 FOR UPDATE`)).rows[0];
+      if(!pillSetting?.immortal_pills_unlocked){
+        await client.query('ROLLBACK');
+        return res.status(423).json({error:'Toàn bộ Tiên Đan trong Tàng Bảo Các đang bị Đan Chủ khóa mua. Chỉ Đan Chủ mới có quyền mở khóa.'});
+      }
+    }
     const pR=await client.query(`SELECT spirit_power,spirit_stones,storage_capacity FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id]);
     if(!pR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ đệ tử.'});}
     const p=pR.rows[0], stage=stageFor(Number(p.spirit_power)||0);
@@ -6850,6 +6864,25 @@ function stopBackgroundJobs(){
   backgroundJobsStarted=false;
 }
 
+async function ensureTreasuryImmortalPillLockSchema(){
+  const migrationId='v3.7.41-treasury-immortal-pill-lock';
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    await client.query(`CREATE TABLE IF NOT EXISTS alchemy_shop_settings (
+      id INTEGER PRIMARY KEY,
+      immortal_pills_unlocked BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_by INTEGER
+    )`);
+    await client.query(`INSERT INTO alchemy_shop_settings(id,immortal_pills_unlocked) VALUES(1,FALSE) ON CONFLICT(id) DO NOTHING`);
+    await client.query(`INSERT INTO app_migrations(id) VALUES($1) ON CONFLICT(id) DO NOTHING`,[migrationId]);
+    await client.query('COMMIT');
+    console.log('[ALCHEMY] v3.7.41: Tàng Bảo Các dùng chung khóa Tiên Đan với Đan Pháp.');
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}
+  finally{client.release();}
+}
+
 async function lockImmortalPillsOnce(){
   const migrationId='v3.7.40-lock-immortal-pills';
   const client=await dbConnect();
@@ -6915,6 +6948,7 @@ async function initializeDatabaseWithRetry(){
     if(shuttingDown||poolClosed)return;
     await ensureAlchemySchema();
     if(shuttingDown||poolClosed)return;
+    await ensureTreasuryImmortalPillLockSchema();
     await lockImmortalPillsOnce();
     if(shuttingDown||poolClosed)return;
     await ensureChallengeSchema();
