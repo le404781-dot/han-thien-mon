@@ -1073,7 +1073,10 @@ async function ensureAlchemySchema(){
   return __ensureAlchemySchemaPromise;
 }
 async function ensureAlchemySchemaImpl(){
-  await ensureVenueRoleSchema();
+  // Schema nền của Đan Pháp đã được tạo trong initDb(). Không gọi lại
+  // ensureVenueRoleSchema() khi người chơi chỉ mở Đan Pháp: hàm đó chứa
+  // nhiều DDL/index/trigger dùng chung và có thể khiến GET Đan Pháp bị lỗi
+  // hoặc chờ khóa trên Render. Ở đây chỉ seed dữ liệu Đan Pháp idempotent.
   // Seed recipe outputs only after the base treasure catalog exists.
   const recipes=[
     ['Tụ Linh Đan Pháp','Hạ Phẩm','Tăng linh lực · nhập môn','Đan pháp cơ bản, ổn định hỏa hầu.',500,78,0,[['Tụ Linh Hoa',2]]],
