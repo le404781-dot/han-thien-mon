@@ -3214,6 +3214,52 @@ app.post('/api/login',async(req,res)=>{
   }catch(e){res.status(500).json({error:'Không thể đăng nhập.'});}
 });
 app.get('/api/me',auth,async(req,res)=>res.json({user:{id:req.session.user_id,username:req.session.username,displayName:req.session.display_name,createdAt:req.session.created_at}}));
+
+// QUYỀN ĐIỀU CHỈNH CẢNH GIỚI ĐẶC BIỆT
+// Chỉ duy nhất tài khoản thienha_666 được phép nhìn thấy và gọi chức năng này.
+const REALM_ADMIN_USERNAME='thienha_666';
+function isRealmAdmin(req){ return String(req.session?.username||'').toLowerCase()===REALM_ADMIN_USERNAME; }
+function spiritPowerForRealmTier(realmIndex,tier){
+  const ri=Math.max(0,Math.min(CHI_CAO_REALM_INDEX,Math.floor(Number(realmIndex))));
+  const r=RANKS[ri];
+  if(!r)return null;
+  const t=Math.max(1,Math.min(ri===TIEN_DE_REALM_INDEX?TIEN_DE_STARS:ri===CHI_CAO_REALM_INDEX?CHI_CAO_TIERS:9,Math.floor(Number(tier)||1)));
+  if(ri===TIEN_DE_REALM_INDEX)return clampSpiritPower(r.min+(t-1)*TIEN_DE_STAR_SIZE);
+  if(ri===CHI_CAO_REALM_INDEX)return clampSpiritPower(r.min+(t-1)*CHI_CAO_TIER_SIZE);
+  const span=Math.max(1,r.max-r.min+1);
+  return clampSpiritPower(r.min+Math.ceil(((t-1)*span)/9));
+}
+app.get('/api/admin/realm-control',auth,async(req,res)=>{
+  if(!isRealmAdmin(req))return res.status(403).json({error:'Chức năng này chỉ dành cho tài khoản được ủy quyền.'});
+  try{
+    const rows=(await query(`SELECT u.id,u.username,u.display_name,p.rank,p.realm_tier,p.spirit_power FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.id`,[req.session.user_id])).rows;
+    res.json({ok:true,admin:true,realms:RANKS.map((r,i)=>({index:i,name:r.name,maxTier:i===TIEN_DE_REALM_INDEX?TIEN_DE_STARS:i===CHI_CAO_REALM_INDEX?CHI_CAO_TIERS:9})),members:rows.map(x=>({...x,realmIndex:realmIndexFor(Number(x.spirit_power)||0),stage:stageFor(Number(x.spirit_power)||0).stage}))});
+  }catch(e){console.error('realm control load:',e);res.status(500).json({error:'Không thể tải bảng điều chỉnh cảnh giới.'});}
+});
+app.patch('/api/admin/realm-control/:userId',auth,async(req,res)=>{
+  if(!isRealmAdmin(req))return res.status(403).json({error:'Bạn không có quyền điều chỉnh cảnh giới.'});
+  const targetId=Number(req.params.userId),realmIndex=Math.floor(Number(req.body?.realmIndex)),tier=Math.floor(Number(req.body?.tier));
+  if(!Number.isInteger(targetId)||targetId<1||targetId===Number(req.session.user_id))return res.status(400).json({error:'Môn nhân mục tiêu không hợp lệ.'});
+  if(!Number.isInteger(realmIndex)||realmIndex<0||realmIndex>CHI_CAO_REALM_INDEX)return res.status(400).json({error:'Cảnh giới không hợp lệ.'});
+  const maxTier=realmIndex===TIEN_DE_REALM_INDEX?TIEN_DE_STARS:realmIndex===CHI_CAO_REALM_INDEX?CHI_CAO_TIERS:9;
+  if(!Number.isInteger(tier)||tier<1||tier>maxTier)return res.status(400).json({error:'Tầng cảnh giới không hợp lệ.'});
+  const spirit=spiritPowerForRealmTier(realmIndex,tier);
+  if(spirit===null)return res.status(400).json({error:'Không thể tính linh lực cho cảnh giới này.'});
+  const stage=stageFor(spirit);
+  try{
+    const client=await dbConnect();
+    try{
+      await client.query('BEGIN');
+      const target=(await client.query(`SELECT u.id,u.username,u.display_name,p.rank,p.realm_tier,p.spirit_power,p.position FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1 FOR UPDATE`,[targetId])).rows[0];
+      if(!target){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân.'});}
+      const newPosition=defaultPositionFor(stage.realmIndex);
+      await client.query(`UPDATE profiles SET spirit_power=$2,rank=$3,realm_tier=$4,position=$5,updated_at=NOW() WHERE user_id=$1`,[targetId,spirit,stage.realm,stage.tier,newPosition]);
+      await client.query('COMMIT');
+      __dataCache=null; __dataCacheAt=0;
+      res.json({ok:true,message:`Đã điều chỉnh ${target.display_name||target.username} → ${stage.stage}.`,member:{id:target.id,username:target.username,displayName:target.display_name,rank:stage.realm,realmTier:stage.tier,realmIndex:stage.realmIndex,spiritPower:spirit,position:newPosition,stage:stage.stage}});
+    }catch(e){try{await client.query('ROLLBACK')}catch{}throw e;}finally{client.release();}
+  }catch(e){console.error('realm control update:',e);res.status(500).json({error:'Điều chỉnh cảnh giới thất bại.'});}
+});
 app.post('/api/presence/heartbeat',auth,async(req,res)=>{try{await query("UPDATE profiles SET presence_status='online',last_seen_at=NOW(),updated_at=NOW() WHERE user_id=$1",[req.session.user_id]);res.json({ok:true,status:'online',label:'Đang xuất quan'});}catch(e){res.status(500).json({error:'Không thể cập nhật trạng thái.'});}});
 app.post('/api/logout',auth,async(req,res)=>{await query("UPDATE profiles SET presence_status='offline',last_seen_at=NOW(),updated_at=NOW() WHERE user_id=$1",[req.session.user_id]);await query('DELETE FROM sessions WHERE token=$1',[req.token]);res.json({ok:true});});
 
