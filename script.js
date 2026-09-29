@@ -18,7 +18,7 @@ const __inflightGets=new Map();
 const __getCache=new Map();
 const GET_CACHE_TTL={
  '/api/data':10000,'/api/profile':5000,'/api/chat':4000,'/api/mailbox':5000,
- '/api/challenges':5000,'/api/challenges/online/state':0,'/api/challenges/announcement':5000,'/api/arena/live':2500,
+ '/api/challenges':1500,'/api/challenges/online/state':0,'/api/challenges/announcement':5000,'/api/arena/live':2500,
  '/api/rewards':15000,'/api/presence':10000
 };
 function getCacheTTL(url){const base=String(url).split('?')[0];return GET_CACHE_TTL[base]??3000;}
@@ -156,6 +156,29 @@ function stopChallengeRealtime(){
  if(window.challengeRealtimeTimer){clearInterval(window.challengeRealtimeTimer);window.challengeRealtimeTimer=null;}
  window.challengeRealtimeBusy=false;
 }
+function updateChallengeLiveDom(b){
+ const root=document.querySelector('.active-battle');
+ if(!root||!b)return false;
+ const setSide=(side,hp,maxHp)=>{
+  const label=root.querySelector(`[data-battle-hp-label="${side}"]`);
+  const bar=root.querySelector(`[data-battle-hp-bar="${side}"]`);
+  const fighter=root.querySelector(`[data-battle-fighter="${side}"]`);
+  const cur=Math.max(0,Number(hp)||0), max=Math.max(1,Number(maxHp)||1), p=Math.min(100,Math.max(0,Math.round(cur/max*100)));
+  if(label)label.textContent=`${Math.round(cur).toLocaleString('vi-VN')} / ${Math.round(max).toLocaleString('vi-VN')}`;
+  if(bar){bar.style.width=`${p}%`;bar.classList.toggle('danger',p<=25);bar.classList.toggle('warn',p>25&&p<=55);}
+  return fighter;
+ };
+ setSide('challenger',b.challengerHp,b.challengerMaxHp);
+ setSide('opponent',b.opponentHp,b.opponentMaxHp);
+ const turn=Number(b.turnUserId||0);
+ root.querySelector('[data-battle-fighter="challenger"]')?.classList.toggle('turn',turn===Number(b.challengerId));
+ root.querySelector('[data-battle-fighter="opponent"]')?.classList.toggle('turn',turn===Number(b.opponentId));
+ const note=root.querySelector('[data-battle-turn-note]');
+ if(note)note.innerHTML=Number(b.turnUserId)===Number(currentUser?.id)?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...';
+ const last=root.querySelector('[data-battle-last-action]');
+ if(last){if(b.lastAction){last.hidden=false;last.innerHTML=`${esc(b.lastAction)} · <b>-${Number(b.lastDamage||0).toLocaleString('vi-VN')} HP</b>`;}else{last.hidden=true;last.textContent='';}}
+ return true;
+}
 async function pollChallengeRealtime(){
  if(window.challengeRealtimeBusy||document.hidden||!getToken())return;
  window.challengeRealtimeBusy=true;
@@ -167,13 +190,16 @@ async function pollChallengeRealtime(){
    return;
   }
   const sig=[b.id,b.status,b.round,b.turnUserId,b.challengerHp,b.opponentHp,b.lastActorId,b.lastAction].join('|');
-  if(window.__challengeLastState!==sig){
-   const hadPrevious=Boolean(window.__challengeLastState);
-   window.__challengeLastState=sig;
-   if(hadPrevious){
-    for(const key of __getCache.keys()){if(String(key).startsWith('/api/challenges|'))__getCache.delete(key);}
-    await loadChallenges();
-   }
+  const previous=window.__challengeLastState||'';
+  const prevParts=previous?previous.split('|'):[];
+  const turnChanged=Boolean(previous)&&String(prevParts[3])!==String(b.turnUserId);
+  const battleChanged=Boolean(previous)&&String(prevParts[0])!==String(b.id);
+  const statusChanged=Boolean(previous)&&String(prevParts[1])!==String(b.status);
+  window.__challengeLastState=sig;
+  window.__challengeLiveState=b;
+  if(!previous||battleChanged||turnChanged||statusChanged||!updateChallengeLiveDom(b)){
+   for(const key of __getCache.keys()){if(String(key).startsWith('/api/challenges|'))__getCache.delete(key);}
+   await loadChallenges();
   }
  }catch(e){
   // Poll nền thất bại không làm gián đoạn trận đang hiển thị.
@@ -192,20 +218,20 @@ async function loadChallenges(){
   const battleHtml=battle?`<div class="challenge-block active-battle">
     <div class="challenge-subhead"><span class="eyebrow">🔥 LÔI ĐÀI ONLINE ĐANG DIỄN RA</span><b>Vòng ${Number(battle.round||0)}</b></div>
     <div class="battle-arena">
-      <article class="battle-fighter ${Number(battle.turnUserId)===Number(battle.challengerId)?'turn':''}">
+      <article data-battle-fighter="challenger" class="battle-fighter ${Number(battle.turnUserId)===Number(battle.challengerId)?'turn':''}">
        <div class="battle-fighter-top"><span class="challenge-avatar">${esc(battle.challengerAvatar||'⚔')}</span><div><b>${esc(battle.challengerName||'Người khiêu chiến')}</b><small>${esc(battle.challengerRank||'')} · ${Number(battle.challengerSpirit||0).toLocaleString('vi-VN')} linh lực</small></div></div>
-       <div class="battle-hp-head"><span>❤️ HP</span><b>${Math.round(battle.challengerHp).toLocaleString('vi-VN')} / ${Math.round(battle.challengerMaxHp).toLocaleString('vi-VN')}</b></div>
-       <div class="battle-hp"><i class="${hpColor(battle.challengerHp,battle.challengerMaxHp)}" style="width:${pct(battle.challengerHp,battle.challengerMaxHp)}%"></i></div>
+       <div class="battle-hp-head"><span>❤️ HP</span><b data-battle-hp-label="challenger">${Math.round(battle.challengerHp).toLocaleString('vi-VN')} / ${Math.round(battle.challengerMaxHp).toLocaleString('vi-VN')}</b></div>
+       <div class="battle-hp"><i data-battle-hp-bar="challenger" class="${hpColor(battle.challengerHp,battle.challengerMaxHp)}" style="width:${pct(battle.challengerHp,battle.challengerMaxHp)}%"></i></div>
       </article>
       <div class="battle-vs">VS</div>
-      <article class="battle-fighter ${Number(battle.turnUserId)===Number(battle.opponentId)?'turn':''}">
+      <article data-battle-fighter="opponent" class="battle-fighter ${Number(battle.turnUserId)===Number(battle.opponentId)?'turn':''}">
        <div class="battle-fighter-top"><span class="challenge-avatar">${esc(battle.opponentAvatar||'⚔')}</span><div><b>${esc(battle.opponentName||'Đối thủ')}</b><small>${esc(battle.opponentRank||'')} · ${Number(battle.opponentSpirit||0).toLocaleString('vi-VN')} linh lực</small></div></div>
-       <div class="battle-hp-head"><span>❤️ HP</span><b>${Math.round(battle.opponentHp).toLocaleString('vi-VN')} / ${Math.round(battle.opponentMaxHp).toLocaleString('vi-VN')}</b></div>
-       <div class="battle-hp"><i class="${hpColor(battle.opponentHp,battle.opponentMaxHp)}" style="width:${pct(battle.opponentHp,battle.opponentMaxHp)}%"></i></div>
+       <div class="battle-hp-head"><span>❤️ HP</span><b data-battle-hp-label="opponent">${Math.round(battle.opponentHp).toLocaleString('vi-VN')} / ${Math.round(battle.opponentMaxHp).toLocaleString('vi-VN')}</b></div>
+       <div class="battle-hp"><i data-battle-hp-bar="opponent" class="${hpColor(battle.opponentHp,battle.opponentMaxHp)}" style="width:${pct(battle.opponentHp,battle.opponentMaxHp)}%"></i></div>
       </article>
     </div>
-    <div class="battle-turn-note">${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
-    ${battle.lastAction?`<div class="battle-last-action">${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b></div>`:''}
+    <div class="battle-turn-note" data-battle-turn-note>${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
+    <div class="battle-last-action" data-battle-last-action ${battle.lastAction?'':'hidden'}>${battle.lastAction?`${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b>`:''}</div>
     ${battle.yourTurn?`<div class="ultimate-choice"><label>⚔ CHỌN RA CHIÊU</label><select id="battleTechniqueSelect">${(currentProfile?.techniques||[]).map(t=>`<option value="${t.id}" ${t.equipped?'selected':''}>${esc(t.name)} · ${esc(t.grade)} · ⚔+${Number(t.power_bonus||0).toLocaleString('vi-VN')}</option>`).join('') || '<option value="0">⚡ Hàn Thiên Phá</option>'}</select><small>Có thể đổi chiêu trước mỗi lượt. Công pháp đang trang bị được chọn mặc định; hệ số sát thương được máy chủ kiểm tra lại.</small></div>`:''}
     <div class="battle-actions"><button class="btn primary battle-ultimate" data-id="${battle.id}" ${battle.yourTurn?'':'disabled'}>${battle.yourTurn?'⚡ TUNG TUYỆT CHIÊU':'⏳ CHỜ ĐỐI THỦ'}</button>${battle.spitAllowed&&battle.yourTurn?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn ghost battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
     <small class="battle-rule">Sát thương phụ thuộc Công lực, trang bị, công pháp được chọn và chênh lệch cảnh giới; cảnh giới cao hơn gây sát thương lớn hơn, cảnh giới thấp hơn bị giảm mạnh.</small>
@@ -230,7 +256,7 @@ async function loadChallenges(){
   const hasOnlineBattle=Boolean(d.activeBattle);
   if(hasOnlineBattle){
    window.__challengeLastState=[d.activeBattle.id,d.activeBattle.status,d.activeBattle.round,d.activeBattle.turnUserId,d.activeBattle.challengerHp,d.activeBattle.opponentHp,d.activeBattle.lastActorId,d.activeBattle.lastAction].join('|');
-   if(!window.challengeRealtimeTimer)window.challengeRealtimeTimer=setInterval(pollChallengeRealtime,2500);
+   if(!window.challengeRealtimeTimer)window.challengeRealtimeTimer=setInterval(pollChallengeRealtime,2000);
   }else{
    window.__challengeLastState=null;
    stopChallengeRealtime();
@@ -242,6 +268,10 @@ async function useUltimate(requestId){
  const b=document.querySelector(`.battle-ultimate[data-id="${requestId}"]`),msg=$('#challengeMsg'); if(b)b.disabled=true;
  try{
   const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,techniqueId:Number($('#battleTechniqueSelect')?.value||0)})});
+  // Server trả lại HP đã ghi xuống DB; dùng kết quả này để không phụ thuộc cache phía client.
+  if(Number(x.targetUserId)>0 && Number.isFinite(Number(x.targetHpAfter))){
+    window.__challengeLastServerAction={requestId:Number(requestId),targetUserId:Number(x.targetUserId),targetHpAfter:Number(x.targetHpAfter),targetHpBefore:Number(x.targetHpBefore||0),round:Number(x.round||0)};
+  }
   const betNote=x.betSettlement?.notices?.find(n=>Number(n.bettorId)===Number(currentUser?.id));
   const betText=betNote?.result==='won'?` · 🏆 Cược thắng +${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:(betNote?.result==='refunded'?` · ↩ Hoàn ${Number(betNote.payout||0).toLocaleString('vi-VN')} linh thạch`:'');
   msg.textContent=x.status==='completed'?`🏆 ${x.message}${betText}`:`⚡ ${x.message}`;
