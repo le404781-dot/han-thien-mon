@@ -2216,6 +2216,20 @@ async function initDb() {
     console.log(`[DB] ${reytheon12StarMigration}: Reytheon=${rey.rowCount?'Tiên Đế 12 Tinh':'chưa tồn tại'}.`);
   }
 
+  // v3.7.52: ép lại Reytheon chính xác Tiên Đế 12 Tinh.
+  // Không dùng migration cũ v3.7.50 vì DB có thể đã đánh dấu migration đó là đã chạy.
+  const reytheon12StarCorrectionMigration='v3.7.52_reytheon_force_tien_de_12_star';
+  const reytheon12StarCorrectionApplied=(await query('SELECT 1 FROM app_migrations WHERE id=$1',[reytheon12StarCorrectionMigration])).rowCount > 0;
+  if(!reytheon12StarCorrectionApplied){
+    const rey=await query(`SELECT u.id FROM users u WHERE LOWER(u.username)=LOWER($1) LIMIT 1`,['Reytheon']);
+    if(rey.rowCount){
+      const spirit=clampSpiritPower(RANK_MINS[TIEN_DE_REALM_INDEX] + (12-1)*TIEN_DE_STAR_SIZE);
+      await query(`UPDATE profiles SET spirit_power=$2,rank='Tiên Đế',realm_tier=12,updated_at=NOW() WHERE user_id=$1`,[Number(rey.rows[0].id),spirit]);
+    }
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[reytheon12StarCorrectionMigration]);
+    console.log(`[DB] ${reytheon12StarCorrectionMigration}: Reytheon=${rey.rowCount?'Tiên Đế 12 Tinh':'chưa tồn tại'}.`);
+  }
+
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
