@@ -15,10 +15,24 @@ const REALM_NAMES=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Th�
 const realmIndexOf=name=>Math.max(0,REALM_NAMES.indexOf(String(name||'')));
 
 const __inflightGets=new Map();
+const __getCache=new Map();
+const GET_CACHE_TTL={
+ '/api/data':10000,'/api/profile':5000,'/api/chat':4000,'/api/mailbox':5000,
+ '/api/challenges':5000,'/api/challenges/announcement':5000,'/api/arena/live':2500,
+ '/api/rewards':15000,'/api/presence':10000
+};
+function getCacheTTL(url){const base=String(url).split('?')[0];return GET_CACHE_TTL[base]??3000;}
+function invalidateGetCache(){__getCache.clear();}
 async function api(url,opts={}){
  const method=String(opts.method||'GET').toUpperCase();
- const key=method==='GET'?`${url}|${getToken()||''}`:null;
- if(key&&__inflightGets.has(key))return __inflightGets.get(key);
+ const token=getToken()||'';
+ const key=method==='GET'?`${url}|${token}`:null;
+ if(method!=='GET')invalidateGetCache();
+ if(key){
+  const cached=__getCache.get(key),ttl=getCacheTTL(url);
+  if(cached && (Date.now()-cached.at)<ttl)return cached.value;
+  if(__inflightGets.has(key))return __inflightGets.get(key);
+ }
  const run=(async()=>{
   const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),...(opts.body&&typeof opts.body==='string'?{'Content-Type':'application/json'}:{})}});
   let d={}; try{d=await r.json();}catch{}
@@ -26,7 +40,7 @@ async function api(url,opts={}){
   if(d&&typeof d==='object')d._status=r.status;
   return d;
  })();
- if(key){__inflightGets.set(key,run);try{return await run;}finally{if(__inflightGets.get(key)===run)__inflightGets.delete(key);}}
+ if(key){__inflightGets.set(key,run);try{const d=await run;__getCache.set(key,{at:Date.now(),value:d});return d;}finally{if(__inflightGets.get(key)===run)__inflightGets.delete(key);}}
  return run;
 }
 
@@ -303,7 +317,7 @@ async function openFriendChat(userId,name){
  const load=async()=>{try{const d=await api('/api/friends/'+userId+'/messages',{headers:authHeaders()});render(d.rows||[]);}catch(e){$('#privateChatMsg').textContent='❌ '+e.message;}};
  await load();
  $('#privateChatForm').onsubmit=async e=>{e.preventDefault();const input=$('#privateChatInput'),msg=$('#privateChatMsg');try{await api('/api/friends/'+userId+'/messages',{method:'POST',headers:authHeaders(),body:JSON.stringify({message:input.value})});input.value='';await load();}catch(err){msg.textContent='❌ '+err.message;}};
- clearInterval(window.privateChatTimer);window.privateChatTimer=setInterval(()=>{if(modal.open)load();},4000);
+ clearInterval(window.privateChatTimer);window.privateChatTimer=setInterval(()=>{if(modal.open&&!document.hidden)load();},6000);
 }
 
 
@@ -380,9 +394,9 @@ function showRewardToast(lines){
  if(!lines.length)return;
  const host=ensureRewardToastHost();
  const el=document.createElement('div');el.className='reward-toast';
- el.innerHTML=`<div class="reward-toast-mark">✦</div><div><b>NHẬN ĐƯỢC</b>${lines.map(x=>`<div>${esc(x)}</div>`).join('')}</div><span class="reward-toast-time">10s</span>`;
+ el.innerHTML=`<div class="reward-toast-mark">✦</div><div><b>NHẬN ĐƯỢC</b>${lines.map(x=>`<div>${esc(x)}</div>`).join('')}</div><span class="reward-toast-time">3.5s</span>`;
  host.appendChild(el);
- setTimeout(()=>el.remove(),10000);
+ setTimeout(()=>el.remove(),3500);
 }
 function snapshotMap(rows,prefix){const m={};for(const x of (rows||[]))m[`${prefix}:${x.id}`]={name:x.name,quantity:Number(x.quantity)||0};return m;}
 async function pollRewardSnapshot(initial=false){
@@ -408,7 +422,7 @@ function startRewardWatcher(){
  if(rewardWatchTimer)clearInterval(rewardWatchTimer);
  rewardSnapshot=null;
  pollRewardSnapshot(true);
- rewardWatchTimer=setInterval(()=>{if(document.hidden)return;pollRewardSnapshot(false);},15000);
+ rewardWatchTimer=setInterval(()=>{if(document.hidden)return;pollRewardSnapshot(false);},30000);
 }
 
 async function loadProfile(){
@@ -472,7 +486,7 @@ async function onlineCultivationTick(){
 function startOnlineCultivation(){
   if(onlineTimer)clearInterval(onlineTimer);
   if(window.__onlineRealtimeTimer)clearInterval(window.__onlineRealtimeTimer);
-  onlineTimer=setInterval(onlineCultivationTick,5000);
+  onlineTimer=setInterval(onlineCultivationTick,15000);
   window.__onlineRealtimeTimer=setInterval(()=>{
     const status=$('#onlineStatus'),gainEl=$('#onlineGain');
     if(!status||!gainEl||!currentProfile||Boolean(currentProfile?.mansion?.active))return;
@@ -695,9 +709,9 @@ async function loadTienKhiEnhance(){
   const d=await api('/api/tien-khi-enhance',{headers:authHeaders()}),items=d.items||[],catalyst=d.catalyst||null;
   const targets=items.map(x=>`<option value="${x.id}">${esc(x.name)} · ${esc(x.reward_grade||'Tiên Khí')} · +${Number(x.enhance_level||0)} · ×${Number(x.quantity||0)}</option>`).join('');
   const cards=items.map(x=>`<article class="enhance-artifact-card" data-enhance-card="${x.id}"><div class="enhance-artifact-visual">${immortalArtifactAvatarHtml(x.avatar||'⚜️')}</div><div class="enhance-artifact-info"><span class="eyebrow">⚜️ ${esc(x.reward_grade||'Tiên Khí')}</span><h3>${esc(x.name)} <b>+${Number(x.enhance_level||0)}</b></h3><p>Đang có ×${Number(x.quantity||0)} · Chiến lực cơ bản +${Number(x.power_bonus||0).toLocaleString('vi-VN')} · Hiện tại +${Number(x.enhanced_power||0).toLocaleString('vi-VN')}</p></div></article>`).join('');
-  area.innerHTML=`<div class="enhance-panel"><div class="enhance-header"><div><span class="eyebrow">⚜️ LUYỆN KHÍ · CƯỜNG HÓA</span><h3>Tiên Khí +0 → +9</h3><p>Lần đầu 100% · lần hai 90% · từ lần 3 ngẫu nhiên 20%–80%. Thất bại đưa Tiên Khí về +0.</p></div><span class="tag">10–100 PHÔI</span></div><div class="enhance-form-grid"><label>Tiên Khí mục tiêu<select id="enhanceTarget">${targets||'<option value="0">— Chưa có Tiên Khí —</option>'}</select></label><label>Tiên Khí làm phôi<select id="enhanceCore">${targets||'<option value="0">— Chưa có phôi —</option>'}</select></label><label>Số lượng phôi<input id="enhanceCoreQty" type="number" min="10" max="100" value="10"></label><label class="enhance-catalyst-option"><span>Thiên Đạo Cường Hóa Thạch · ×${Number(catalyst?.quantity||0)}</span><select id="enhanceCatalyst"><option value="0">Không sử dụng</option><option value="1" ${catalyst?'':'disabled'}>＋1 · Tăng thêm 5% ${catalyst?'':'(không có)'}</option></select></label><button class="btn primary" id="enhanceBtn" ${items.length<2?'disabled':''}>⚜️ Cường Hóa</button></div><div id="enhanceRate" class="enhance-rate">Chọn Tiên Khí mục tiêu và phôi để xem tỷ lệ dự kiến.</div><div id="enhanceMsg" class="train-msg"></div></div><div class="enhance-grid">${cards||'<div class="empty-state compact"><p>Chưa có Tiên Khí để Cường Hóa.</p></div>'}</div>`;
+  area.innerHTML=`<div class="enhance-panel"><div class="enhance-header"><div><span class="eyebrow">⚜️ LUYỆN KHÍ · CƯỜNG HÓA</span><h3>Tiên Khí +0 → +9</h3><p>Lần đầu 100% · lần hai 90% · từ lần 3 ngẫu nhiên 20%–80%. Thất bại đưa Tiên Khí về +0.</p></div><span class="tag">10–100 PHÔI</span></div><div class="enhance-form-grid"><label>Tiên Khí mục tiêu<select id="enhanceTarget">${targets||'<option value="0">— Chưa có Tiên Khí —</option>'}</select></label><label>Tiên Khí làm phôi<select id="enhanceCore">${targets||'<option value="0">— Chưa có phôi —</option>'}</select></label><label>Số lượng phôi<input id="enhanceCoreQty" type="number" min="10" max="100" value="10"></label><label class="enhance-catalyst-option"><span>Thiên Đạo Cường Hóa Thạch · ×${Number(catalyst?.quantity||0)}</span><select id="enhanceCatalyst"><option value="0">Không sử dụng</option><option value="1" ${catalyst?'':'disabled'}>＋1 · Tăng thêm 5% ${catalyst?'':'(không có)'}</option></select></label><button class="btn primary" id="enhanceBtn" ${items.length<1?'disabled':''}>⚜️ Cường Hóa</button></div><div id="enhanceRate" class="enhance-rate">Chọn Tiên Khí mục tiêu và phôi để xem tỷ lệ dự kiến.</div><div id="enhanceMsg" class="train-msg"></div></div><div class="enhance-grid">${cards||'<div class="empty-state compact"><p>Chưa có Tiên Khí để Cường Hóa.</p></div>'}</div>`;
   const target=$('#enhanceTarget'),core=$('#enhanceCore'),qty=$('#enhanceCoreQty'),catalystSelect=$('#enhanceCatalyst'),rate=$('#enhanceRate'),btn=$('#enhanceBtn');
-  const sync=()=>{const t=items.find(x=>Number(x.id)===Number(target?.value)),c=items.find(x=>Number(x.id)===Number(core?.value));const n=Math.max(10,Math.min(100,Math.floor(Number(qty?.value)||10)));if(qty)qty.value=n;if(!t||!c){if(rate)rate.textContent='Chọn Tiên Khí mục tiêu và phôi.';return;}if(Number(t.id)===Number(c.id)){if(rate)rate.textContent='❌ Không thể dùng chính Tiên Khí mục tiêu làm phôi.';if(btn)btn.disabled=true;return;}if(String(t.reward_grade||'').trim()!==String(c.reward_grade||'').trim()){if(rate)rate.textContent='❌ Phôi phải cùng phẩm cấp hoặc cùng loại.';if(btn)btn.disabled=true;return;}if(rate)rate.textContent=`🎲 Tỷ lệ thành công: ${Number(t.enhance_level||0)===0?'100% (lần đầu)':Number(t.enhance_level||0)===1?'90% (lần thứ hai)':'ngẫu nhiên 20%–80%'}${Number(catalystSelect?.value||0)===1?' + 5% Thiên Đạo':''} · ${n} phôi · Cấp hiện tại +${Number(t.enhance_level||0)}`;if(btn)btn.disabled=Number(t.enhance_level||0)>=9;};
+  const sync=()=>{const t=items.find(x=>Number(x.id)===Number(target?.value)),c=items.find(x=>Number(x.id)===Number(core?.value));const n=Math.max(10,Math.min(100,Math.floor(Number(qty?.value)||10)));if(qty)qty.value=n;if(!t||!c){if(rate)rate.textContent='Chọn Tiên Khí mục tiêu và phôi.';return;}if(String(t.reward_grade||'').trim()!==String(c.reward_grade||'').trim() && String(t.name||'').trim()!==String(c.name||'').trim()){if(rate)rate.textContent='❌ Phôi phải cùng phẩm cấp hoặc cùng loại.';if(btn)btn.disabled=true;return;}if(Number(t.id)===Number(c.id) && Number(c.quantity)<n+1){if(rate)rate.textContent='❌ Phôi cùng loại phải chừa lại ít nhất 1 bản Tiên Khí mục tiêu.';if(btn)btn.disabled=true;return;}if(rate)rate.textContent=`🎲 Tỷ lệ thành công: ${Number(t.enhance_level||0)===0?'100% (lần đầu)':Number(t.enhance_level||0)===1?'90% (lần thứ hai)':'ngẫu nhiên 20%–80%'}${Number(catalystSelect?.value||0)===1?' + 5% Thiên Đạo':''} · ${n} phôi · Cấp hiện tại +${Number(t.enhance_level||0)}`;if(btn)btn.disabled=Number(t.enhance_level||0)>=9;};
   [target,core,qty,catalystSelect].forEach(el=>el?.addEventListener('input',sync));[target,core,catalystSelect].forEach(el=>el?.addEventListener('change',sync));sync();
   btn?.addEventListener('click',async()=>{btn.disabled=true;const msg=$('#enhanceMsg');const n=Math.max(10,Math.min(100,Math.floor(Number(qty.value)||10))),cq=Number(catalystSelect?.value||0);area.classList.add('enhancing');try{const x=await api('/api/tien-khi-enhance',{method:'POST',headers:authHeaders(),body:JSON.stringify({targetItemId:Number(target.value),coreItemId:Number(core.value),coreQuantity:n,catalystQuantity:cq})});msg.textContent=(x.success?'✨ ':'💥 ')+x.message+(x.success?` · Tỷ lệ lượt này ${Number(x.successRate).toFixed(0)}%`:` · Tỷ lệ lượt này ${Number(x.successRate).toFixed(0)}%`);area.classList.toggle('enhance-success',Boolean(x.success));if(x.success){area.classList.add('enhance-burst');setTimeout(()=>area.classList.remove('enhance-burst'),1200);}await Promise.all([loadTienKhiEnhance(),loadEquipment(),loadProfile(),loadTienThai(),loadTuDi(),loadDisciples()]);}catch(e){msg.textContent='❌ '+e.message;}finally{area.classList.remove('enhancing');btn.disabled=false;}});
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>⚜️ Không thể mở Cường Hóa</h3><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadTienKhiEnhance()">↻ Mở lại</button></div>`;}
@@ -982,8 +996,8 @@ async function loadBeastArena(){
   document.querySelectorAll('.beast-invite-btn').forEach(btn=>btn.onclick=async()=>{const beastId=selected();const skillId=Number($('#beastArenaSkill')?.value||1);if(!beastId)return;btn.disabled=true;try{const x=await api('/api/beast-arena/online/request',{method:'POST',headers:authHeaders(),body:JSON.stringify({targetUserId:Number(btn.dataset.user),beastId,skillId,skillQueue:skillQueue.map(x=>Number(x.id||1))})});$('#beastArenaMsg').textContent='🪶 '+x.message;await Promise.all([loadBeastArena(),loadMailbox()]);}catch(e){$('#beastArenaMsg').textContent='❌ '+e.message;btn.disabled=false;}});
   document.querySelectorAll('.beast-offline-btn').forEach(btn=>btn.onclick=async()=>{const beastId=selected(),skillId=Number($('#beastArenaSkill')?.value||1);if(!beastId)return;btn.disabled=true;const divine=btn.dataset.npc==='thien-ho'||btn.dataset.npc==='than-long';try{const x=await api(divine?'/api/beast-arena/divine':'/api/beast-arena/offline',{method:'POST',headers:authHeaders(),body:JSON.stringify({beastId,npcId:btn.dataset.npc,skillId,skillQueue:skillQueue.map(x=>Number(x.id||1))})});$('#beastArenaMsg').textContent=(x.win?'🏆 ':'💥 ')+x.message+(x.reward?` · 🎁 ${x.reward.name} ×${x.reward.quantity}`:'')+(x.debuff?` · ⚠️ ${x.debuff.text}`:'');renderBattle({...x,aName:x.log?.[0]?.actor==='a'?x.log?.[0]?.actorName:'Linh thú',bName:x.npc,types:x.log?.[0]?{a:'—',b:'—'}:{},maxHp:x.maxHp||{a:1,b:1}});await Promise.all([loadBeastArena(),loadTuDi(),loadProfile()]);}catch(e){$('#beastArenaMsg').textContent='❌ '+e.message;}finally{btn.disabled=false;}});
   if(activeBattle)renderActiveBattle(activeBattle); else $('#beastArenaBattle').innerHTML='';
-  clearInterval(window.beastActiveBattleTimer); window.beastActiveBattleTimer=setInterval(async()=>{if(!getToken()||!document.querySelector('#beastArenaArea #beastArenaBattle'))return;try{const z=await api('/api/beast-arena',{headers:authHeaders()});if(z.activeBattle)renderActiveBattle(z.activeBattle);else if(!document.querySelector('.beast-turn-skill'))$('#beastArenaBattle').innerHTML='';}catch{}},2500);
-  await spectator(); clearInterval(window.beastSpectatorTimer); window.beastSpectatorTimer=setInterval(()=>{if(document.querySelector('#beastArenaArea #beastSpectatorList')&&getToken())spectator();},8000);
+  clearInterval(window.beastActiveBattleTimer); window.beastActiveBattleTimer=setInterval(async()=>{if(!getToken()||document.hidden||!document.querySelector('#beastArenaArea #beastArenaBattle'))return;try{const z=await api('/api/beast-arena',{headers:authHeaders()});if(z.activeBattle)renderActiveBattle(z.activeBattle);else if(!document.querySelector('.beast-turn-skill'))$('#beastArenaBattle').innerHTML='';}catch{}},5000);
+  await spectator(); clearInterval(window.beastSpectatorTimer); window.beastSpectatorTimer=setInterval(()=>{if(!document.hidden&&document.querySelector('#beastArenaArea #beastSpectatorList')&&getToken())spectator();},15000);
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>Không thể mở Thú Trường</h3><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadBeastArena()">↻ Thử lại</button></div>`;}
 }
 
@@ -1418,8 +1432,8 @@ if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('colo
 setupTutorial();
 
 loadData();loadSect();checkSession();startRewardWatcher();
-setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},60000);
-setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},10000);
+setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();}},180000);
+setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},20000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
 
 /* v3.6.47 · Điều hướng tập trung theo từng chức năng */

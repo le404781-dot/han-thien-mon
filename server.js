@@ -1,9 +1,14 @@
 const express = require('express');
+const compression = require('compression');
 const path = require('path');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 
 const app = express();
+// HTTP performance: nén Brotli/Gzip có chọn lọc cho payload đủ lớn.
+// Ngưỡng 1 KB tránh tốn CPU cho response nhỏ; compression tự đàm phán
+// Brotli/Gzip theo Accept-Encoding của trình duyệt.
+app.use(compression({ threshold: 1024, level: 6 }));
 // Render Web Service: always bind to the injected PORT on all interfaces.
 const PORT = Number(process.env.PORT) || 10000;
 const HOST = '0.0.0.0';
@@ -44,8 +49,12 @@ async function ensureRuntimeSchemaImpl(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS sect TEXT NOT NULL DEFAULT 'Hàn Thiên Môn';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS position TEXT NOT NULL DEFAULT 'Ngoại môn đệ tử';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS rank TEXT NOT NULL DEFAULT 'Luyện Khí';
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_power INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS experience INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_power BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS experience BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ALTER COLUMN spirit_power TYPE BIGINT USING COALESCE(spirit_power,0)::BIGINT;
+    ALTER TABLE profiles ALTER COLUMN spirit_power SET DEFAULT 0;
+    ALTER TABLE profiles ALTER COLUMN experience TYPE BIGINT USING COALESCE(experience,0)::BIGINT;
+    ALTER TABLE profiles ALTER COLUMN experience SET DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bio TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS birthday TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hobby TEXT NOT NULL DEFAULT '';
@@ -455,13 +464,15 @@ for(let i=10;i<=TIEN_DE_REALM_INDEX;i++){
   const originalDelta=PRE_X4_RANK_MINS[i]-PRE_X4_RANK_MINS[previous];
   RANK_MINS[i]=RANK_MINS[previous]+originalDelta*4;
 }
-// Chí Cao bắt đầu ngay sau Tiên Đế Cửu Cửu Tinh.
+// Chí Cao bắt đầu ngay sau Tiên Đế Cửu Cửu Tinh và có đúng 9 tầng.
 const TIEN_DE_STAR_SIZE = Math.max(1, Math.ceil(RANK_MINS[TIEN_DE_REALM_INDEX] / 9));
+const CHI_CAO_TIERS = 9;
+const CHI_CAO_TIER_SIZE = TIEN_DE_STAR_SIZE * 11;
 RANK_MINS[CHI_CAO_REALM_INDEX] = RANK_MINS[TIEN_DE_REALM_INDEX] + TIEN_DE_STAR_SIZE * 99;
-const RANKS = BASE_REALM_NAMES.map((x,i)=>({name:x[0],min:RANK_MINS[i],max:i===BASE_REALM_NAMES.length-1?Infinity:RANK_MINS[i+1]-1,description:x[1]}));
+const MAX_CHI_CAO_SPIRIT = RANK_MINS[CHI_CAO_REALM_INDEX] + CHI_CAO_TIER_SIZE * CHI_CAO_TIERS - 1;
+const RANKS = BASE_REALM_NAMES.map((x,i)=>({name:x[0],min:RANK_MINS[i],max:i===CHI_CAO_REALM_INDEX?MAX_CHI_CAO_SPIRIT:RANK_MINS[i+1]-1,description:x[1]}));
 const IMMORTAL_REALM_START = 9;
 const TIEN_DE_STARS = 99;
-const CHI_CAO_TIERS = 9;
 
 const TRIBULATION_COUNT = 9;
 const LEGEND_CHAR_LIMITS = [300,500,800,1200,1600,2200,3000,4000,5000,5500,6000,6500,7000,7500,8000,8500,9000,10000,11000];
@@ -479,22 +490,24 @@ function realmIndexFor(spirit) {
   return RANKS.map(r=>r.min).reduce((idx,min,i)=>spirit>=min?i:idx,0);
 }
 function stageFor(spirit) {
-  const ri=realmIndexFor(spirit);
+  const normalized=Math.max(0,Math.min(MAX_CHI_CAO_SPIRIT,Number(spirit)||0));
+  const ri=realmIndexFor(normalized);
   const r=RANKS[ri];
   if (ri===TIEN_DE_REALM_INDEX) {
-    const star=Math.min(TIEN_DE_STARS, Math.floor(Math.max(0,spirit-r.min)/TIEN_DE_STAR_SIZE)+1);
+    const star=Math.min(TIEN_DE_STARS, Math.floor(Math.max(0,normalized-r.min)/TIEN_DE_STAR_SIZE)+1);
     const starName=`${star===99?'Cửu Cửu':star} Tinh`;
     return {realm:r.name,tier:star,stage:`${r.name} ${starName}`,realmIndex:ri,tierName:starName,maxTier:TIEN_DE_STARS};
   }
   if (ri===CHI_CAO_REALM_INDEX) {
-    const tier=Math.min(CHI_CAO_TIERS, Math.floor(Math.max(0,spirit-r.min)/TIEN_DE_STAR_SIZE)+1);
+    const tier=Math.min(CHI_CAO_TIERS, Math.floor(Math.max(0,normalized-r.min)/CHI_CAO_TIER_SIZE)+1);
     const tierName=`${TIERS[tier-1]} Chí Cao`;
     return {realm:r.name,tier,stage:`${r.name} ${tierName}`,realmIndex:ri,tierName,maxTier:CHI_CAO_TIERS};
   }
   const span=r.max-r.min+1;
-  const tier=Math.min(9, Math.floor(((spirit-r.min)*9)/span)+1);
+  const tier=Math.min(9, Math.floor(((normalized-r.min)*9)/span)+1);
   return {realm:r.name,tier,stage:`${r.name} ${TIERS[tier-1]}`,realmIndex:ri,tierName:TIERS[tier-1],maxTier:9};
 }
+function clampSpiritPower(value){ return Math.max(0,Math.min(MAX_CHI_CAO_SPIRIT,Number(value)||0)); }
 
 const SPIRIT_ROOT_FOUNDATION_RECOVERY_MINUTES = 60;
 function foundationMaxForStage(stage){ return Math.max(100,100+Number(stage?.realmIndex||0)*20); }
@@ -612,7 +625,7 @@ function progressFor(spirit) {
     return {rank:r.name,tier:s.tier,stage:s.stage,tierName:s.tierName,maxTier:TIEN_DE_STARS,percent,next:'Chí Cao',remaining:Math.max(0,RANKS[CHI_CAO_REALM_INDEX].min-spirit)};
   }
   if (r.name==='Chí Cao') {
-    const tierSize=TIEN_DE_STAR_SIZE;
+    const tierSize=CHI_CAO_TIER_SIZE;
     const tierStart=r.min+(s.tier-1)*tierSize;
     const tierEnd=s.tier<CHI_CAO_TIERS?r.min+s.tier*tierSize-1:Infinity;
     const percent=Number.isFinite(tierEnd)?Math.max(0,Math.min(100,Math.round(((spirit-tierStart+1)/(tierEnd-tierStart+1))*100))):100;
@@ -1306,8 +1319,8 @@ async function initDb() {
       sect TEXT NOT NULL DEFAULT 'Hàn Thiên Môn',
       position TEXT NOT NULL DEFAULT 'Ngoại môn đệ tử',
       rank TEXT NOT NULL DEFAULT 'Luyện Khí',
-      spirit_power INTEGER NOT NULL DEFAULT 0,
-      experience INTEGER NOT NULL DEFAULT 0,
+      spirit_power BIGINT NOT NULL DEFAULT 0,
+      experience BIGINT NOT NULL DEFAULT 0,
       bio TEXT NOT NULL DEFAULT '',
       birthday TEXT NOT NULL DEFAULT '',
       hobby TEXT NOT NULL DEFAULT '',
@@ -2103,14 +2116,14 @@ async function addDailyActivity(userId, field, amount=1) {
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(__dirname, {
-  maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
+  maxAge: process.env.NODE_ENV === 'production' ? '30d' : 0,
   etag: true,
   lastModified: true,
   setHeaders(res, filePath) {
     if (/\.html$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache');
     } else if (/\.(?:js|css|png|jpe?g|webp|svg|ico)$/i.test(filePath)) {
-      res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=604800, stale-while-revalidate=86400' : 'no-cache');
+      res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=2592000, stale-while-revalidate=604800, immutable' : 'no-cache');
     } else {
       res.setHeader('Cache-Control', 'public, max-age=600');
     }
@@ -2229,9 +2242,10 @@ async function settleMansionIncome(client, userId){
   const gain=hours*(Number(row.spirit_per_hour)||0);
   const oldPower=(await client.query('SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE',[userId])).rows[0]?.spirit_power||0;
   const oldStage=stageFor(Number(oldPower));
-  const newPower=Number(oldPower)+gain;
+  const newPower=clampSpiritPower(Number(oldPower)+gain);
+  const actualGain=Math.max(0,newPower-Number(oldPower));
   const newStage=stageFor(newPower);
-  await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,updated_at=NOW() WHERE user_id=$1`,[userId,newPower,gain,newStage.realm,newStage.tier]);
+  await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,updated_at=NOW() WHERE user_id=$1`,[userId,newPower,actualGain,newStage.realm,newStage.tier]);
   const breakthroughRewards=await grantRealmBreakthroughRewards(client,userId,oldStage.realmIndex,newStage.realmIndex);
   await client.query(`UPDATE user_mansions SET last_tick_at=last_tick_at+($2 * INTERVAL '1 hour') WHERE user_id=$1`,[userId,hours]);
   return {gain,active:true,name:row.name,grade:row.grade,rate:Number(row.spirit_per_hour)||0,breakthroughRewards};
@@ -2813,7 +2827,7 @@ app.post('/api/professions/claim',auth,async(req,res)=>{
 let __dataCache=null;
 let __dataCacheAt=0;
 app.get('/api/data',async(req,res)=>{
-  res.setHeader('Cache-Control','private, max-age=5, stale-while-revalidate=5');
+  res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=10');
   if(__dataCache && Date.now()-__dataCacheAt<5000) return res.json(__dataCache);
   try {
     const [m,t,u] = await Promise.all([
@@ -3216,7 +3230,7 @@ app.post('/api/cultivation/train',auth,async(req,res)=>{
     const baseMax=Math.max(28,72-currentStage.realmIndex*5-currentStage.tier*2);
     const baseMin=Math.max(12,Math.floor(baseMax*0.55));
     const rawGain=crypto.randomInt(baseMin,baseMax+1); const gain=Math.max(1,Math.round(rawGain*(1+rarityBonus(prof.spirit_root_rarity)+techniqueTrainingBonus/100+Number(prof.equipped_immortal_artifact_spirit_bonus||0)/100)));
-    const r=await client.query('UPDATE profiles SET spirit_power=spirit_power+$2, experience=experience+$2, updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,experience',[userId,gain]);
+    const r=await client.query('UPDATE profiles SET spirit_power=LEAST($3::bigint,spirit_power+$2), experience=experience+LEAST($3::bigint,GREATEST(0,$3::bigint-spirit_power)), updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power,experience',[userId,gain,MAX_CHI_CAO_SPIRIT]);
     const spirit=r.rows[0].spirit_power; const stage=stageFor(spirit);
     const breakthroughRewards=await grantRealmBreakthroughRewards(client,userId,currentStage.realmIndex,stage.realmIndex);
     await client.query('UPDATE profiles SET rank=$2, realm_tier=$3 WHERE user_id=$1',[userId,stage.realm,stage.tier]);
@@ -3264,11 +3278,13 @@ app.post('/api/cultivation/online',auth,async(req,res)=>{
       let spirit=Number(p.spirit_power)||0;
       let breakthroughRewards=[];
       if(gain>0){
-        spirit+=gain; earned+=gain;
+        const cappedSpirit=clampSpiritPower(spirit+gain);
+        const actualGain=Math.max(0,cappedSpirit-spirit);
+        spirit=cappedSpirit; earned+=actualGain;
         const ns=stageFor(spirit);
         breakthroughRewards=await grantRealmBreakthroughRewards(client,req.session.user_id,st.realmIndex,ns.realmIndex);
         await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,last_online_at=NOW(),online_spirit_date=$6,online_spirit_earned=$7,online_spirit_remainder_seconds=$8,updated_at=NOW() WHERE user_id=$1`,
-          [req.session.user_id,spirit,gain,ns.realm,ns.tier,today,earned,remainder]);
+          [req.session.user_id,spirit,actualGain,ns.realm,ns.tier,today,earned,remainder]);
       } else {
         await client.query(`UPDATE profiles SET last_online_at=NOW(),online_spirit_date=$2,online_spirit_earned=$3,online_spirit_remainder_seconds=$4 WHERE user_id=$1`,[req.session.user_id,today,earned,remainder]);
       }
@@ -3482,8 +3498,8 @@ app.post('/api/storage/use',auth,async(req,res)=>{
       }
       await client.query(`UPDATE profiles SET spirit_root_foundation=$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,next]);
     }
-    const nr=await client.query(`UPDATE profiles SET spirit_power=spirit_power+$2,experience=experience+$2,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,
-      [req.session.user_id,gain*qty]);
+    const nr=await client.query(`UPDATE profiles SET spirit_power=LEAST($3::bigint,spirit_power+$2),experience=experience+LEAST($3::bigint,GREATEST(0,$3::bigint-spirit_power)),updated_at=NOW() WHERE user_id=$1 RETURNING spirit_power`,
+      [req.session.user_id,gain*qty,MAX_CHI_CAO_SPIRIT]);
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,
       [req.session.user_id,itemId,qty]);
     await client.query('COMMIT');
@@ -5358,10 +5374,11 @@ async function applyChallengeWin(client,userId,mode,odds,loserSpirit=0,winnerSpi
     gain=Math.max(mode==='online'?180:80,Math.floor(spirit*(mode==='online'?0.30:0.12)));
   }
   const item=await randomChallengeReward(client,userId,mode,qualityMode);
-  const ns=spirit+gain;
+  const ns=clampSpiritPower(spirit+gain);
+  const actualGain=Math.max(0,ns-spirit);
   const st=stageFor(ns);
-  await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,challenge_debuff_until=NULL,challenge_debuff_percent=0,challenge_debuff_text='',updated_at=NOW() WHERE user_id=$1`,[userId,ns,gain,st.realm,st.tier]);
-  return {gain,spiritPower:ns,stage:st,item,qualityMode};
+  await client.query(`UPDATE profiles SET spirit_power=$2,experience=experience+$3,rank=$4,realm_tier=$5,challenge_debuff_until=NULL,challenge_debuff_percent=0,challenge_debuff_text='',updated_at=NOW() WHERE user_id=$1`,[userId,ns,actualGain,st.realm,st.tier]);
+  return {gain:actualGain,spiritPower:ns,stage:st,item,qualityMode};
 }
 
 
@@ -5680,7 +5697,7 @@ async function ensureChallengeSchemaImpl(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Tân đệ tử';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS rank TEXT NOT NULL DEFAULT 'Luyện Khí';
-    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_power INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_power BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_until TIMESTAMPTZ;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS challenge_debuff_percent INTEGER NOT NULL DEFAULT 0;
