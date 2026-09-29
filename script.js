@@ -16,6 +16,18 @@ const realmIndexOf=name=>Math.max(0,REALM_NAMES.indexOf(String(name||'')));
 
 const __inflightGets=new Map();
 const __getCache=new Map();
+window.challengeAutoAttack=localStorage.getItem('htm_challenge_auto_attack')==='1';
+window.challengeAutoAttackBusy=false;
+function setChallengeAuto(enabled){
+ window.challengeAutoAttack=Boolean(enabled);
+ try{localStorage.setItem('htm_challenge_auto_attack',window.challengeAutoAttack?'1':'0');}catch{}
+ document.querySelectorAll('.battle-auto').forEach(b=>{
+  b.textContent=window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH';
+  b.classList.toggle('primary',window.challengeAutoAttack);
+  b.classList.toggle('ghost',!window.challengeAutoAttack);
+ });
+}
+
 const GET_CACHE_TTL={
  '/api/data':10000,'/api/profile':5000,'/api/chat':4000,'/api/mailbox':5000,
  '/api/challenges':1500,'/api/challenges/online/state':0,'/api/challenges/announcement':5000,'/api/arena/live':2500,
@@ -186,7 +198,7 @@ async function autoChallengeAttack(battle){
    const x=await api('/api/challenges/online/action',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:Number(battle.id),techniqueId:0})});
    const msg=$('#challengeMsg');
    if(msg)msg.textContent=x.status==='completed'?`🏆 ${x.message}`:`⚡ ${x.message}`;
-   if(x.status==='completed')window.challengeAutoAttack=false;
+   if(x.status==='completed')setChallengeAuto(false);
    await Promise.all([loadProfile(),loadChallenges()]);
  }catch(e){
    // 409 can simply mean the opponent or another tab already consumed the turn.
@@ -201,7 +213,7 @@ async function pollChallengeRealtime(){
   const d=await api('/api/challenges/online/state',{headers:authHeaders()});
   const b=d.activeBattle||null;
   if(!b){
-   window.challengeAutoAttack=false;
+   setChallengeAuto(false);
    if(window.__challengeLastState){window.__challengeLastState=null;await loadChallenges();}
    return;
   }
@@ -262,18 +274,18 @@ async function loadChallenges(){
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">🎯 CHỌN ĐỐI THỦ</span><b>${users.length} môn nhân</b></div><div class="challenge-list">${users.length?users.map(x=>`<article class="challenge-card"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${Number(x.challenge_debuff_percent||0)>0?`<small class="debuff-mini">☠ Đang chịu debuff ${x.challenge_debuff_percent}%</small>`:''}</div><div class="challenge-card-actions"><button class="btn small primary challenge-online" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>⚔ Online</button><button class="btn small ghost challenge-offline" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>🌓 Offline</button></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có môn nhân khác để khiêu chiến.</p></div>`}</div></div>
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📜 CHIẾN TÍCH</span><b>${history.length} trận gần đây</b></div><div class="challenge-history">${history.length?history.map(h=>{const meId=Number(currentUser?.id),won=Number(h.winner_id)===meId,pendingStatus=h.status==='pending',activeStatus=h.status==='accepted';return `<article class="challenge-history-row"><span>${h.mode==='online'?'⚔':'🌓'}</span><div><b>${won?'🏆 Thắng':h.status==='rejected'?'Từ chối':activeStatus?'⚔ Đang giao chiến':pendingStatus?'⌛ Chờ':'💀 Thất bại'}</b><small>${esc(Number(h.challenger_id)===meId?h.opponent_name:h.challenger_name)} · ${new Date(h.created_at).toLocaleString('vi-VN')}</small></div><div class="challenge-result-text">${won?`+${Number(h.reward_spirit||0).toLocaleString('vi-VN')} linh lực${h.reward_item_name?` · ${esc(h.reward_item_name)} ×${h.reward_quantity}`:''}`:esc(h.penalty_text||'')}</div></article>`}).join(''):`<div class="empty-state compact"><p>Chưa có chiến tích.</p></div>`}</div></div>
    <p id="challengeMsg" class="train-msg"></p>`;
+  if(battle){window.__challengeLiveState=battle; setChallengeAuto(window.challengeAutoAttack===true);}
   document.querySelectorAll('.challenge-online').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'online'));
   document.querySelectorAll('.challenge-offline').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'offline'));
   document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept'));
   document.querySelectorAll('.challenge-reject').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'reject'));
   document.querySelectorAll('.battle-ultimate').forEach(b=>b.onclick=()=>useUltimate(Number(b.dataset.id)));
   document.querySelectorAll('.battle-auto').forEach(b=>b.onclick=async()=>{
-    window.challengeAutoAttack=window.challengeAutoAttack!==true;
-    b.textContent=window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH';
-    b.classList.toggle('primary',window.challengeAutoAttack);
-    b.classList.toggle('ghost',!window.challengeAutoAttack);
-    if(window.challengeAutoAttack){
-      const live=window.__challengeLiveState;
+    const enabled=!window.challengeAutoAttack;
+    setChallengeAuto(enabled);
+    if(enabled){
+      const live=window.__challengeLiveState||battle;
+      if(live) window.__challengeLiveState=live;
       if(live?.yourTurn) await autoChallengeAttack(live);
     }
   });
@@ -342,7 +354,13 @@ async function respondChallenge(requestId,action){
  try{
   const x=await api('/api/challenges/online/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,action})});
   msg.textContent=action==='reject'?`🏳️ ${x.message}`:`⚔ ${x.message}`;
+  if(action==='accept' && x.battle){
+    window.__challengeLiveState={...x.battle,status:'accepted'};
+    window.__challengeLastState=[x.battle.id,'accepted',x.battle.round,x.battle.turnUserId,x.battle.challengerHp,x.battle.opponentHp,x.battle.lastActorId||0,x.battle.lastAction||''].join('|');
+    if(!window.challengeRealtimeTimer)window.challengeRealtimeTimer=setInterval(pollChallengeRealtime,2000);
+  }
   await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
+  if(action==='accept' && window.challengeAutoAttack && window.__challengeLiveState?.yourTurn) await autoChallengeAttack(window.__challengeLiveState);
  }catch(e){msg.textContent='❌ '+e.message;}
 }
 

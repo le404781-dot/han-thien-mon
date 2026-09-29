@@ -15,6 +15,9 @@ const HOST = '0.0.0.0';
 let dbReady = false;
 let dbInitError = null;
 let backgroundJobsStarted = false;
+let shuttingDown = false;
+let backgroundTimers = [];
+let dbMaintenanceTimer = null;
 const DATABASE_URL = String(process.env.DATABASE_URL || '').trim();
 let pool = null;
 if (DATABASE_URL) {
@@ -29,6 +32,7 @@ if (DATABASE_URL) {
 }
 
 async function query(text, params = []) {
+  if (shuttingDown) throw new Error('Server đang đóng, database tạm ngừng nhận truy vấn.');
   if (!pool) throw new Error('DATABASE_URL chưa được cấu hình trên Render.');
   return pool.query(text, params);
 }
@@ -6094,7 +6098,7 @@ app.get('/api/challenges',auth,async(req,res)=>{
              FROM challenge_requests cr
              JOIN users cu ON cu.id=cr.challenger_id JOIN profiles cp ON cp.user_id=cu.id
              JOIN users ou ON ou.id=cr.opponent_id JOIN profiles op ON op.user_id=ou.id
-             WHERE cr.status='accepted' AND (cr.challenger_id=$1 OR cr.opponent_id=$1) ORDER BY cr.id DESC LIMIT 1`,[uid]),
+             WHERE cr.status='accepted' AND cr.mode='online' AND (cr.challenger_id=$1 OR cr.opponent_id=$1) ORDER BY cr.id DESC LIMIT 1`,[uid]),
       query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.challenger_hp,cr.opponent_hp,cr.challenger_max_hp,cr.opponent_max_hp,cr.turn_user_id,cr.round_number,cr.last_action,cr.last_damage,cr.started_at,
                     cu.display_name AS challenger_name,cp.avatar AS challenger_avatar,cp.rank AS challenger_rank,
                     ou.display_name AS opponent_name,op.avatar AS opponent_avatar,op.rank AS opponent_rank,
@@ -6762,16 +6766,25 @@ server.keepAliveTimeout = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 120000);
 server.headersTimeout = Number(process.env.HEADERS_TIMEOUT_MS || 125000);
 
 function startBackgroundJobs(){
-  if(backgroundJobsStarted) return;
+  if(backgroundJobsStarted || shuttingDown) return;
   backgroundJobsStarted = true;
-  setInterval(()=>processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e)),30000);
-  setInterval(()=>processAlchemyNpcOrders().catch(e=>console.error('alchemy npc orders:',e)),30000);
-  processAlchemyNpcOrders().catch(e=>console.error('alchemy npc orders:',e));
-  processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e));
+  const tavernTimer=setInterval(()=>{if(!shuttingDown)processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e));},30000);
+  const alchemyTimer=setInterval(()=>{if(!shuttingDown)processAlchemyNpcOrders().catch(e=>console.error('alchemy npc orders:',e));},30000);
+  backgroundTimers.push(tavernTimer,alchemyTimer);
+  if(!shuttingDown){
+    processAlchemyNpcOrders().catch(e=>{if(!shuttingDown)console.error('alchemy npc sales:',e);});
+    processTavernNpcSales().catch(e=>{if(!shuttingDown)console.error('tavern npc sales:',e);});
+  }
+}
+
+function stopBackgroundJobs(){
+  for(const timer of backgroundTimers.splice(0)){try{clearInterval(timer);}catch{}}
+  if(dbMaintenanceTimer){try{clearInterval(dbMaintenanceTimer);}catch{} dbMaintenanceTimer=null;}
+  backgroundJobsStarted=false;
 }
 
 async function clearActiveOnlineChallengesOnce(){
-  const migrationId='v3.7.37-clear-online-challenges';
+  const migrationId='v3.7.38-clear-online-challenges-and-repair';
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
@@ -6798,6 +6811,7 @@ async function clearActiveOnlineChallengesOnce(){
 }
 
 async function initializeDatabaseWithRetry(){
+  if(shuttingDown) return;
   if(!DATABASE_URL){
     dbReady=false;
     dbInitError='DATABASE_URL chưa được cấu hình trên Render.';
@@ -6818,30 +6832,39 @@ async function initializeDatabaseWithRetry(){
     dbReady = true;
     console.log('[DB] PostgreSQL schema/data initialization hoàn tất.');
     startBackgroundJobs();
-    setInterval(runDatabaseMaintenance, 5*60*1000);
+    if(dbMaintenanceTimer) clearInterval(dbMaintenanceTimer);
+    dbMaintenanceTimer=setInterval(()=>{if(!shuttingDown)runDatabaseMaintenance().catch(e=>console.error('database maintenance timer:',e));},5*60*1000);
   }catch(err){
     dbReady = false;
     dbInitError = err?.message || String(err);
     console.error('[DB] Không khởi tạo được database:', dbInitError);
     console.error('[DB] Kiểm tra DATABASE_URL, SSL và quyền truy cập PostgreSQL trên Render.');
-    setTimeout(initializeDatabaseWithRetry, 15000).unref();
+    if(!shuttingDown)setTimeout(initializeDatabaseWithRetry, 15000).unref();
   }
 }
 
 initializeDatabaseWithRetry();
 
-process.on('SIGTERM',async()=>{
-  console.log('Nhận SIGTERM — đang đóng Hàn Thiên Môn...');
-  server.close(async()=>{
-    try{ if(pool) await pool.end(); }catch(e){ console.error('pool.end:',e); }
+let shutdownPromise=null;
+async function gracefulShutdown(signal){
+  if(shutdownPromise) return shutdownPromise;
+  shutdownPromise=(async()=>{
+    shuttingDown=true;
+    stopBackgroundJobs();
+    console.log(`Nhận ${signal} — đang đóng Hàn Thiên Môn...`);
+    try{
+      await new Promise(resolve=>{
+        let settled=false;
+        const finish=()=>{if(!settled){settled=true;resolve();}};
+        try{server.close(finish);}catch{finish();}
+        setTimeout(finish,8000).unref();
+      });
+    }catch{}
+    try{if(pool) await pool.end();}catch(e){console.error('[DB] pool.end:',e.message);}
     process.exit(0);
-  });
-  setTimeout(()=>process.exit(1),10000).unref();
-});
+  })();
+  return shutdownPromise;
+}
 
-process.on('SIGINT',async()=>{
-  server.close(async()=>{
-    try{ if(pool) await pool.end(); }catch(e){}
-    process.exit(0);
-  });
-});
+process.once('SIGTERM',()=>{void gracefulShutdown('SIGTERM');});
+process.once('SIGINT',()=>{void gracefulShutdown('SIGINT');});
