@@ -64,6 +64,7 @@ async function ensureRuntimeSchemaImpl(){
     ALTER TABLE profiles ALTER COLUMN spirit_stones TYPE BIGINT USING COALESCE(spirit_stones,0)::BIGINT;
     ALTER TABLE profiles ALTER COLUMN spirit_stones SET DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wealth_public BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS storage_capacity INTEGER NOT NULL DEFAULT 30;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gacha_claimed BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root TEXT;
@@ -5211,6 +5212,7 @@ app.get('/api/leaderboard',async(req,res)=>{
 
 app.get('/api/wealth',async(req,res)=>{
   try{
+    await ensureRuntimeSchema();
     const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_stones,p.wealth_public,p.spirit_power,p.avatar
       FROM users u JOIN profiles p ON p.user_id=u.id
       ORDER BY p.spirit_stones DESC,u.id ASC LIMIT 100`);
@@ -5219,7 +5221,7 @@ app.get('/api/wealth',async(req,res)=>{
 });
 
 app.patch('/api/wealth/privacy',auth,async(req,res)=>{
-  try{const enabled=Boolean(req.body?.public);const r=await query('UPDATE profiles SET wealth_public=$2,updated_at=NOW() WHERE user_id=$1 RETURNING wealth_public',[req.session.user_id,enabled]);res.json({ok:true,wealthPublic:Boolean(r.rows[0]?.wealth_public),message:enabled?'Đã công khai số lượng linh thạch trên Bảng Tài Phú.':'Đã ẩn số lượng linh thạch, người khác sẽ thấy ??? Linh thạch.'});}
+  try{await ensureRuntimeSchema();const enabled=Boolean(req.body?.public);const r=await query('UPDATE profiles SET wealth_public=$2,updated_at=NOW() WHERE user_id=$1 RETURNING wealth_public',[req.session.user_id,enabled]);res.json({ok:true,wealthPublic:Boolean(r.rows[0]?.wealth_public),message:enabled?'Đã công khai số lượng linh thạch trên Bảng Tài Phú.':'Đã ẩn số lượng linh thạch, người khác sẽ thấy ??? Linh thạch.'});}
   catch(e){res.status(500).json({error:'Không thể cập nhật quyền hiển thị Tài Phú.'});}
 });
 
@@ -5270,10 +5272,50 @@ app.post('/api/chat',auth,async(req,res)=>{
   } catch(e){console.error('chat send:',e);res.status(500).json({error:'Không thể gửi tin nhắn.'});}
 });
 
+let __ensureRedPacketSchemaPromise=null;
+async function ensureRedPacketSchema(){
+  if(!__ensureRedPacketSchemaPromise) __ensureRedPacketSchemaPromise=ensureRedPacketSchemaImpl().catch(err=>{__ensureRedPacketSchemaPromise=null;throw err;});
+  return __ensureRedPacketSchemaPromise;
+}
+async function ensureRedPacketSchemaImpl(){
+  await query(`
+    CREATE TABLE IF NOT EXISTS red_packets (
+      id BIGSERIAL PRIMARY KEY,
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      total_stones BIGINT NOT NULL CHECK(total_stones BETWEEN 10000 AND 10000000),
+      remaining_stones BIGINT NOT NULL CHECK(remaining_stones >= 0),
+      recipient_limit INTEGER NOT NULL CHECK(recipient_limit BETWEEN 1 AND 100),
+      claimed_count INTEGER NOT NULL DEFAULT 0 CHECK(claimed_count >= 0),
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','completed','expired')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW()+INTERVAL '10 minutes')
+    );
+    CREATE INDEX IF NOT EXISTS idx_red_packets_active ON red_packets(status,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_red_packets_sender_created ON red_packets(sender_id,created_at DESC);
+    CREATE TABLE IF NOT EXISTS red_packet_claims (
+      packet_id BIGINT NOT NULL REFERENCES red_packets(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount BIGINT NOT NULL CHECK(amount > 0),
+      claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(packet_id,user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_red_packet_claims_user ON red_packet_claims(user_id,claimed_at DESC);
+    CREATE TABLE IF NOT EXISTS global_announcements (
+      id BIGSERIAL PRIMARY KEY,
+      kind TEXT NOT NULL DEFAULT 'red_packet',
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_global_announcements_active ON global_announcements(expires_at,id DESC);
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wealth_public BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+}
+
 function isHoaThanOrHigher(spirit){ return realmIndexFor(Number(spirit)||0) >= 4; }
 
 app.get('/api/red-packets',auth,async(req,res)=>{
-  try{
+  try{await ensureRedPacketSchema();
     const rows=(await query(`SELECT rp.id,rp.sender_id,u.display_name AS sender_name,rp.total_stones,rp.remaining_stones,rp.recipient_limit,rp.claimed_count,rp.status,rp.created_at,rp.expires_at,
       EXISTS(SELECT 1 FROM red_packet_claims c WHERE c.packet_id=rp.id AND c.user_id=$1) AS claimed
       FROM red_packets rp JOIN users u ON u.id=rp.sender_id
@@ -5285,6 +5327,7 @@ app.get('/api/red-packets',auth,async(req,res)=>{
 });
 
 app.post('/api/red-packets',auth,async(req,res)=>{
+  await ensureRedPacketSchema();
   const client=await pool.connect();
   try{
     const total=Number(req.body?.totalStones);
@@ -5308,6 +5351,7 @@ app.post('/api/red-packets',auth,async(req,res)=>{
 });
 
 app.post('/api/red-packets/:id/claim',auth,async(req,res)=>{
+  await ensureRedPacketSchema();
   const client=await pool.connect();
   try{
     const packetId=Number(req.params.id); if(!Number.isInteger(packetId)||packetId<=0)return res.status(400).json({error:'Lì Xì không hợp lệ.'});

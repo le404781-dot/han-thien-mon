@@ -1,0 +1,23 @@
+HÀN THIÊN MÔN v3.7.33 – FIX CHỨC NĂNG MỚI
+
+1. FIX CACHE-BUST
+- v3.7.32 vẫn tham chiếu style.css/script.js v3.7.28.
+- Đổi toàn bộ cache-busting sang v3.7.33 để iPhone/Safari tải đúng giao diện và JS mới.
+
+2. TÀI PHÚ
+- Đảm bảo wealth_public được tạo nếu DB cũ chưa có cột.
+- Giữ mặc định ẩn: ??? Linh thạch.
+- Xếp hạng vẫn theo số dư thực tế.
+
+3. LÌ XÌ
+- Thêm schema guard riêng cho red_packets, red_packet_claims, global_announcements.
+- Endpoint tự đảm bảo schema tồn tại trước khi đọc/phát/nhận.
+- Giữ transaction + row lock + khóa nhận trùng.
+
+4. TIÊN BÀN
+- Giữ giới hạn 50 lượt/ngày.
+- Bảng sử dụng theo ngày Việt Nam và giao dịch rollback nếu quay thất bại.
+
+5. KIỂM TRA
+- node --check server.js: OK
+- node --check script.js: OK

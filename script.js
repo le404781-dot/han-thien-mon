@@ -1464,6 +1464,7 @@ setInterval(()=>{if(getToken()&&!document.hidden){loadGlobalAnnouncement();loadR
 setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},20000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
 
+/* v3.7.33 · Fix cache bust cho các chức năng Tiên Bàn / Lì Xì / Tài Phú */
 /* v3.6.47 · Điều hướng tập trung theo từng chức năng */
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
