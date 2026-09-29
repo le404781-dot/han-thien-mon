@@ -1127,7 +1127,6 @@ async function ensureAlchemySchemaImpl(){
     ['Kim Tiên Bất Diệt Đan','Đan dược · Tiên Đan','Bất diệt đan tôi luyện tiên thể Kim Tiên.',6000000,5600000,14,'Cực Phẩm'],
     ['Tiên Quân Cửu Thiên Đan','Đan dược · Tiên Đan','Cửu thiên tiên đan hội tụ cửu trọng tiên vận.',15000000,15000000,15,'Tiên Phẩm'],
     ['Tiên Tôn Vạn Đạo Đan','Đan dược · Tiên Đan','Vạn đạo đan chứa đạo vận mạnh mẽ của Tiên Tôn.',35000000,38000000,16,'Tiên Phẩm'],
-    ['Tiên Đế Hồng Mông Đan','Đan dược · Tiên Đan','Hồng Mông đan chứa một tia bản nguyên Hồng Mông.',80000000,100000000,17,'Chí Tôn'],
     ['Chí Cao Thiên Đạo Đan','Đan dược · Tiên Đan','Thiên đạo đan dành cho Chí Cao, ẩn chứa đạo vận vượt Tiên Đế.',250000000,350000000,18,'Chí Cao']
   ];
   for(const [name,category,description,price,spiritGain,minRealm,grade] of immortalPills){
@@ -1961,6 +1960,29 @@ async function initDb() {
     await query('INSERT INTO app_migrations(id) VALUES($1)',[realmCorrectionMigration]);
     console.log(`[DB] ${realmCorrectionMigration}: đã chỉnh cảnh giới chính xác cho 5 môn nhân.`);
   }
+  // v3.7.45: loại bỏ hoàn toàn Tiên Đế Hồng Mông Đan khỏi hệ thống.
+  // Xóa cả catalog và mọi tồn kho/reward tham chiếu thông qua FK phù hợp.
+  // Migration chạy đúng một lần để không tái tạo vật phẩm ở các lần restart.
+  const removeHongMengDanMigration = 'v3.7.45_remove_tien_de_hong_mong_dan';
+  const removeHongMengDanApplied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[removeHongMengDanMigration])).rowCount > 0;
+  if(!removeHongMengDanApplied){
+    await query(`DELETE FROM treasure_items WHERE name='Tiên Đế Hồng Mông Đan'`);
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[removeHongMengDanMigration]);
+    console.log(`[DB] ${removeHongMengDanMigration}: đã xóa hoàn toàn Tiên Đế Hồng Mông Đan khỏi web.`);
+  }
+
+  // v3.7.45: đặt chính xác linh thạch cho 2 môn nhân theo yêu cầu quản trị.
+  const spiritStonesCorrectionMigration = 'v3.7.45_set_spirit_stones_cuu_vi_ho_reytheon_exact';
+  const spiritStonesCorrectionApplied = (await query('SELECT 1 FROM app_migrations WHERE id=$1',[spiritStonesCorrectionMigration])).rowCount > 0;
+  if(!spiritStonesCorrectionApplied){
+    await query(`UPDATE profiles p SET spirit_stones=$2,updated_at=NOW()
+      FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)`,['Cuu_Vi_Ho',229147161840]);
+    await query(`UPDATE profiles p SET spirit_stones=$2,updated_at=NOW()
+      FROM users u WHERE u.id=p.user_id AND LOWER(u.username)=LOWER($1)`,['Reytheon',150896940297]);
+    await query('INSERT INTO app_migrations(id) VALUES($1)',[spiritStonesCorrectionMigration]);
+    console.log(`[DB] ${spiritStonesCorrectionMigration}: đã đặt lại linh thạch chính xác.`);
+  }
+
   await backfillRealmBreakthroughRewards();
   const existingUsers = await query('SELECT id FROM users');
   for (const u of existingUsers.rows) await ensureAchievements(u.id, 0);
