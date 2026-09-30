@@ -7721,7 +7721,7 @@ app.get('/api/tien-menh/state',auth,async(req,res)=>{
     const history=game?(await query(`SELECT id,event_type,actor_id,message,payload,created_at FROM tien_menh_history WHERE game_id=$1 ORDER BY id DESC LIMIT 30`,[game.id])).rows:[];
     const members=master&&Number(master.user_id)===Number(uid)?(await query(`SELECT u.id,u.display_name,u.username FROM users u WHERE u.id<>$1 ORDER BY u.display_name LIMIT 200`,[uid])).rows:[];
     res.set('Cache-Control','no-store');
-    res.json({ok:true,master,canApply:!master,members,openGames:open.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),creatorName:g.creator_name||'Môn nhân',creatorAvatar:g.creator_avatar||'🧑🏻‍🎓',maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),stakeHint:null,createdAt:g.created_at})),liveGames:live.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),creatorName:g.creator_name||'Môn nhân',creatorAvatar:g.creator_avatar||'🧑🏻‍🎓',maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),aliveCount:Number(g.alive_count),pot:Number(g.pot)||0,startedAt:g.started_at,round:Number(g.round_number)||0})),game:game?tienMenhPublicGame(game,players,uid,cards):null,history});
+    res.json({ok:true,master,canApply:!master,canForceCancelLobbies:isRealmAdmin(req),members,openGames:open.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),creatorName:g.creator_name||'Môn nhân',creatorAvatar:g.creator_avatar||'🧑🏻‍🎓',maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),stakeHint:null,createdAt:g.created_at})),liveGames:live.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),creatorName:g.creator_name||'Môn nhân',creatorAvatar:g.creator_avatar||'🧑🏻‍🎓',maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),aliveCount:Number(g.alive_count),pot:Number(g.pot)||0,startedAt:g.started_at,round:Number(g.round_number)||0})),game:game?tienMenhPublicGame(game,players,uid,cards):null,history});
   }catch(e){console.error('tien menh state:',e);res.status(500).json({error:'Không thể mở Tiên Mệnh.'});}
 });
 
@@ -7961,6 +7961,51 @@ app.post('/api/tien-menh/invite',auth,async(req,res)=>{
     await client.query('COMMIT');
     res.status(201).json({ok:true,...r.rows[0],message});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien menh invite:',e);res.status(500).json({error:'Không thể gửi lời mời Tiên Mệnh.'});}finally{client.release();}
+});
+
+app.post('/api/tien-menh/admin/cancel-lobbies',auth,async(req,res)=>{
+  if(!isRealmAdmin(req))return res.status(403).json({error:'Chức năng này chỉ dành riêng cho môn nhân thienha_666.'});
+  await ensureTienMenhSchema();
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    const games=(await client.query(`
+      SELECT id,creator_id,pot
+      FROM tien_menh_games
+      WHERE mode='online' AND status='lobby'
+      ORDER BY id
+      FOR UPDATE
+    `)).rows;
+    let refunded=0,refundTotal=0;
+    for(const g of games){
+      const players=(await client.query(`
+        SELECT user_id,stake
+        FROM tien_menh_players
+        WHERE game_id=$1 AND user_id IS NOT NULL
+        ORDER BY seat
+        FOR UPDATE
+      `,[g.id])).rows;
+      for(const pl of players){
+        const stake=Math.max(0,Number(pl.stake)||0);
+        if(!stake)continue;
+        const r=await client.query(`
+          UPDATE profiles
+          SET spirit_stones=COALESCE(spirit_stones,0)+$2::BIGINT,updated_at=NOW()
+          WHERE user_id=$1
+          RETURNING user_id
+        `,[Number(pl.user_id),stake]);
+        if(!r.rowCount)throw new Error(`Không tìm thấy profile user ${pl.user_id} khi hoàn Linh Thạch.`);
+        refunded++; refundTotal+=stake;
+      }
+      await client.query(`DELETE FROM tien_menh_games WHERE id=$1`,[g.id]);
+    }
+    await client.query('COMMIT');
+    res.json({ok:true,cancelled:games.length,refundedPlayers:refunded,refundTotal,message:games.length?`Đã hủy ${games.length} bàn Tiên Mệnh đang tạo và hoàn ${refundTotal.toLocaleString('vi-VN')} Linh Thạch.`:'Không có bàn Tiên Mệnh đang tạo cần hủy.'});
+  }catch(e){
+    try{await client.query('ROLLBACK')}catch{}
+    console.error('tien menh admin cancel lobbies:',e);
+    res.status(500).json({error:'Không thể hủy các bàn Tiên Mệnh đang tạo.'});
+  }finally{client.release();}
 });
 
 app.post('/api/tien-menh/challenge',auth,async(req,res)=>{
