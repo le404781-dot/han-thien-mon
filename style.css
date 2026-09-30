@@ -2128,3 +2128,5 @@ body.function-only-focus .audio-player-section.focus-active,body.function-only-f
 }
 .tien-table{contain:layout paint;content-visibility:auto;contain-intrinsic-size:600px 520px}
 .tien-chat-log{contain:content}
+
+.battle-turn-timer{margin:10px 0;padding:10px 14px;border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 88%,var(--gold) 12%);text-align:center;font-weight:900;font-variant-numeric:tabular-nums}.battle-turn-timer{letter-spacing:.03em}.active-battle:not(.battle-countdown) .battle-turn-timer{animation:challengeCountdownPulse 1.2s ease-in-out infinite}
