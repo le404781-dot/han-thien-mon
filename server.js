@@ -1103,6 +1103,23 @@ async function runDatabaseMaintenance(){
 
     // Không cần giữ payload chiến đấu lớn sau khi trận đã kết thúc.
     await query(`UPDATE beast_arena_requests SET battle_log='[]'::jsonb, challenger_stats='{}'::jsonb, opponent_stats='{}'::jsonb WHERE status='completed' AND responded_at IS NOT NULL AND responded_at < NOW()-INTERVAL '5 minutes' AND (battle_log <> '[]'::jsonb OR challenger_stats <> '{}'::jsonb OR opponent_stats <> '{}'::jsonb)`);
+
+    // Tiên Mệnh: chỉ giữ các bàn đang chơi/lobby gần đây. Bàn đã kết thúc/hủy
+    // được xóa theo batch để không làm phình database; ON DELETE CASCADE dọn
+    // luôn player/card/history của bàn tương ứng.
+    await query(`
+      WITH old_games AS (
+        SELECT id
+        FROM tien_menh_games
+        WHERE status IN ('completed','cancelled')
+          AND COALESCE(finished_at,created_at) < NOW()-INTERVAL '5 minutes'
+        ORDER BY id
+        LIMIT 100
+      )
+      DELETE FROM tien_menh_games g
+      USING old_games o
+      WHERE g.id=o.id
+    `);
   }catch(e){ console.error('database maintenance:',e.message); }
 }
 
@@ -7478,6 +7495,15 @@ async function ensureTienMenhSchemaImpl(){
     ALTER TABLE tien_menh_games ADD COLUMN IF NOT EXISTS last_actor_player_id BIGINT REFERENCES tien_menh_players(id) ON DELETE SET NULL;
     ALTER TABLE tien_menh_players ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS idx_tien_menh_games_active_watch ON tien_menh_games(status,mode,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_tien_menh_games_online_lobby_created ON tien_menh_games(created_at,id) WHERE mode='online' AND status='lobby';
+    CREATE INDEX IF NOT EXISTS idx_tien_menh_games_online_active_started ON tien_menh_games(started_at,id) WHERE mode='online' AND status='active';
+    CREATE INDEX IF NOT EXISTS idx_tien_menh_games_cleanup ON tien_menh_games(status,finished_at,id);
+    CREATE INDEX IF NOT EXISTS idx_tien_menh_players_user_game ON tien_menh_players(user_id,game_id) WHERE user_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tien_menh_players_game_alive_seat ON tien_menh_players(game_id,alive,seat);
+    CREATE INDEX IF NOT EXISTS idx_tien_menh_cards_game_location_id ON tien_menh_cards(game_id,location,id);
+    CREATE INDEX IF NOT EXISTS idx_tien_menh_history_game_id ON tien_menh_history(game_id,id DESC);
+    ALTER TABLE tien_menh_games ADD COLUMN IF NOT EXISTS reward_paid_at TIMESTAMPTZ;
+    UPDATE tien_menh_games SET reward_paid_at=COALESCE(reward_paid_at,finished_at) WHERE status='completed' AND reward_paid_at IS NULL;
     UPDATE tien_menh_games g SET turn_player_id=p.id FROM tien_menh_players p WHERE g.turn_player_id IS NULL AND g.status='active' AND p.game_id=g.id AND ((g.turn_user_id IS NOT NULL AND p.user_id=g.turn_user_id) OR (g.turn_user_id IS NULL AND p.alive=true AND p.seat=(SELECT MIN(p2.seat) FROM tien_menh_players p2 WHERE p2.game_id=g.id AND p2.alive=true)));
     UPDATE tien_menh_games g SET last_actor_player_id=p.id FROM tien_menh_players p WHERE g.last_actor_player_id IS NULL AND g.last_actor_id IS NOT NULL AND p.game_id=g.id AND p.user_id=g.last_actor_id;
   `);
@@ -7497,7 +7523,7 @@ async function tienMenhDeal(client,gameId,playerId,count=8){
 }
 async function tienMenhFinish(client,gameId,winnerId){
   const game=(await client.query(`SELECT * FROM tien_menh_games WHERE id=$1 FOR UPDATE`,[gameId])).rows[0];
-  if(!game||game.status==='completed')return null;
+  if(!game||game.status==='completed'||game.reward_paid_at)return null;
   const players=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat FOR UPDATE`,[gameId])).rows;
   const winner=players.find(p=>p.alive) || players.find(p=>Number(p.user_id)===Number(winnerId));
   if(!winner)return null;
@@ -7519,10 +7545,114 @@ async function tienMenhFinish(client,gameId,winnerId){
     const mp=(await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[master])).rows[0];
     if(mp) await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1`,[master,commission]);
   }
-  await client.query(`UPDATE tien_menh_games SET status='completed',winner_id=$2,winner_spirit_bonus=$3,master_commission=$4,finished_at=NOW(),turn_user_id=NULL WHERE id=$1`,[gameId,winner.user_id||null,spiritBonus,commission]);
+  await client.query(`UPDATE tien_menh_games SET status='completed',winner_id=$2,winner_spirit_bonus=$3,master_commission=$4,finished_at=NOW(),reward_paid_at=NOW(),turn_user_id=NULL WHERE id=$1 AND status='active' AND reward_paid_at IS NULL`,[gameId,winner.user_id||null,spiritBonus,commission]);
   await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'finish',$2,$3,$4::jsonb)`,[gameId,winner.user_id||null,`🏆 ${winner.display_name} là người cuối cùng còn sống · nhận ${payout.toLocaleString('vi-VN')} linh thạch và +${spiritBonus.toLocaleString('vi-VN')} linh lực.`,JSON.stringify({payout,spiritBonus,commission})]);
   return {winnerId:winner.user_id?Number(winner.user_id):null,payout,spiritBonus,commission,winnerName:winner.display_name};
 }
+
+/**
+ * Tiên Mệnh cleanup:
+ * - v3.7.83: một lần dọn toàn bộ lobby cũ đang mở khi deploy, hoàn lại toàn bộ
+ *   stake trước khi xóa bàn.
+ * - Sau đó server tự dọn lobby quá 5 phút nếu vẫn chỉ có người tạo bàn.
+ *   Không phụ thuộc browser/visibility của người chơi.
+ */
+async function resetTienMenhOpenLobbiesOnce(){
+  const migrationId='v3.7.83-tien-menh-reset-open-lobbies';
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    const exists=(await client.query(`SELECT 1 FROM app_migrations WHERE id=$1 FOR UPDATE`,[migrationId])).rows[0];
+    if(exists){await client.query('COMMIT');return 0;}
+    const games=(await client.query(`
+      SELECT id
+      FROM tien_menh_games
+      WHERE mode='online' AND status='lobby'
+      ORDER BY id
+      FOR UPDATE
+    `)).rows;
+    let refunded=0;
+    for(const g of games){
+      const players=(await client.query(`
+        SELECT id,user_id,stake
+        FROM tien_menh_players
+        WHERE game_id=$1
+        ORDER BY seat
+        FOR UPDATE
+      `,[g.id])).rows;
+      for(const p of players){
+        if(p.user_id!=null && Number(p.stake)>0){
+          const r=await client.query(`
+            UPDATE profiles
+            SET spirit_stones=COALESCE(spirit_stones,0)+$2::BIGINT,updated_at=NOW()
+            WHERE user_id=$1
+            RETURNING user_id
+          `,[Number(p.user_id),Number(p.stake)]);
+          if(!r.rowCount) throw new Error(`Không tìm thấy profile user ${p.user_id} khi hoàn Linh Thạch Tiên Mệnh.`);
+          refunded++;
+        }
+      }
+      await client.query(`DELETE FROM tien_menh_games WHERE id=$1`,[g.id]);
+    }
+    await client.query(`INSERT INTO app_migrations(id) VALUES($1)`,[migrationId]);
+    await client.query('COMMIT');
+    if(games.length) console.log(`[TIEN-MENH] v3.7.82 đã xóa ${games.length} lobby cũ và hoàn ${refunded} khoản cược.`);
+    return games.length;
+  }catch(e){
+    try{await client.query('ROLLBACK')}catch{}
+    throw e;
+  }finally{client.release();}
+}
+
+async function cleanupTienMenhExpiredLobbies(limit=25){
+  if(shuttingDown||poolClosed||!dbReady)return 0;
+  const client=await dbConnect();
+  let cleaned=0;
+  try{
+    for(let i=0;i<Math.max(1,Math.min(100,Number(limit)||25));i++){
+      await client.query('BEGIN');
+      const g=(await client.query(`
+        SELECT g.id
+        FROM tien_menh_games g
+        WHERE g.mode='online'
+          AND g.status='lobby'
+          AND g.created_at < NOW()-INTERVAL '5 minutes'
+          AND (SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id)=1
+        ORDER BY g.created_at,g.id
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      `)).rows[0];
+      if(!g){await client.query('ROLLBACK');break;}
+      const p=(await client.query(`
+        SELECT id,user_id,stake
+        FROM tien_menh_players
+        WHERE game_id=$1
+        ORDER BY seat
+        LIMIT 1
+        FOR UPDATE
+      `,[g.id])).rows[0];
+      if(p?.user_id!=null && Number(p.stake)>0){
+        const r=await client.query(`
+          UPDATE profiles
+          SET spirit_stones=COALESCE(spirit_stones,0)+$2::BIGINT,updated_at=NOW()
+          WHERE user_id=$1
+          RETURNING user_id
+        `,[Number(p.user_id),Number(p.stake)]);
+        if(!r.rowCount) throw new Error(`Không tìm thấy profile user ${p.user_id} khi cleanup lobby Tiên Mệnh.`);
+      }
+      await client.query(`DELETE FROM tien_menh_games WHERE id=$1`,[g.id]);
+      await client.query('COMMIT');
+      cleaned++;
+    }
+    if(cleaned) console.log(`[TIEN-MENH] Server cleanup đã hủy ${cleaned} lobby quá 5 phút chưa có người thứ 2.`);
+    return cleaned;
+  }catch(e){
+    try{await client.query('ROLLBACK')}catch{}
+    console.error('tien menh lobby cleanup:',e);
+    return cleaned;
+  }finally{client.release();}
+}
+
 async function tienMenhAdvanceNpc(client,gameId){
   for(let guard=0;guard<32;guard++){
     const game=(await client.query(`SELECT * FROM tien_menh_games WHERE id=$1 FOR UPDATE`,[gameId])).rows[0];
@@ -7571,7 +7701,7 @@ function tienMenhPublicGame(game,players,viewerId,cards){
   const own=players.find(p=>p.user_id!=null&&Number(p.user_id)===Number(viewerId)&&!p.is_npc);
   const turnPlayerId=game.turn_player_id==null?null:Number(game.turn_player_id);
   const lastActorPlayerId=game.last_actor_player_id==null?null:Number(game.last_actor_player_id);
-  return {id:Number(game.id),mode:game.mode,status:game.status,maxPlayers:Number(game.max_players),turnUserId:game.turn_user_id==null?null:Number(game.turn_user_id),turnPlayerId,lastActorId:game.last_actor_id==null?null:Number(game.last_actor_id),lastActorPlayerId,lastClaimType:game.last_claim_type,lastClaimCount:Number(game.last_claim_count)||0,forceChallenge:Boolean(game.force_challenge),round:Number(game.round_number)||0,pot:Number(game.pot)||0,winnerId:game.winner_id==null?null:Number(game.winner_id),masterCommission:Number(game.master_commission)||0,createdAt:game.created_at,startedAt:game.started_at,finishedAt:game.finished_at,players:players.map(p=>({id:Number(p.id),userId:p.user_id==null?null:Number(p.user_id),name:p.display_name,seat:Number(p.seat),stake:Number(p.stake),life:Number(p.life),alive:Boolean(p.alive),npc:Boolean(p.is_npc),avatar:p.avatar||'🧑🏻‍🎓',leftAt:p.left_at||null})),lastPlay:game.last_play||[],ownHand:(cards||[]).map(c=>({id:Number(c.id),type:c.card_type,...tienMenhCardInfo(c.card_type)})),master:game._master||null};
+  return {id:Number(game.id),mode:game.mode,status:game.status,maxPlayers:Number(game.max_players),turnUserId:game.turn_user_id==null?null:Number(game.turn_user_id),turnPlayerId,lastActorId:game.last_actor_id==null?null:Number(game.last_actor_id),lastActorPlayerId,lastClaimType:game.last_claim_type,lastClaimCount:Number(game.last_claim_count)||0,forceChallenge:Boolean(game.force_challenge),round:Number(game.round_number)||0,pot:Number(game.pot)||0,winnerId:game.winner_id==null?null:Number(game.winner_id),winnerSpiritBonus:Number(game.winner_spirit_bonus)||0,masterCommission:Number(game.master_commission)||0,rewardPaidAt:game.reward_paid_at||null,createdAt:game.created_at,startedAt:game.started_at,finishedAt:game.finished_at,players:players.map(p=>({id:Number(p.id),userId:p.user_id==null?null:Number(p.user_id),name:p.display_name,seat:Number(p.seat),stake:Number(p.stake),life:Number(p.life),alive:Boolean(p.alive),npc:Boolean(p.is_npc),avatar:p.avatar||'🧑🏻‍🎓',leftAt:p.left_at||null})),lastPlay:game.last_play||[],ownHand:(cards||[]).map(c=>({id:Number(c.id),type:c.card_type,...tienMenhCardInfo(c.card_type)})),master:game._master||null};
 }
 
 app.get('/api/tien-menh/state',auth,async(req,res)=>{
@@ -7579,8 +7709,8 @@ app.get('/api/tien-menh/state',auth,async(req,res)=>{
     await ensureTienMenhSchema();
     const uid=req.session.user_id;
     const master=(await query(`SELECT tm.user_id,u.display_name,u.username FROM tien_menh_master tm JOIN users u ON u.id=tm.user_id WHERE tm.singleton_id=1`,[])).rows[0]||null;
-    const open=(await query(`SELECT g.*,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id)::int AS player_count FROM tien_menh_games g WHERE g.mode='online' AND g.status='lobby' ORDER BY g.id DESC LIMIT 20`,[])).rows;
-    const live=(await query(`SELECT g.*,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id AND p.alive=true)::int AS alive_count,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id)::int AS player_count FROM tien_menh_games g WHERE g.mode='online' AND g.status='active' ORDER BY g.started_at DESC NULLS LAST,g.id DESC LIMIT 30`,[])).rows;
+    const open=(await query(`SELECT g.*,u.display_name AS creator_name,COALESCE(pr.avatar,'🧑🏻‍🎓') AS creator_avatar,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id)::int AS player_count FROM tien_menh_games g JOIN users u ON u.id=g.creator_id LEFT JOIN profiles pr ON pr.user_id=u.id WHERE g.mode='online' AND g.status='lobby' ORDER BY g.id DESC LIMIT 20`,[])).rows;
+    const live=(await query(`SELECT g.*,u.display_name AS creator_name,COALESCE(pr.avatar,'🧑🏻‍🎓') AS creator_avatar,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id AND p.alive=true)::int AS alive_count,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id)::int AS player_count FROM tien_menh_games g JOIN users u ON u.id=g.creator_id LEFT JOIN profiles pr ON pr.user_id=u.id WHERE g.mode='online' AND g.status='active' ORDER BY g.started_at DESC NULLS LAST,g.id DESC LIMIT 30`,[])).rows;
     const mine=(await query(`SELECT * FROM tien_menh_games WHERE id IN (SELECT game_id FROM tien_menh_players WHERE user_id=$1) AND status IN ('lobby','active') ORDER BY id DESC LIMIT 1`,[uid])).rows[0]||null;
     let game=mine,players=[],cards=[];
     if(game){
@@ -7591,10 +7721,60 @@ app.get('/api/tien-menh/state',auth,async(req,res)=>{
     const history=game?(await query(`SELECT id,event_type,actor_id,message,payload,created_at FROM tien_menh_history WHERE game_id=$1 ORDER BY id DESC LIMIT 30`,[game.id])).rows:[];
     const members=master&&Number(master.user_id)===Number(uid)?(await query(`SELECT u.id,u.display_name,u.username FROM users u WHERE u.id<>$1 ORDER BY u.display_name LIMIT 200`,[uid])).rows:[];
     res.set('Cache-Control','no-store');
-    res.json({ok:true,master,canApply:!master,members,openGames:open.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),stakeHint:null,createdAt:g.created_at})),liveGames:live.map(g=>({id:Number(g.id),maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),aliveCount:Number(g.alive_count),pot:Number(g.pot)||0,startedAt:g.started_at,round:Number(g.round_number)||0})),game:game?tienMenhPublicGame(game,players,uid,cards):null,history});
+    res.json({ok:true,master,canApply:!master,members,openGames:open.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),creatorName:g.creator_name||'Môn nhân',creatorAvatar:g.creator_avatar||'🧑🏻‍🎓',maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),stakeHint:null,createdAt:g.created_at})),liveGames:live.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),creatorName:g.creator_name||'Môn nhân',creatorAvatar:g.creator_avatar||'🧑🏻‍🎓',maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),aliveCount:Number(g.alive_count),pot:Number(g.pot)||0,startedAt:g.started_at,round:Number(g.round_number)||0})),game:game?tienMenhPublicGame(game,players,uid,cards):null,history});
   }catch(e){console.error('tien menh state:',e);res.status(500).json({error:'Không thể mở Tiên Mệnh.'});}
 });
 
+app.get('/api/tien-menh/pulse',auth,async(req,res)=>{
+  try{
+    await ensureTienMenhSchema();
+    const id=Number(req.query?.gameId);
+    if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Bàn không hợp lệ.'});
+    const uid=req.session.user_id;
+    const game=(await query(`
+      SELECT g.*
+      FROM tien_menh_games g
+      JOIN tien_menh_players me ON me.game_id=g.id AND me.user_id=$2
+      WHERE g.id=$1
+      LIMIT 1
+    `,[id,uid])).rows[0];
+    if(!game)return res.json({ok:true,game:null,history:[]});
+    const players=(await query(`
+      SELECT p.*,COALESCE(pr.avatar,'🧑🏻‍🎓') AS avatar
+      FROM tien_menh_players p
+      LEFT JOIN profiles pr ON pr.user_id=p.user_id
+      WHERE p.game_id=$1
+      ORDER BY p.seat
+    `,[id])).rows;
+    const me=players.find(p=>Number(p.user_id)===Number(uid));
+    const cards=me?(await query(`
+      SELECT id,card_type
+      FROM tien_menh_cards
+      WHERE player_id=$1 AND location='hand'
+      ORDER BY id
+    `,[me.id])).rows:[];
+    const history=(await query(`
+      SELECT id,event_type,actor_id,message,payload,created_at
+      FROM tien_menh_history
+      WHERE game_id=$1
+      ORDER BY id DESC
+      LIMIT 8
+    `,[id])).rows;
+    const publicGame=tienMenhPublicGame(game,players,uid,cards);
+    const result=game.status==='completed'&&game.winner_id!=null?{
+      winnerId:Number(game.winner_id),
+      payout:Number(game.pot)||0,
+      spiritBonus:Number(game.winner_spirit_bonus)||0,
+      commission:Number(game.master_commission)||0,
+      winnerName:players.find(p=>Number(p.user_id)===Number(game.winner_id))?.display_name||'Người chiến thắng'
+    }:null;
+    res.set('Cache-Control','no-store');
+    res.json({ok:true,game:publicGame,history,result});
+  }catch(e){
+    console.error('tien menh pulse:',e);
+    res.status(500).json({error:'Không thể cập nhật trạng thái Tiên Mệnh.'});
+  }
+});
 app.get('/api/tien-menh/watch',auth,async(req,res)=>{
   try{
     await ensureTienMenhSchema();
@@ -7749,14 +7929,38 @@ app.post('/api/tien-menh/leave',auth,async(req,res)=>{
       if(wasLastActor) await client.query(`UPDATE tien_menh_cards SET location='discard' WHERE game_id=$1 AND location='table'`,[gameId]);
       const alive=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND alive=true ORDER BY seat FOR UPDATE`,[gameId])).rows;
       await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'leave',$2,$3,'{}'::jsonb)`,[gameId,req.session.user_id,`${me.display_name} đã rời bàn Tiên Mệnh.`]);
-      if(alive.length<=1){await tienMenhFinish(client,gameId,alive[0]?.user_id||null);} else {
+      let finishResult=null;
+      if(alive.length<=1){finishResult=await tienMenhFinish(client,gameId,alive[0]?.user_id||null);} else {
         const next=tienMenhNextAlive(alive,me.seat);
         await client.query(`UPDATE tien_menh_games SET turn_player_id=$2,turn_user_id=$3,last_actor_id=NULL,last_actor_player_id=NULL,last_claim_type='',last_claim_count=0,last_play='[]'::jsonb,force_challenge=false WHERE id=$1`,[gameId,next?.id||null,next?.user_id||null]);
         await tienMenhAdvanceNpc(client,gameId);
       }
+      await client.query('COMMIT');
+      return res.json({ok:true,finished:Boolean(finishResult),result:finishResult,message:'Đã rời bàn Tiên Mệnh.'});
     }
-    await client.query('COMMIT');res.json({ok:true,message:'Đã rời bàn Tiên Mệnh.'});
+    await client.query('COMMIT');res.json({ok:true,finished:false,result:null,message:'Đã rời bàn Tiên Mệnh.'});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien menh leave:',e);res.status(500).json({error:'Không thể rời bàn.'});}finally{client.release();}
+});
+
+app.post('/api/tien-menh/invite',auth,async(req,res)=>{
+  const client=await dbConnect();
+  try{
+    const gameId=Number(req.body?.gameId);
+    if(!Number.isInteger(gameId)||gameId<1)return res.status(400).json({error:'Bàn Tiên Mệnh không hợp lệ.'});
+    await client.query('BEGIN');
+    const g=(await client.query(`SELECT g.id,g.max_players,g.pot,g.status,g.creator_id,u.display_name AS creator_name FROM tien_menh_games g JOIN users u ON u.id=g.creator_id WHERE g.id=$1 AND g.mode='online' AND g.status='lobby' FOR UPDATE`,[gameId])).rows[0];
+    if(!g){await client.query('ROLLBACK');return res.status(404).json({error:'Bàn không còn mở để mời.'});}
+    const count=Number((await client.query(`SELECT COUNT(*)::int AS c FROM tien_menh_players WHERE game_id=$1`,[gameId])).rows[0]?.c||0);
+    if(count>=Number(g.max_players)){await client.query('ROLLBACK');return res.status(409).json({error:'Bàn đã đủ số Môn Nhân.'});}
+    const me=(await client.query(`SELECT display_name FROM tien_menh_players WHERE game_id=$1 AND user_id=$2`,[gameId,req.session.user_id])).rows[0];
+    const sender=me?.display_name || (await client.query(`SELECT display_name FROM users WHERE id=$1`,[req.session.user_id])).rows[0]?.display_name || 'Môn nhân';
+    const message=`🏮 ${sender} mời Môn Nhân tham gia Tiên Mệnh · Bàn #${gameId} · Chủ bàn: ${g.creator_name} · ${count}/${g.max_players} chỗ · 💎 ${Number(g.pot||0).toLocaleString('vi-VN')} Linh Thạch đang đặt.`;
+    const r=await client.query(`INSERT INTO chat_messages(user_id,message,kind) VALUES($1,$2,'tien_menh_invite') RETURNING id,created_at`,[req.session.user_id,message]);
+    const recipients=(await client.query('SELECT user_id FROM profiles WHERE user_id<>$1 AND mailbox_enabled=TRUE',[req.session.user_id])).rows.map(x=>x.user_id);
+    await notifyMany(recipients,'chat_total','🏮 Lời mời Tiên Mệnh',`${sender} đang mời Môn Nhân vào Bàn #${gameId}.`,'#chat');
+    await client.query('COMMIT');
+    res.status(201).json({ok:true,...r.rows[0],message});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien menh invite:',e);res.status(500).json({error:'Không thể gửi lời mời Tiên Mệnh.'});}finally{client.release();}
 });
 
 app.post('/api/tien-menh/challenge',auth,async(req,res)=>{
@@ -7829,7 +8033,8 @@ function startBackgroundJobs(){
   const alchemyTimer=setInterval(()=>{if(!shuttingDown)processAlchemyNpcOrders().catch(e=>console.error('alchemy npc orders:',e));},30000);
   // v3.7.59: quét định kỳ để không lôi đài accepted nào bị treo sau restart/network.
   const onlineChallengeTimer=setInterval(()=>{if(!shuttingDown&&dbReady)autoResolveActiveOnlineChallenges('background').catch(e=>console.error('online challenge auto-resolve:',e));},2000);
-  backgroundTimers.push(onlineChallengeTimer);
+  const tienMenhCleanupTimer=setInterval(()=>{if(!shuttingDown&&dbReady)cleanupTienMenhExpiredLobbies(25);},60000);
+  backgroundTimers.push(onlineChallengeTimer,tienMenhCleanupTimer);
   backgroundTimers.push(tavernTimer,alchemyTimer);
   if(!shuttingDown){
     processAlchemyNpcOrders().catch(e=>{if(!shuttingDown)console.error('alchemy npc sales:',e);});
@@ -8249,6 +8454,8 @@ async function initializeDatabaseWithRetry(){
     if(shuttingDown||poolClosed)return;
     await ensureTienMenhSchema();
     if(shuttingDown||poolClosed)return;
+    await resetTienMenhOpenLobbiesOnce();
+    if(shuttingDown||poolClosed)return;
     await clearActiveOnlineChallengesOnce();
     if(shuttingDown||poolClosed)return;
     await applyV3_7_44DataResetOnce();
@@ -8256,6 +8463,8 @@ async function initializeDatabaseWithRetry(){
     await runDatabaseMaintenance();
     dbInitError = null;
     dbReady = true;
+    await cleanupTienMenhExpiredLobbies(50);
+    if(shuttingDown||poolClosed)return;
     // v3.7.59: sau khi DB đã sẵn sàng, lập tức tự động tính và kết thúc
     // mọi lôi đài online còn status=accepted. Không cần người chơi thao tác.
     await autoResolveActiveOnlineChallenges('startup');
