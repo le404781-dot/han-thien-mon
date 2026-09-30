@@ -314,6 +314,37 @@ function updateChallengeLiveDom(b){
  if(last){if(b.lastAction){last.hidden=false;last.innerHTML=`${esc(b.lastAction)} · <b>-${Number(b.lastDamage||0).toLocaleString('vi-VN')} HP</b>`;}else{last.hidden=true;last.textContent='';}}
  return true;
 }
+async function renderAutoChallengeResult(battle){
+ const area=$('#challengeArea'); if(!area||!battle)return;
+ stopChallengeRealtime();
+ const log=Array.isArray(battle.log)?battle.log:[];
+ const meId=Number(currentUser?.id||0), winnerId=Number(battle.winnerId||0);
+ const pct=(hp,max)=>Math.min(100,Math.max(0,Math.round(Number(hp||0)/Math.max(1,Number(max||1))*100)));
+ const fighter=(side,name,rank,spirit,avatar,maxHp)=>`<article data-auto-fighter="${side}" class="auto-battle-fighter"><div class="auto-battle-avatar">${avatarHtml(avatar||'⚔')}</div><div class="auto-battle-name"><b>${esc(name||'Môn nhân')}</b><small>${esc(rank||'')} · ${Number(spirit||0).toLocaleString('vi-VN')} linh lực</small></div><div class="auto-battle-hp"><i data-auto-hp="${side}" style="width:100%"></i></div><b class="auto-battle-hp-label" data-auto-hp-label="${side}">${Number(maxHp||0).toLocaleString('vi-VN')} / ${Number(maxHp||0).toLocaleString('vi-VN')} HP</b></article>`;
+ area.innerHTML=`<div class="auto-battle-result active-battle"><div class="auto-battle-title"><span class="eyebrow">⚔ LÔI ĐÀI ONLINE · TỰ ĐỘNG QUYẾT ĐẤU</span><h3>${esc(battle.challengerName)} <span>VS</span> ${esc(battle.opponentName)}</h3><small>Đối phương đã đồng thuận · hệ thống tự tính toán toàn bộ trận đấu</small></div><div class="auto-battle-arena">${fighter('a',battle.challengerName,battle.challengerRank,battle.challengerSpirit,battle.challengerAvatar,battle.challengerMaxHp)}<div class="auto-battle-vs">⚡<strong>VS</strong>⚡</div>${fighter('b',battle.opponentName,battle.opponentRank,battle.opponentSpirit,battle.opponentAvatar,battle.opponentMaxHp)}</div><div class="auto-battle-impact" id="autoBattleImpact">⚔️ Lôi đài khai mở...</div><div class="auto-battle-log" id="autoBattleLog"></div><div class="auto-battle-result-final" id="autoBattleFinal">⏳ Hệ thống đang vận chuyển chiến đấu...</div></div>`;
+ const setHp=(side,hp,max)=>{const bar=document.querySelector(`[data-auto-hp="${side}"]`),label=document.querySelector(`[data-auto-hp-label="${side}"]`),m=Math.max(1,Number(max)||1),v=Math.max(0,Number(hp)||0);if(bar)bar.style.width=pct(v,m)+'%';if(label)label.textContent=`${Math.round(v).toLocaleString('vi-VN')} / ${Math.round(m).toLocaleString('vi-VN')} HP`;};
+ let hpA=Number(battle.challengerMaxHp)||1,hpB=Number(battle.opponentMaxHp)||1;
+ setHp('a',hpA,battle.challengerMaxHp);setHp('b',hpB,battle.opponentMaxHp);
+ for(const entry of log){
+   const attackerSide=Number(entry.attackerId)===Number(battle.challengerId)?'a':'b';
+   const defenderSide=attackerSide==='a'?'b':'a';
+   const impact=$('#autoBattleImpact'), logEl=$('#autoBattleLog');
+   const atk=document.querySelector(`[data-auto-fighter="${attackerSide}"]`), def=document.querySelector(`[data-auto-fighter="${defenderSide}"]`);
+   if(atk){atk.classList.remove('auto-battle-attack');void atk.offsetWidth;atk.classList.add('auto-battle-attack');}
+   await new Promise(r=>setTimeout(r,220));
+   if(def){def.classList.remove('auto-battle-hit');void def.offsetWidth;def.classList.add('auto-battle-hit');const dmg=document.createElement('span');dmg.className='auto-battle-damage';dmg.textContent=`-${Number(entry.damage||0).toLocaleString('vi-VN')} HP`;def.appendChild(dmg);setTimeout(()=>dmg.remove(),850);}
+   impact.textContent=entry.kind==='spit'?`💦 ${entry.attackerName} sử dụng Nhổ 1 Ngụm Nước Bọt!`:`${entry.action} · ${Number(entry.damage||0).toLocaleString('vi-VN')} sát thương`;
+   if(Number(entry.attackerId)===Number(battle.challengerId))hpB=Number(entry.hpB||0);else hpA=Number(entry.hpA||0);
+   setHp('a',hpA,battle.challengerMaxHp);setHp('b',hpB,battle.opponentMaxHp);
+   if(logEl){const row=document.createElement('div');row.className='auto-battle-log-row';row.innerHTML=`<span>V${Number(entry.round||0)}</span><p>${esc(entry.text||'')}</p><b>-${Number(entry.damage||0).toLocaleString('vi-VN')}</b>`;logEl.prepend(row);}
+   await new Promise(r=>setTimeout(r,520));
+ }
+ const final=$('#autoBattleFinal');
+ if(final){const won=winnerId===meId;final.className=`auto-battle-result-final ${won?'win':'loss'}`;final.innerHTML=`${won?'🏆':'💀'} <b>${esc(battle.winnerId===battle.challengerId?battle.challengerName:battle.opponentName)} chiến thắng!</b><span>${esc(battle.reward?.gain?`+${Number(battle.reward.gain).toLocaleString('vi-VN')} linh lực · ${battle.reward?.item?.name||'Phần thưởng'} ×${battle.reward?.item?.quantity||1}`:battle.penalty?.text||'Kết quả đã được ghi vào chiến tích.')}</span>`;}
+ await new Promise(r=>setTimeout(r,2200));
+ await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard(),loadMailbox()]);
+}
+
 async function autoChallengeAttack(battle){
  if(!battle||!battle.yourTurn||window.challengeAutoAttack!==true||window.challengeAutoAttackBusy)return;
  window.challengeAutoAttackBusy=true;
@@ -392,7 +423,7 @@ async function loadChallenges(){
    ${debuffActive?`<div class="challenge-debuff"><b>☠ ${esc(me.challenge_debuff_text||'Khiêu chiến thất bại: đang chịu debuff.')}</b><small>Debuff còn hiệu lực đến ${new Date(me.challenge_debuff_until).toLocaleString('vi-VN')}</small></div>`:''}
    ${battleHtml}
    ${publicBattles.length?`<div class="challenge-block betting-block"><div class="challenge-subhead"><span class="eyebrow">💎 SÀN ĐẶT CƯỢC LÔI ĐÀI</span><b>Mọi môn nhân đều có thể tham gia</b></div><div class="challenge-list">${publicBattles.map(x=>{const pool=Number(x.bet_pool||0),a=Number(x.challenger_bet||0),b=Number(x.opponent_bet||0);return `<article class="challenge-card bet-card"><span class="challenge-avatar">⚔</span><div><b>${esc(x.challenger_name)} VS ${esc(x.opponent_name)}</b><small>💎 Tổng cược: ${pool.toLocaleString('vi-VN')} · ${esc(x.challenger_name)}: ${a.toLocaleString('vi-VN')} · ${esc(x.opponent_name)}: ${b.toLocaleString('vi-VN')}</small></div><div class="bet-actions"><select class="bet-target" data-id="${x.id}"><option value="${x.challenger_id}">Cược ${esc(x.challenger_name)}</option><option value="${x.opponent_id}">Cược ${esc(x.opponent_name)}</option></select><input class="bet-amount" data-id="${x.id}" type="number" min="1" value="100" inputmode="numeric"><button class="btn small primary challenge-bet" data-id="${x.id}">💎 Đặt cược</button></div></article>`}).join('')}</div></div>`:''}
-   <div class="challenge-limit-banner"><span>⚔ Lượt Khiêu Chiến</span><b>${Number(usage.used)}/${Number(usage.limit)} trong 24 giờ</b><small>${challengeLimitReached?'⛔ Đã hết lượt':'Còn '+Number(usage.remaining)+' lượt'}</small></div><div class="challenge-rules"><div><span class="eyebrow">⚔ ONLINE · LÔI ĐÀI</span><h3>Đánh theo lượt</h3><p>Đối phương đồng thuận rồi hai bên lần lượt tung tuyệt chiêu. Ai hết thanh máu trước sẽ thất bại.</p></div><div><span class="eyebrow">🌓 OFFLINE · MÔ PHỎNG</span><h3>Đánh với bản mô phỏng</h3><p>Không cần đối phương online. Chế độ này vẫn dùng quy tắc chênh cảnh giới.</p></div><div><span class="eyebrow">☯ QUY LUẬT CẢNH GIỚI</span><h3>Sát thương theo cảnh giới</h3><p>Cùng cảnh giới sẽ cân bằng hơn; cảnh giới cao hơn có hệ số sát thương tăng, cảnh giới thấp hơn bị giảm sát thương.</p></div></div>
+   <div class="challenge-limit-banner"><span>⚔ Lượt Khiêu Chiến</span><b>${Number(usage.used)}/${Number(usage.limit)} trong 24 giờ</b><small>${challengeLimitReached?'⛔ Đã hết lượt':'Còn '+Number(usage.remaining)+' lượt'}</small></div><div class="challenge-rules"><div><span class="eyebrow">⚔ ONLINE · LÔI ĐÀI</span><h3>Tự động quyết đấu</h3><p>Đối phương đồng thuận là Lôi Đài lập tức khai mở. Hệ thống tự tính toán, tự ra chiêu, hiển thị sát thương và kết quả; không cần hai bên bấm nút.</p></div><div><span class="eyebrow">🌓 OFFLINE · MÔ PHỎNG</span><h3>Đánh với bản mô phỏng</h3><p>Không cần đối phương online. Chế độ này vẫn dùng quy tắc chênh cảnh giới.</p></div><div><span class="eyebrow">☯ QUY LUẬT CẢNH GIỚI</span><h3>Sát thương theo cảnh giới</h3><p>Cùng cảnh giới sẽ cân bằng hơn; cảnh giới cao hơn có hệ số sát thương tăng, cảnh giới thấp hơn bị giảm sát thương.</p></div></div>
    ${pending.length?`<div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📨 LỜI MỜI LÔI ĐÀI</span><b>${pending.length} lời mời đang chờ</b></div><div class="challenge-list">${pending.map(x=>`<article class="challenge-card incoming"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.challenger_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary challenge-accept" data-id="${x.id}">Đồng thuận</button><button class="btn small ghost challenge-reject" data-id="${x.id}">Từ chối</button></article>`).join('')}</div></div>`:''}
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">🎯 CHỌN ĐỐI THỦ</span><b>${users.length} môn nhân</b></div><div class="challenge-list">${users.length?users.map(x=>`<article class="challenge-card"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${Number(x.challenge_debuff_percent||0)>0?`<small class="debuff-mini">☠ Đang chịu debuff ${x.challenge_debuff_percent}%</small>`:''}</div><div class="challenge-card-actions"><button class="btn small primary challenge-online" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>⚔ Online</button><button class="btn small ghost challenge-offline" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>🌓 Offline</button></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có môn nhân khác để khiêu chiến.</p></div>`}</div></div>
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📜 CHIẾN TÍCH</span><b>${history.length} trận gần đây</b></div><div class="challenge-history">${history.length?history.map(h=>{const meId=Number(currentUser?.id),won=Number(h.winner_id)===meId,pendingStatus=h.status==='pending',activeStatus=h.status==='accepted';return `<article class="challenge-history-row"><span>${h.mode==='online'?'⚔':'🌓'}</span><div><b>${won?'🏆 Thắng':h.status==='rejected'?'Từ chối':activeStatus?'⚔ Đang giao chiến':pendingStatus?'⌛ Chờ':'💀 Thất bại'}</b><small>${esc(Number(h.challenger_id)===meId?h.opponent_name:h.challenger_name)} · ${new Date(h.created_at).toLocaleString('vi-VN')}</small></div><div class="challenge-result-text">${won?`+${Number(h.reward_spirit||0).toLocaleString('vi-VN')} linh lực${h.reward_item_name?` · ${esc(h.reward_item_name)} ×${h.reward_quantity}`:''}`:esc(h.penalty_text||'')}</div></article>`}).join(''):`<div class="empty-state compact"><p>Chưa có chiến tích.</p></div>`}</div></div>
@@ -484,12 +515,11 @@ async function respondChallenge(requestId,action){
   const x=await api('/api/challenges/online/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,action})});
   msg.textContent=action==='reject'?`🏳️ ${x.message}`:`⚔ ${x.message}`;
   if(action==='accept' && x.battle){
-    window.__challengeLiveState={...x.battle,status:'accepted'};
-    window.__challengeLastState=[x.battle.id,'accepted',x.battle.round,x.battle.turnUserId,x.battle.challengerHp,x.battle.opponentHp,x.battle.lastActorId||0,x.battle.lastAction||''].join('|');
-    if(!window.challengeRealtimeTimer)window.challengeRealtimeTimer=setInterval(pollChallengeRealtime,2000);
+    // Không còn thao tác chọn chiêu: hệ thống đã tính xong ngay khi đồng thuận.
+    await renderAutoChallengeResult(x.battle);
+    return;
   }
   await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
-  if(action==='accept' && window.challengeAutoAttack && window.__challengeLiveState?.yourTurn) await autoChallengeAttack(window.__challengeLiveState);
  }catch(e){msg.textContent='❌ '+e.message;}
 }
 
@@ -1591,9 +1621,10 @@ async function loadMailbox(){
   area.innerHTML=`<div class="mailbox-toolbar"><label><input id="mailboxToggle" type="checkbox" ${d.enabled?'checked':''}> 🔔 Nhận thông báo Hòm Thư</label><button id="mailboxReadAll" class="btn small ghost">Đánh dấu tất cả đã đọc</button><span>Chưa đọc: <b>${Number(d.unread||0)}</b></span></div><div class="mailbox-list">${(d.rows||[]).map(x=>{
     const a=x.actionData||null;
     const actionable=Boolean(a?.action && (a.requestId||a.invitationId) && !x.read_at);
-    const icon=x.type==='challenge'?'⚔️':x.type==='beast_challenge'?'🪶':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='tavern_sale'?'🥂':x.type==='alchemy_order'?'⚗️':x.type==='chat_total'?'☯':'📬';
+    const icon=x.type==='challenge'?'⚔️':x.type==='challenge_result'?'🏆':x.type==='beast_challenge'?'🪶':x.type==='friend'?'🤝':x.type==='private_chat'?'💬':x.type==='bicanh_invite'?'🌌':x.type==='tavern_sale'?'🥂':x.type==='alchemy_order'?'⚗️':x.type==='chat_total'?'☯':'📬';
     const beastChoice=actionable&&a?.action==='beast_challenge'&&a?.requestId?`<div class="mail-beast-choice"><select class="mail-beast-select" data-id="${x.id}"><option value="0">Chọn linh thú xuất chiến</option>${(d.beastsForArena||[]).map(b=>`<option value="${b.beast_id}">${esc(b.name)} · ${esc(b.beast_realm)} · ${esc(b.beast_type)}</option>`).join('')}</select><select class="mail-skill-select" data-id="${x.id}"><option value="1">Tuyệt kỹ 1</option><option value="2">Tuyệt kỹ 2</option><option value="3">Tuyệt kỹ 3</option></select></div>`:'';
-    const buttons=actionable?`${beastChoice}<div class="mail-actions"><button class="btn small primary mail-accept" data-id="${x.id}">✓ Đồng ý</button><button class="btn small ghost mail-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div>`:'';
+    const resultReplay=x.type==='challenge_result'&&a?.action==='challenge_result'&&a?.requestId&&!x.read_at?`<div class="mail-actions"><button class="btn small primary mail-challenge-result" data-id="${x.id}" data-request-id="${a.requestId}">⚔ Xem lại trận đấu</button><span class="mail-action-msg"></span></div>`:'';
+    const buttons=resultReplay|| (actionable?`${beastChoice}<div class="mail-actions"><button class="btn small primary mail-accept" data-id="${x.id}">✓ Đồng ý</button><button class="btn small ghost mail-reject" data-id="${x.id}">✕ Từ chối</button><span class="mail-action-msg"></span></div>`:'');
     return `<article class="mail-item ${x.read_at?'':'unread'} ${actionable?'mail-actionable':''}" data-id="${x.id}"><div class="mail-icon">${icon}</div><div class="mail-content"><b>${esc(x.title)}</b><p>${esc(x.message)}</p><small>${new Date(x.created_at).toLocaleString('vi-VN')}</small>${buttons}</div>${x.read_at?'':'<span class="mail-new">MỚI</span>'}</article>`;
   }).join('')||'<div class="empty-state compact"><p>Hòm thư đang tĩnh lặng.</p></div>'}</div>`;
   $('#mailboxToggle').onchange=async e=>{try{await api('/api/mailbox/toggle',{method:'POST',headers:authHeaders(),body:JSON.stringify({enabled:e.target.checked})});}catch(err){e.target.checked=!e.target.checked;}};
@@ -1611,6 +1642,18 @@ async function loadMailbox(){
     ev.stopPropagation();
     const id=Number(btn.dataset.id),row=(d.rows||[]).find(x=>Number(x.id)===id);
     await respondMailboxAction(id,'reject',row?.actionData,btn);
+  });
+  document.querySelectorAll('.mail-challenge-result').forEach(btn=>btn.onclick=async ev=>{
+    ev.stopPropagation();
+    const mail=btn.closest('.mail-item'),msg=mail?.querySelector('.mail-action-msg');
+    btn.disabled=true;
+    try{
+      const x=await api('/api/challenges/online/result/'+Number(btn.dataset.requestId),{headers:authHeaders()});
+      await api('/api/mailbox/read',{method:'POST',headers:authHeaders(),body:JSON.stringify({id:Number(btn.dataset.id)})});
+      if(msg)msg.textContent='✓ Đang mở lại diễn biến trận đấu...';
+      await renderAutoChallengeResult(x.battle);
+      await loadMailbox();
+    }catch(e){if(msg)msg.textContent='❌ '+e.message;btn.disabled=false;}
   });
  }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
 }
