@@ -1836,15 +1836,16 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.63 · Audio iPhone/Safari/Render hardening.
-   Mục tiêu: không để UI báo lỗi chỉ vì một media pipeline iOS bị kẹt; đồng thời
-   tách rõ lỗi giao file khỏi lỗi WebKit. Audio được lấy bằng URL tuyệt đối,
-   response audio không bị compression/cache dài hạn, và iOS AudioSession được
-   "heal" trước khi phát khi API này tồn tại. */
+/* v3.7.64 · Audio iPhone/Safari/Render final fix.
+   Quan trọng: KHÔNG await fetch/Promise nào trước audio.play() khi nút được
+   kích bằng thao tác chạm. iOS Safari có thể làm mất transient user activation
+   sau một await, khiến play() bị từ chối hoặc media pipeline không được mở.
+   Đồng thời không dùng watchdog 1.8s: file ~5MB có thể cần lâu hơn để bắt đầu
+   trên mạng di động/Render cold-start. Chỉ fallback sau khi chờ đủ lâu. */
 (function setupBackgroundMusic(){
  const audioHost=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
  if(!audioHost||!playBtn||!stopBtn)return;
- const musicKey='htm_background_music',volumeKey='htm_background_volume',VERSION='3.7.63';
+ const musicKey='htm_background_music',volumeKey='htm_background_volume',VERSION='3.7.64';
  const SOURCES=[
    {path:'/assets/audio/tinh-ve-background.mp3',type:'audio/mpeg'},
    {path:'/assets/audio/tinh-ve-background.m4a',type:'audio/mp4'}
@@ -1856,7 +1857,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  if(volume)volume.value=String(savedVolume);
  if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
  let audio=audioHost,sourceIndex=0,desiredPlay=localStorage.getItem(musicKey)==='on';
- let retryTimer=null,watchdogTimer=null,healthTimer=null,playbackEventSeen=false,gestureGeneration=0;
+ let watchdogTimer=null,retryTimer=null,healthTimer=null,playbackEventSeen=false,gestureGeneration=0,retryCount=0;
 
  function setStatus(playing,text){
    if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
@@ -1868,19 +1869,14 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    try{navigator.mediaSession.metadata=new MediaMetadata({title:'Tinh Vệ · Hàn Thiên Môn',artist:'Hàn Thiên Môn',album:'Nhạc nền tiên hiệp'});}catch{}
  }
  function clearTimers(){
-   if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
    if(watchdogTimer){clearTimeout(watchdogTimer);watchdogTimer=null;}
+   if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
    if(healthTimer){clearTimeout(healthTimer);healthTimer=null;}
  }
  function healIOSAudioSession(){
    try{
      const session=navigator.audioSession;
-     if(!session)return;
-     // WebKit bug 323104: a tab can keep a stale output category while every
-     // media API reports success. Cycling through a real category change can
-     // repopulate the system audio session. Never fail playback if unsupported.
-     session.type='ambient';
-     session.type='playback';
+     if(session&&session.type!=='playback')session.type='playback';
    }catch{}
  }
  function configure(el,index){
@@ -1899,27 +1895,33 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    audio=fresh;sourceIndex=index;bindAudioEvents(audio);return audio;
  }
  function markPlaying(){
-   playbackEventSeen=true;clearTimers();mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');
+   playbackEventSeen=true;retryCount=0;clearTimers();mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');
  }
- function nextSourceOrRetry(){
+ function scheduleRetry(index,delay){
+   if(!desiredPlay||retryTimer)return;
+   retryTimer=setTimeout(()=>{retryTimer=null;if(desiredPlay)start(false,index);},delay);
+ }
+ function nextSourceOrRetry(reason='unknown'){
    if(!desiredPlay)return;
-   if(sourceIndex+1<SOURCES.length){
+   clearTimers();
+   if(sourceIndex+1<SOURCES.length && reason==='media-error'){
      const next=sourceIndex+1;
-     setStatus(false,'Đang thử đường phát dự phòng…');
-     setTimeout(()=>start(false,next),120);
-   }else{
-     // One more clean media element after a short delay handles transient iOS
-     // media-pipeline resets without immediately blaming the file.
+     setStatus(false,'Đang thử định dạng âm thanh dự phòng…');
+     scheduleRetry(next,250);
+     return;
+   }
+   retryCount+=1;
+   if(retryCount<=2){
      setStatus(false,'iPhone đang khởi tạo lại đường âm thanh…');
-     retryTimer=setTimeout(()=>{retryTimer=null;if(desiredPlay)start(false,0);},700);
+     scheduleRetry(sourceIndex,1200*retryCount);
+   }else{
+     setStatus(false,'iPhone chưa xác nhận được đường âm thanh. Chạm Khởi Nhạc để thử lại.');
    }
  }
- function handleAudioError(){
-   clearTimers();
-   nextSourceOrRetry();
- }
+ function handleAudioError(){nextSourceOrRetry('media-error');}
  function bindAudioEvents(el){
    el.addEventListener('playing',markPlaying,{passive:true});
+   el.addEventListener('canplay',()=>{if(desiredPlay&&!playbackEventSeen)msg&&(msg.textContent='Đã tải nhạc · đang mở âm thanh…');},{passive:true});
    el.addEventListener('play',()=>mediaMeta(),{passive:true});
    el.addEventListener('pause',()=>{
      if(!el.ended&&desiredPlay)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');
@@ -1927,57 +1929,66 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    },{passive:true});
    el.addEventListener('ended',()=>{if(desiredPlay)start(false,sourceIndex);},{passive:true});
    el.addEventListener('error',handleAudioError,{passive:true});
-   el.addEventListener('stalled',()=>{
-     if(desiredPlay&&!retryTimer){retryTimer=setTimeout(()=>{retryTimer=null;if(desiredPlay&&audio.paused)start(false,sourceIndex);},1800);}
-   },{passive:true});
  }
  bindAudioEvents(audio);configure(audio,0);
 
- async function checkAudioHealth(){
-   try{
-     const r=await fetch('/api/audio-health?ts='+Date.now(),{cache:'no-store',credentials:'same-origin'});
-     const data=await r.json();
-     if(!r.ok||!data.ok||!Array.isArray(data.audio)||data.audio.some(x=>!x.exists||Number(x.bytes)<=0))return false;
-     return true;
-   }catch{return null;}
+ function checkAudioHealthBackground(){
+   // Diagnostic only. Tuyệt đối không chặn audio.play() sau một thao tác chạm.
+   fetch('/api/audio-health?ts='+Date.now(),{cache:'no-store',credentials:'same-origin'})
+     .then(r=>r.json().then(data=>({ok:r.ok,data})))
+     .then(({ok,data})=>{
+       if(!desiredPlay||playbackEventSeen)return;
+       if(!ok||!data||!data.ok||!Array.isArray(data.audio)||data.audio.some(x=>!x.exists||Number(x.bytes)<=0)){
+         msg&&(msg.textContent='Máy chủ chưa cung cấp đủ tệp nhạc.');
+       }
+     }).catch(()=>{});
  }
- async function start(fromGesture=false,forcedIndex=null){
+ function start(fromGesture=false,forcedIndex=null){
    desiredPlay=true;localStorage.setItem(musicKey,'on');
    const gen=++gestureGeneration,idx=forcedIndex==null?sourceIndex:forcedIndex;
    clearTimers();
-   healIOSAudioSession();
-   // A real user tap always gets a new element; this is the safest recovery
-   // from a stuck iOS media pipeline and also satisfies the gesture policy.
-   if(fromGesture||idx!==sourceIndex||audio===audioHost)audio=replaceAudio(idx);
+   if(fromGesture){retryCount=0;healIOSAudioSession();audio=replaceAudio(idx);}
+   else if(idx!==sourceIndex){healIOSAudioSession();audio=replaceAudio(idx);}
    else{audio.loop=true;audio.muted=false;audio.volume=savedVolume;}
    audio.volume=savedVolume;sourceIndex=idx;playbackEventSeen=false;
-   setStatus(false,'Đang kiểm tra và mở âm thanh…');
-   if(fromGesture){
-     const health=await checkAudioHealth();
-     if(gen!==gestureGeneration||!desiredPlay)return;
-     if(health===false){setStatus(false,'Máy chủ chưa cung cấp tệp nhạc. Hãy triển khai lại bản mới.');return;}
-   }
+   setStatus(false,'Đang mở âm thanh…');
+
+   // CRITICAL: gọi play() NGAY trong call stack của thao tác chạm.
+   // Không await fetch, không await AudioSession, không chờ health-check trước.
+   let playPromise;
    try{
      healIOSAudioSession();
-     const promise=audio.play();
-     if(promise&&typeof promise.then==='function')await promise;
-     if(gen!==gestureGeneration||!desiredPlay)return;
-     clearTimers();
-     watchdogTimer=setTimeout(()=>{
-       watchdogTimer=null;
-       if(desiredPlay&&!playbackEventSeen)nextSourceOrRetry();
-     },1800);
+     playPromise=audio.play();
    }catch(e){
-     if(gen!==gestureGeneration||!desiredPlay)return;
-     // Autoplay/policy errors are not file errors. Keep the message actionable.
-     const name=String(e&&e.name||'');
-     if(name==='NotAllowedError'||name==='AbortError'){
-       setStatus(false,fromGesture?'iPhone chưa mở quyền âm thanh. Chạm Khởi Nhạc thêm một lần.':'Đã ghi nhớ phát nhạc · chạm Khởi Nhạc để mở khóa âm thanh.');
-     }else nextSourceOrRetry();
+     handlePlayFailure(e,fromGesture,gen);return;
+   }
+   if(playPromise&&typeof playPromise.then==='function'){
+     playPromise.then(()=>{
+       if(gen!==gestureGeneration||!desiredPlay)return;
+       // play() resolve không đồng nghĩa iOS đã phát ra loa; chờ event 'playing'.
+       watchdogTimer=setTimeout(()=>{
+         watchdogTimer=null;
+         if(desiredPlay&&!playbackEventSeen)nextSourceOrRetry('watchdog');
+       },8000);
+     }).catch(e=>handlePlayFailure(e,fromGesture,gen));
+   }else{
+     watchdogTimer=setTimeout(()=>{if(desiredPlay&&!playbackEventSeen)nextSourceOrRetry('watchdog');},8000);
+   }
+   if(fromGesture)checkAudioHealthBackground();
+ }
+ function handlePlayFailure(e,fromGesture,gen){
+   if(gen!==gestureGeneration||!desiredPlay)return;
+   const name=String(e&&e.name||'');
+   if(name==='NotAllowedError'){
+     setStatus(false,'iPhone chưa cho phép phát âm thanh. Hãy chạm Khởi Nhạc lại một lần.');
+   }else if(name==='AbortError'){
+     setStatus(false,'iPhone vừa ngắt đường âm thanh. Chạm Khởi Nhạc để mở lại.');
+   }else{
+     nextSourceOrRetry('media-error');
    }
  }
  function stop(){
-   desiredPlay=false;localStorage.setItem(musicKey,'off');gestureGeneration++;clearTimers();
+   desiredPlay=false;localStorage.setItem(musicKey,'off');gestureGeneration++;clearTimers();retryCount=0;
    try{audio.pause();audio.currentTime=0;}catch{}
    setStatus(false,'Đã ngưng nhạc nền.');
  }
