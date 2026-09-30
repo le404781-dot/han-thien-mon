@@ -2500,23 +2500,79 @@ async function addDailyActivity(userId, field, amount=1) {
 
 app.use(express.json({ limit: '2mb' }));
 
-// v3.7.73 · Audio streaming route with HTTP Range support.
+// v3.7.75 · Audio delivery rebuilt for iPhone/Safari/Android/desktop.
+// Serve the same audio through both /audio/* and /assets/audio/* so old/new
+// client code and direct browser playback use exactly the same server path.
 const AUDIO_FILES={
- 'tinh-ve-background.mp3':{file:'assets/audio/tinh-ve-background.mp3',type:'audio/mpeg'},
- 'tinh-ve-background.m4a':{file:'assets/audio/tinh-ve-background.m4a',type:'audio/mp4'},
- 'tinh-ve-background.ogg':{file:'assets/audio/tinh-ve-background.ogg',type:'audio/ogg'},
- 'tinh-ve-background.webm':{file:'assets/audio/tinh-ve-background.webm',type:'audio/webm'}
+  'tinh-ve-background.mp3':{file:'assets/audio/tinh-ve-background.mp3',type:'audio/mpeg'},
+  'tinh-ve-background.m4a':{file:'assets/audio/tinh-ve-background.m4a',type:'audio/mp4'},
+  'tinh-ve-background.ogg':{file:'assets/audio/tinh-ve-background.ogg',type:'audio/ogg'},
+  'tinh-ve-background.webm':{file:'assets/audio/tinh-ve-background.webm',type:'audio/webm'}
 };
-app.get('/audio/:name',(req,res)=>{
- const item=AUDIO_FILES[String(req.params.name||'')]; if(!item)return res.status(404).send('Audio not found');
- const filePath=path.join(__dirname,item.file); if(!fs.existsSync(filePath))return res.status(404).send('Audio not found');
- const stat=fs.statSync(filePath), total=stat.size, range=req.headers.range;
- res.setHeader('Content-Type',item.type);res.setHeader('Accept-Ranges','bytes');res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');res.setHeader('Pragma','no-cache');res.setHeader('Content-Disposition','inline');res.setHeader('X-Content-Type-Options','nosniff');
- if(!range){res.setHeader('Content-Length',total);return fs.createReadStream(filePath).pipe(res);}
- const m=/bytes=(\d*)-(\d*)/.exec(range); if(!m)return res.status(416).set('Content-Range',`bytes */${total}`).end();
- let start=m[1]?Number(m[1]):Math.max(total-(Number(m[2])||0),0), end=m[2]?Number(m[2]):total-1;
- if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<start||start>=total)return res.status(416).set('Content-Range',`bytes */${total}`).end();
- end=Math.min(end,total-1);const len=end-start+1;res.status(206);res.setHeader('Content-Length',len);res.setHeader('Content-Range',`bytes ${start}-${end}/${total}`);fs.createReadStream(filePath,{start,end}).pipe(res);
+function audioPath(name){
+  const item=AUDIO_FILES[String(name||'')];
+  if(!item)return null;
+  const filePath=path.resolve(__dirname,item.file);
+  const root=path.resolve(__dirname,'assets/audio');
+  if(!filePath.startsWith(root+path.sep))return null;
+  return {item,filePath};
+}
+function audioHeaders(res,item,stat){
+  res.setHeader('Content-Type',item.type);
+  res.setHeader('Accept-Ranges','bytes');
+  res.setHeader('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma','no-cache');
+  res.setHeader('Expires','0');
+  res.setHeader('Content-Disposition','inline');
+  res.setHeader('X-Content-Type-Options','nosniff');
+  res.setHeader('Last-Modified',stat.mtime.toUTCString());
+  res.setHeader('ETag',`W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+}
+function serveAudio(req,res){
+  const found=audioPath(req.params.name);
+  if(!found)return res.status(404).type('text/plain').send('Audio not found');
+  let stat;
+  try{stat=fs.statSync(found.filePath);}catch(e){
+    console.error('[audio] missing asset:',found.filePath,e&&e.message);
+    return res.status(503).type('text/plain').send('Audio asset unavailable');
+  }
+  if(!stat.isFile())return res.status(404).type('text/plain').send('Audio not found');
+  audioHeaders(res,found.item,stat);
+  const total=stat.size;
+  const range=req.headers.range;
+  if(req.method==='HEAD'){
+    res.setHeader('Content-Length',String(total));
+    return res.status(200).end();
+  }
+  if(!range){
+    res.setHeader('Content-Length',String(total));
+    return fs.createReadStream(found.filePath).on('error',()=>{if(!res.headersSent)res.status(500);res.end();}).pipe(res);
+  }
+  const m=/^bytes=(\d*)-(\d*)$/i.exec(String(range).trim());
+  if(!m)return res.status(416).set('Content-Range',`bytes */${total}`).end();
+  let start=m[1]!==''?Number(m[1]):NaN;
+  let end=m[2]!==''?Number(m[2]):NaN;
+  if(Number.isNaN(start)){const suffix=Number(m[2]);if(!Number.isFinite(suffix)||suffix<=0)return res.status(416).set('Content-Range',`bytes */${total}`).end();start=Math.max(total-suffix,0);end=total-1;}
+  else {if(!Number.isFinite(start)||start<0||start>=total)return res.status(416).set('Content-Range',`bytes */${total}`).end();if(Number.isNaN(end)||end>=total)end=total-1;}
+  if(end<start)return res.status(416).set('Content-Range',`bytes */${total}`).end();
+  const len=end-start+1;
+  res.status(206);
+  res.setHeader('Content-Length',String(len));
+  res.setHeader('Content-Range',`bytes ${start}-${end}/${total}`);
+  return fs.createReadStream(found.filePath,{start,end}).on('error',()=>{if(!res.headersSent)res.status(500);res.end();}).pipe(res);
+}
+app.get('/audio/:name',serveAudio);
+app.head('/audio/:name',serveAudio);
+app.get('/assets/audio/:name',serveAudio);
+app.head('/assets/audio/:name',serveAudio);
+app.get('/api/audio-health',(req,res)=>{
+  const audio=Object.entries(AUDIO_FILES).map(([name,item])=>{
+    const filePath=path.resolve(__dirname,item.file);
+    try{const st=fs.statSync(filePath);return {name,exists:st.isFile(),bytes:st.size,type:item.type,url:`/audio/${name}`};}
+    catch(e){return {name,exists:false,bytes:0,type:item.type,url:`/audio/${name}`,error:String(e&&e.message||e)};}
+  });
+  res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
+  res.json({ok:audio.every(x=>x.exists&&x.bytes>0),audio});
 });
 
 app.use(express.static(__dirname, {

@@ -1842,8 +1842,10 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  const disc=$('#audioDisc'), seek=$('#audioSeek'), current=$('#audioCurrentTime'), duration=$('#audioDuration');
  const volume=$('#audioVolume'), volumeValue=$('#audioVolumeValue'), status=$('#audioStatus'), msg=$('#audioMsg'), liveDot=$('#audioLiveDot');
  if(!audio||!playBtn||!stopBtn)return;
- const V='3.7.74', VOL_KEY='htm_music_volume_v373';
- const sources=['/audio/tinh-ve-background.mp3?v='+V,'/audio/tinh-ve-background.m4a?v='+V,'/audio/tinh-ve-background.ogg?v='+V,'/audio/tinh-ve-background.webm?v='+V];
+ const V='3.7.75', VOL_KEY='htm_music_volume_v375';
+ const base=['/audio/tinh-ve-background.mp3','/audio/tinh-ve-background.m4a','/audio/tinh-ve-background.ogg','/audio/tinh-ve-background.webm'];
+ const legacy=['/assets/audio/tinh-ve-background.mp3','/assets/audio/tinh-ve-background.m4a','/assets/audio/tinh-ve-background.ogg','/assets/audio/tinh-ve-background.webm'];
+ const sources=[...base,...legacy].map(x=>x+'?v='+V);
  let sourceIndex=0, playToken=0, started=false, switching=false;
  const fmt=t=>{t=Number(t)||0;const m=Math.floor(t/60),s=Math.floor(t%60);return `${m}:${String(s).padStart(2,'0')}`};
  const setStatus=playing=>{status.textContent=playing?'🟢 ĐANG PHÁT':'🔴 ĐANG NGƯNG';status.style.color=playing?'var(--jade)':'var(--red)';disc.classList.toggle('is-playing',playing);liveDot.classList.toggle('is-playing',playing);playBtn.disabled=playing;stopBtn.disabled=!playing;playBtn.textContent=playing?'🔊 Đang Phát':'🔊 Khởi Nhạc';};
@@ -1879,7 +1881,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
      // Sau khi chuyển nguồn, yêu cầu một lần chạm mới để tránh mất user activation.
      setStatus(false);return;
    }
-   setStatus(false);setMsg('Không mở được file nhạc trên máy chủ. Hãy tải lại trang rồi bấm Khởi Nhạc.');
+   setStatus(false);setMsg('Không mở được file nhạc trên máy chủ. Đang thử đường dẫn dự phòng…');
  }
  playBtn.addEventListener('click',()=>{if(audio.paused)tryPlayFromGesture();});
  stopBtn.addEventListener('click',()=>{++playToken;audio.pause();audio.removeAttribute('src');audio.load();started=false;sourceIndex=0;seek.value='0';current.textContent='0:00';duration.textContent='0:00';setStatus(false);setMsg('Nhạc đã ngưng. Bấm Khởi Nhạc để phát lại từ đầu.');});
@@ -1891,7 +1893,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  audio.addEventListener('loadedmetadata',()=>{if(Number.isFinite(audio.duration)&&audio.duration>0)duration.textContent=fmt(audio.duration);});
  audio.addEventListener('error',()=>{
    if(!started)return;
-   if(sourceIndex<sources.length-1 && !switching){switching=true;setSource(sourceIndex+1);switching=false;setStatus(false);setMsg('Nguồn nhạc không tải được, hãy bấm Khởi Nhạc để thử định dạng tiếp theo.');}
+   if(sourceIndex<sources.length-1 && !switching){switching=true;setSource(sourceIndex+1);switching=false;setStatus(false);setMsg('Đang thử đường dẫn/định dạng âm thanh dự phòng…');}
    else{setStatus(false);setMsg('Không tải được file nhạc. Kiểm tra kết nối hoặc Deploy lại phiên bản mới.');}
  });
  seek.addEventListener('input',()=>{if(Number.isFinite(audio.duration)&&audio.duration>0)audio.currentTime=(Number(seek.value)/100)*audio.duration;});
