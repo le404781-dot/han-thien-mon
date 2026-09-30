@@ -1,6 +1,7 @@
 const express = require('express');
 const compression = require('compression');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 
@@ -8,7 +9,17 @@ const app = express();
 // HTTP performance: nén Brotli/Gzip có chọn lọc cho payload đủ lớn.
 // Ngưỡng 1 KB tránh tốn CPU cho response nhỏ; compression tự đàm phán
 // Brotli/Gzip theo Accept-Encoding của trình duyệt.
-app.use(compression({ threshold: 1024, level: 6 }));
+app.use(compression({
+  threshold: 1024,
+  level: 6,
+  filter(req, res) {
+    // Never gzip/brotli already-compressed audio. Some iOS/WebKit builds have
+    // had media-pipeline problems when an audio response is transformed by an
+    // intermediary. MP3/M4A must travel as the original byte stream.
+    if (/\.(?:mp3|m4a|aac|wav|ogg|oga)$/i.test(req.path || '')) return false;
+    return compression.filter(req, res);
+  }
+}));
 // Render Web Service: always bind to the injected PORT on all interfaces.
 const PORT = Number(process.env.PORT) || 10000;
 const HOST = '0.0.0.0';
@@ -2498,12 +2509,37 @@ async function addDailyActivity(userId, field, amount=1) {
 }
 
 app.use(express.json({ limit: '2mb' }));
+
+// Audio delivery diagnostic: no database is touched. This lets the frontend
+// distinguish a missing/corrupt deployment asset from an iOS/WebKit playback
+// problem without downloading the full 5 MB track.
+app.get('/api/audio-health', (req, res) => {
+  try {
+    const files = ['assets/audio/tinh-ve-background.mp3', 'assets/audio/tinh-ve-background.m4a'];
+    const result = files.map(rel => {
+      const abs = path.join(__dirname, rel);
+      const st = fs.statSync(abs);
+      return { path: '/' + rel, bytes: st.size, modified: st.mtime.toISOString(), exists: true };
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, audio: result });
+  } catch (error) {
+    res.status(503).setHeader('Cache-Control', 'no-store').json({ ok: false, error: 'AUDIO_ASSET_UNAVAILABLE', message: String(error && error.message || error) });
+  }
+});
 app.use(express.static(__dirname, {
   maxAge: process.env.NODE_ENV === 'production' ? '30d' : 0,
   etag: true,
   lastModified: true,
   setHeaders(res, filePath) {
-    if (/\.html$/i.test(filePath)) {
+    if (/\.(?:mp3|m4a|aac|wav|ogg|oga)$/i.test(filePath)) {
+      // Audio must be a clean, range-capable byte stream. Do not cache a stale
+      // failed media response on iPhone and explicitly advertise byte ranges.
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+    } else if (/\.html$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache');
     } else if (/\.(?:js|css)$/i.test(filePath)) {
       // JS/CSS must always revalidate. Older deployments reused the same asset
