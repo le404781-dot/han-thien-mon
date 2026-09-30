@@ -1,10 +1,10 @@
 {
-  "id": "/?app=han-thien-mon-3-7-79",
+  "id": "/?app=han-thien-mon-3-7-81",
   "name": "Hàn Thiên Môn",
   "short_name": "Hàn Thiên Môn",
   "description": "Sơn môn tiên hiệp Hàn Thiên Môn",
   "lang": "vi",
-  "start_url": "/?app=han-thien-mon-3-7-79",
+  "start_url": "/?app=han-thien-mon-3-7-81",
   "scope": "/",
   "display": "standalone",
   "display_override": [

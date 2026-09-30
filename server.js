@@ -7393,7 +7393,7 @@ app.get('/api/beast-arena/spectate',auth,async(req,res)=>{try{await ensureBeastA
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIÊN MỆNH · Linh Bài nói thật / vọng ngữ · 2–4 người · NPC offline
-// v3.7.80
+// v3.7.82
 // ─────────────────────────────────────────────────────────────────────────────
 const TIEN_MENH_CARD_TYPES=[
   {key:'thien_kiem',name:'Thiên Kiếm',icon:'⚔️'},
@@ -7428,6 +7428,7 @@ async function ensureTienMenhSchemaImpl(){
       last_claim_type TEXT NOT NULL DEFAULT '',
       last_claim_count INTEGER NOT NULL DEFAULT 0,
       last_play JSONB NOT NULL DEFAULT '[]'::jsonb,
+      force_challenge BOOLEAN NOT NULL DEFAULT FALSE,
       round_number INTEGER NOT NULL DEFAULT 0,
       pot NUMERIC(14,0) NOT NULL DEFAULT 0,
       winner_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -7472,6 +7473,13 @@ async function ensureTienMenhSchemaImpl(){
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_tien_menh_history_game ON tien_menh_history(game_id,id);
+    ALTER TABLE tien_menh_games ADD COLUMN IF NOT EXISTS force_challenge BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE tien_menh_games ADD COLUMN IF NOT EXISTS turn_player_id BIGINT REFERENCES tien_menh_players(id) ON DELETE SET NULL;
+    ALTER TABLE tien_menh_games ADD COLUMN IF NOT EXISTS last_actor_player_id BIGINT REFERENCES tien_menh_players(id) ON DELETE SET NULL;
+    ALTER TABLE tien_menh_players ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ;
+    CREATE INDEX IF NOT EXISTS idx_tien_menh_games_active_watch ON tien_menh_games(status,mode,id DESC);
+    UPDATE tien_menh_games g SET turn_player_id=p.id FROM tien_menh_players p WHERE g.turn_player_id IS NULL AND g.status='active' AND p.game_id=g.id AND ((g.turn_user_id IS NOT NULL AND p.user_id=g.turn_user_id) OR (g.turn_user_id IS NULL AND p.alive=true AND p.seat=(SELECT MIN(p2.seat) FROM tien_menh_players p2 WHERE p2.game_id=g.id AND p2.alive=true)));
+    UPDATE tien_menh_games g SET last_actor_player_id=p.id FROM tien_menh_players p WHERE g.last_actor_player_id IS NULL AND g.last_actor_id IS NOT NULL AND p.game_id=g.id AND p.user_id=g.last_actor_id;
   `);
 }
 function tienMenhCardInfo(key){return TIEN_MENH_CARD_TYPES.find(x=>x.key===String(key))||TIEN_MENH_CARD_TYPES[0];}
@@ -7495,9 +7503,9 @@ async function tienMenhFinish(client,gameId,winnerId){
   if(!winner)return null;
   const master=(await client.query(`SELECT user_id FROM tien_menh_master WHERE singleton_id=1`)).rows[0]?.user_id||null;
   const totalPot=Number(game.pot||0);
-  const otherStakes=players.reduce((n,p)=>n+(Number(p.stake)||0)*(master&&Number(p.user_id)!==Number(master)?1:0),0);
+  const otherStakes=players.reduce((n,p)=>n+(Number(p.stake)||0)*(master&&!p.is_npc&&Number(p.user_id)!==Number(master)?1:0),0);
   const commission=Math.min(totalPot,Math.floor(otherStakes*0.15));
-  const payout=Math.max(0,totalPot-commission);
+  const payout=Math.max(0,totalPot);
   let spiritBonus=0;
   if(winner.user_id && Number(winner.user_id)>0){
     const prof=(await client.query(`SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[winner.user_id])).rows[0];
@@ -7516,51 +7524,54 @@ async function tienMenhFinish(client,gameId,winnerId){
   return {winnerId:winner.user_id?Number(winner.user_id):null,payout,spiritBonus,commission,winnerName:winner.display_name};
 }
 async function tienMenhAdvanceNpc(client,gameId){
-  for(let guard=0;guard<20;guard++){
+  for(let guard=0;guard<32;guard++){
     const game=(await client.query(`SELECT * FROM tien_menh_games WHERE id=$1 FOR UPDATE`,[gameId])).rows[0];
-    if(!game||game.status!=='active')return;
+    if(!game||game.status!=='active'||game.turn_player_id==null)return;
     const players=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat FOR UPDATE`,[gameId])).rows;
-    const current=players.find(p=>Number(p.user_id)===Number(game.turn_user_id));
-    if(!current||!current.is_npc||!current.alive)return;
+    const current=players.find(p=>p.alive&&Number(p.id)===Number(game.turn_player_id));
+    if(!current||!current.is_npc)return;
     let hand=(await client.query(`SELECT id,card_type FROM tien_menh_cards WHERE player_id=$1 AND location='hand' ORDER BY id`,[current.id])).rows;
-    if(hand.length<3){await tienMenhDeal(client,gameId,current.id,5);hand=(await client.query(`SELECT id,card_type FROM tien_menh_cards WHERE player_id=$1 AND location='hand' ORDER BY id`,[current.id])).rows;}
+    if(hand.length===0){
+      const next=tienMenhNextAlive(players,current.seat);
+      if(next) await client.query(`UPDATE tien_menh_games SET turn_player_id=$2,turn_user_id=$3 WHERE id=$1`,[gameId,next.id,next.user_id||null]);
+      continue;
+    }
     const count=Math.min(hand.length,1+Math.floor(Math.random()*Math.min(3,hand.length)));
-    const selected=hand.slice(0,count);
-    const claim=Math.random()<0.65?selected[Math.floor(Math.random()*selected.length)].card_type:tienMenhRandomCard();
+    const selected=hand.slice(0,count),claim=Math.random()<0.68?selected[Math.floor(Math.random()*selected.length)].card_type:tienMenhRandomCard();
     const ids=selected.map(x=>Number(x.id));
     await client.query(`UPDATE tien_menh_cards SET location='table' WHERE id=ANY($1::bigint[]) AND player_id=$2`,[ids,current.id]);
-    await client.query(`UPDATE tien_menh_games SET last_actor_id=$2,last_claim_type=$3,last_claim_count=$4,last_play=$5::jsonb,round_number=round_number+1 WHERE id=$1`,[gameId,current.user_id||null,claim,count,JSON.stringify(ids)]);
-    await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'play',$2,$3,$4::jsonb)`,[gameId,current.user_id||null,`${current.display_name} đặt ${count} Linh Bài và tuyên bố: “${count} lá này đều là ${tienMenhCardInfo(claim).name}.”`,JSON.stringify({count,claim})]);
-    // NPC có xác suất bắt vọng người chơi/đối thủ đang đặt bài. Nếu không bắt, chuyển lượt.
-    const target=current;
-    const aliveOthers=players.filter(p=>p.alive&&Number(p.id)!==Number(current.id));
-    const challenger=aliveOthers.find(p=>!p.is_npc) || aliveOthers[0];
-    if(challenger && Math.random()<0.28){
-      const truth=tienMenhClaimTruth(selected,claim);
-      const punished=truth?challenger:current;
-      punished.life=Math.max(0,Number(punished.life)-1);
-      await client.query(`UPDATE tien_menh_players SET life=$2,alive=$3 WHERE id=$1`,[punished.id,punished.life,punished.life>0]);
-      await client.query(`UPDATE tien_menh_cards SET location='discard' WHERE id=ANY($1::bigint[])`,[ids]);
-      await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'challenge',$2,$3,$4::jsonb)`,[gameId,challenger.user_id||null,truth?`🔍 ${challenger.display_name} Bắt Vọng thất bại · Thiên Phạt -1 Sinh Mệnh.`:`🔍 ${challenger.display_name} Bắt Vọng chính xác · ${current.display_name} chịu Nghiệp Hỏa -1 Sinh Mệnh.`,JSON.stringify({truth,challengerId:challenger.user_id,punishedId:punished.user_id})]);
-      const alive=players.filter(p=>p.alive&&Number(p.id)!==Number(punished.id));
-      if(Number(punished.life)<=0){
-        const winner=alive.length===1?alive[0]:null;
-        if(winner){await tienMenhFinish(client,gameId,winner.user_id);return;}
-      }
-    }else{
-      await client.query(`UPDATE tien_menh_cards SET location='discard' WHERE id=ANY($1::bigint[])`,[ids]);
-    }
-    const fresh=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat`,[gameId])).rows;
-    const next=tienMenhNextAlive(fresh, current.seat);
-    if(!next){return;}
-    await client.query(`UPDATE tien_menh_games SET turn_user_id=$2,last_actor_id=NULL,last_claim_type='',last_claim_count=0,last_play='[]'::jsonb WHERE id=$1`,[gameId,next.user_id||null]);
+    const remaining=Number((await client.query(`SELECT COUNT(*)::int c FROM tien_menh_cards WHERE player_id=$1 AND location='hand'`,[current.id])).rows[0].c||0);
+    const force=remaining===0;
+    await client.query(`UPDATE tien_menh_games SET last_actor_player_id=$2,last_actor_id=NULL,last_claim_type=$3,last_claim_count=$4,last_play=$5::jsonb,force_challenge=$6,round_number=round_number+1 WHERE id=$1`,[gameId,current.id,claim,count,JSON.stringify(ids),force]);
+    await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'play',NULL,$2,$3::jsonb)`,[gameId,`${current.display_name} đặt ${count} Linh Bài và tuyên bố: “${count} lá này đều là ${tienMenhCardInfo(claim).name}.”`,JSON.stringify({claim,count,npc:true,remaining,forceChallenge:force,actorPlayerId:current.id})]);
+    const after=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat FOR UPDATE`,[gameId])).rows;
+    const next=tienMenhNextAlive(after,current.seat);
+    if(!next)return;
+    await client.query(`UPDATE tien_menh_games SET turn_player_id=$2,turn_user_id=$3 WHERE id=$1`,[gameId,next.id,next.user_id||null]);
     if(!next.is_npc)return;
+    if(force){
+      // NPC must challenge the previous actor when it is the next player and the last card was played.
+      const target=(await client.query(`SELECT id,life,alive,user_id,display_name FROM tien_menh_players WHERE id=$1 FOR UPDATE`,[current.id])).rows[0];
+      const tableCards=(await client.query(`SELECT id,card_type FROM tien_menh_cards WHERE id=ANY($1::bigint[]) AND location='table'`,[ids])).rows;
+      const truth=tableCards.length===count&&tienMenhClaimTruth(tableCards,claim);
+      const punished=truth?next:target;
+      const newLife=Math.max(0,Number(punished.life)-1);
+      await client.query(`UPDATE tien_menh_players SET life=$2,alive=$3 WHERE id=$1`,[punished.id,newLife,newLife>0]);
+      await client.query(`UPDATE tien_menh_cards SET location='discard' WHERE id=ANY($1::bigint[])`,[ids]);
+      await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'challenge',NULL,$2,$3::jsonb)`,[gameId,truth?`⚡ ${next.display_name} Bắt Vọng sai · Thiên Phạt -1 Sinh Mệnh.`:`🔥 ${next.display_name} Bắt Vọng chính xác · ${target.display_name} chịu Nghiệp Hỏa -1 Sinh Mệnh.`,JSON.stringify({truth,npc:true,challengerPlayerId:next.id,punishedPlayerId:punished.id,forceChallenge:true})]);
+      const alive=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND alive=true ORDER BY seat FOR UPDATE`,[gameId])).rows;
+      if(alive.length<=1){await tienMenhFinish(client,gameId,alive[0]?.user_id||null);return;}
+      const following=tienMenhNextAlive(alive,current.seat);
+      if(following) await client.query(`UPDATE tien_menh_games SET turn_player_id=$2,turn_user_id=$3,last_actor_id=NULL,last_actor_player_id=NULL,last_claim_type='',last_claim_count=0,last_play='[]'::jsonb,force_challenge=false WHERE id=$1`,[gameId,following.id,following.user_id||null]);
+    }
   }
 }
 
 function tienMenhPublicGame(game,players,viewerId,cards){
-  const own=players.find(p=>Number(p.user_id)===Number(viewerId)&&!p.is_npc);
-  return {id:Number(game.id),mode:game.mode,status:game.status,maxPlayers:Number(game.max_players),turnUserId:game.turn_user_id==null?null:Number(game.turn_user_id),lastActorId:game.last_actor_id==null?null:Number(game.last_actor_id),lastClaimType:game.last_claim_type,lastClaimCount:Number(game.last_claim_count)||0,round:Number(game.round_number)||0,pot:Number(game.pot)||0,winnerId:game.winner_id==null?null:Number(game.winner_id),masterCommission:Number(game.master_commission)||0,createdAt:game.created_at,startedAt:game.started_at,finishedAt:game.finished_at,players:players.map(p=>({id:Number(p.id),userId:p.user_id==null?null:Number(p.user_id),name:p.display_name,seat:Number(p.seat),stake:Number(p.stake),life:Number(p.life),alive:Boolean(p.alive),npc:Boolean(p.is_npc)})),lastPlay:game.last_play||[],ownHand:(cards||[]).map(c=>({id:Number(c.id),type:c.card_type,...tienMenhCardInfo(c.card_type)})),master:game._master||null};
+  const own=players.find(p=>p.user_id!=null&&Number(p.user_id)===Number(viewerId)&&!p.is_npc);
+  const turnPlayerId=game.turn_player_id==null?null:Number(game.turn_player_id);
+  const lastActorPlayerId=game.last_actor_player_id==null?null:Number(game.last_actor_player_id);
+  return {id:Number(game.id),mode:game.mode,status:game.status,maxPlayers:Number(game.max_players),turnUserId:game.turn_user_id==null?null:Number(game.turn_user_id),turnPlayerId,lastActorId:game.last_actor_id==null?null:Number(game.last_actor_id),lastActorPlayerId,lastClaimType:game.last_claim_type,lastClaimCount:Number(game.last_claim_count)||0,forceChallenge:Boolean(game.force_challenge),round:Number(game.round_number)||0,pot:Number(game.pot)||0,winnerId:game.winner_id==null?null:Number(game.winner_id),masterCommission:Number(game.master_commission)||0,createdAt:game.created_at,startedAt:game.started_at,finishedAt:game.finished_at,players:players.map(p=>({id:Number(p.id),userId:p.user_id==null?null:Number(p.user_id),name:p.display_name,seat:Number(p.seat),stake:Number(p.stake),life:Number(p.life),alive:Boolean(p.alive),npc:Boolean(p.is_npc),avatar:p.avatar||'🧑🏻‍🎓',leftAt:p.left_at||null})),lastPlay:game.last_play||[],ownHand:(cards||[]).map(c=>({id:Number(c.id),type:c.card_type,...tienMenhCardInfo(c.card_type)})),master:game._master||null};
 }
 
 app.get('/api/tien-menh/state',auth,async(req,res)=>{
@@ -7569,18 +7580,37 @@ app.get('/api/tien-menh/state',auth,async(req,res)=>{
     const uid=req.session.user_id;
     const master=(await query(`SELECT tm.user_id,u.display_name,u.username FROM tien_menh_master tm JOIN users u ON u.id=tm.user_id WHERE tm.singleton_id=1`,[])).rows[0]||null;
     const open=(await query(`SELECT g.*,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id)::int AS player_count FROM tien_menh_games g WHERE g.mode='online' AND g.status='lobby' ORDER BY g.id DESC LIMIT 20`,[])).rows;
+    const live=(await query(`SELECT g.*,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id AND p.alive=true)::int AS alive_count,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id)::int AS player_count FROM tien_menh_games g WHERE g.mode='online' AND g.status='active' ORDER BY g.started_at DESC NULLS LAST,g.id DESC LIMIT 30`,[])).rows;
     const mine=(await query(`SELECT * FROM tien_menh_games WHERE id IN (SELECT game_id FROM tien_menh_players WHERE user_id=$1) AND status IN ('lobby','active') ORDER BY id DESC LIMIT 1`,[uid])).rows[0]||null;
     let game=mine,players=[],cards=[];
     if(game){
-      players=(await query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat`,[game.id])).rows;
+      players=(await query(`SELECT p.*,COALESCE(pr.avatar,'🧑🏻‍🎓') AS avatar FROM tien_menh_players p LEFT JOIN profiles pr ON pr.user_id=p.user_id WHERE p.game_id=$1 ORDER BY p.seat`,[game.id])).rows;
       const me=players.find(p=>Number(p.user_id)===Number(uid));
       if(me)cards=(await query(`SELECT id,card_type FROM tien_menh_cards WHERE player_id=$1 AND location='hand' ORDER BY id`,[me.id])).rows;
     }
     const history=game?(await query(`SELECT id,event_type,actor_id,message,payload,created_at FROM tien_menh_history WHERE game_id=$1 ORDER BY id DESC LIMIT 30`,[game.id])).rows:[];
     const members=master&&Number(master.user_id)===Number(uid)?(await query(`SELECT u.id,u.display_name,u.username FROM users u WHERE u.id<>$1 ORDER BY u.display_name LIMIT 200`,[uid])).rows:[];
     res.set('Cache-Control','no-store');
-    res.json({ok:true,master,canApply:!master,members,openGames:open.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),stakeHint:null,createdAt:g.created_at})),game:game?tienMenhPublicGame(game,players,uid,cards):null,history});
+    res.json({ok:true,master,canApply:!master,members,openGames:open.map(g=>({id:Number(g.id),creatorId:Number(g.creator_id),maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),stakeHint:null,createdAt:g.created_at})),liveGames:live.map(g=>({id:Number(g.id),maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),aliveCount:Number(g.alive_count),pot:Number(g.pot)||0,startedAt:g.started_at,round:Number(g.round_number)||0})),game:game?tienMenhPublicGame(game,players,uid,cards):null,history});
   }catch(e){console.error('tien menh state:',e);res.status(500).json({error:'Không thể mở Tiên Mệnh.'});}
+});
+
+app.get('/api/tien-menh/watch',auth,async(req,res)=>{
+  try{
+    await ensureTienMenhSchema();
+    const rows=(await query(`SELECT g.*,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id)::int AS player_count,(SELECT COUNT(*) FROM tien_menh_players p WHERE p.game_id=g.id AND p.alive=true)::int AS alive_count FROM tien_menh_games g WHERE g.mode='online' AND g.status='active' ORDER BY g.started_at DESC NULLS LAST,g.id DESC LIMIT 30`,[])).rows;
+    res.set('Cache-Control','no-store');res.json({ok:true,games:rows.map(g=>({id:Number(g.id),maxPlayers:Number(g.max_players),playerCount:Number(g.player_count),aliveCount:Number(g.alive_count),pot:Number(g.pot)||0,round:Number(g.round_number)||0,turnPlayerId:g.turn_player_id==null?null:Number(g.turn_player_id),startedAt:g.started_at}))});
+  }catch(e){res.status(500).json({error:'Không thể tải các bàn Tiên Mệnh đang diễn ra.'});}
+});
+app.get('/api/tien-menh/watch/:id',auth,async(req,res)=>{
+  try{
+    await ensureTienMenhSchema();const id=Number(req.params.id);if(!Number.isInteger(id))return res.status(400).json({error:'Bàn không hợp lệ.'});
+    const game=(await query(`SELECT * FROM tien_menh_games WHERE id=$1 AND mode='online' AND status='active'`,[id])).rows[0];if(!game)return res.status(404).json({error:'Bàn không còn diễn ra.'});
+    const players=(await query(`SELECT p.*,COALESCE(pr.avatar,'🧑🏻‍🎓') AS avatar FROM tien_menh_players p LEFT JOIN profiles pr ON pr.user_id=p.user_id WHERE p.game_id=$1 ORDER BY p.seat`,[id])).rows;
+    const history=(await query(`SELECT id,event_type,actor_id,message,payload,created_at FROM tien_menh_history WHERE game_id=$1 ORDER BY id DESC LIMIT 50`,[id])).rows;
+    const master=(await query(`SELECT tm.user_id,u.display_name FROM tien_menh_master tm JOIN users u ON u.id=tm.user_id WHERE tm.singleton_id=1`,[])).rows[0]||null;
+    res.set('Cache-Control','no-store');res.json({ok:true,game:tienMenhPublicGame({...game,_master:master},players,req.session.user_id,[]),history});
+  }catch(e){res.status(500).json({error:'Không thể xem bàn Tiên Mệnh.'});}
 });
 
 app.post('/api/tien-menh/master/apply',auth,async(req,res)=>{
@@ -7629,7 +7659,7 @@ async function tienMenhCreate(req,res,offline=false){
       for(let i=1;i<actualMax;i++){const npcStake=stake;const npcName=['Huyền Cơ','Mặc Vũ','Tử Yên'][i-1]||`NPC ${i}`;await client.query(`INSERT INTO tien_menh_players(game_id,user_id,display_name,seat,stake,is_npc) VALUES($1,NULL,$2,$3,$4,true)`,[g.id,npcName,i+1,npcStake]);await client.query(`UPDATE tien_menh_games SET pot=pot+$2 WHERE id=$1`,[g.id,npcStake]);}
       await tienMenhDeal(client,g.id,ins.id,8);
       const npcs=(await client.query(`SELECT id FROM tien_menh_players WHERE game_id=$1 AND is_npc=true`,[g.id])).rows;for(const n of npcs)await tienMenhDeal(client,g.id,n.id,8);
-      const first=(await client.query(`SELECT user_id FROM tien_menh_players WHERE game_id=$1 AND alive=true ORDER BY seat LIMIT 1`,[g.id])).rows[0];await client.query(`UPDATE tien_menh_games SET turn_user_id=$2,pot=$3 WHERE id=$1`,[g.id,first?.user_id||uid,stake*actualMax]);
+      const first=(await client.query(`SELECT id,user_id FROM tien_menh_players WHERE game_id=$1 AND alive=true ORDER BY seat LIMIT 1`,[g.id])).rows[0];await client.query(`UPDATE tien_menh_games SET turn_player_id=$2,turn_user_id=$3,pot=$4 WHERE id=$1`,[g.id,first?.id||ins.id,first?.user_id||uid,stake*actualMax]);
     }
     await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'create',$2,$3,'{}'::jsonb)`,[g.id,uid,offline?'🏮 Ván Tiên Mệnh offline đã khai mở. NPC đặt mức linh thạch ngang bằng người chơi.':'🏮 Bàn Tiên Mệnh đã được mở.']);
     await client.query('COMMIT');res.json({ok:true,gameId:Number(g.id),message:offline?'Đã mở ván offline với NPC.':'Đã tạo bàn Tiên Mệnh.'});
@@ -7663,7 +7693,7 @@ app.post('/api/tien-menh/start',auth,async(req,res)=>{
     if(Number(g.creator_id)!==Number(req.session.user_id)){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ người mở bàn được bắt đầu.'});}
     const players=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat FOR UPDATE`,[gameId])).rows;if(players.length<2){await client.query('ROLLBACK');return res.status(400).json({error:'Cần ít nhất 2 môn nhân.'});}
     for(const p of players)await tienMenhDeal(client,gameId,p.id,8);
-    const first=players[0];await client.query(`UPDATE tien_menh_games SET status='active',started_at=NOW(),turn_user_id=$2 WHERE id=$1`,[gameId,first.user_id]);
+    const first=players[0];await client.query(`UPDATE tien_menh_games SET status='active',started_at=NOW(),turn_player_id=$2,turn_user_id=$3 WHERE id=$1`,[gameId,first.id,first.user_id]);
     await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'start',$2,'🏮 Ván Tiên Mệnh bắt đầu.','{}'::jsonb)`,[gameId,req.session.user_id]);
     await client.query('COMMIT');res.json({ok:true,message:'Ván Tiên Mệnh đã bắt đầu.'});
   }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể bắt đầu ván.'});}finally{client.release();}
@@ -7672,23 +7702,61 @@ app.post('/api/tien-menh/start',auth,async(req,res)=>{
 app.post('/api/tien-menh/play',auth,async(req,res)=>{
   const client=await dbConnect();
   try{
-    const gameId=Number(req.body?.gameId),claim=String(req.body?.claimType||''),cardIds=Array.isArray(req.body?.cardIds)?req.body.cardIds.map(Number).filter(Number.isInteger):[];
-    if(!Number.isInteger(gameId)||!TIEN_MENH_CARD_TYPES.some(x=>x.key===claim)||cardIds.length<1||cardIds.length>3)return res.status(400).json({error:'Chọn từ 1 đến 3 Linh Bài và một lời công bố hợp lệ.'});
-    const clientGame=client;await clientGame.query('BEGIN');
-    const g=(await clientGame.query(`SELECT * FROM tien_menh_games WHERE id=$1 AND status='active' FOR UPDATE`,[gameId])).rows[0];if(!g){await clientGame.query('ROLLBACK');return res.status(404).json({error:'Ván không còn hoạt động.'});}
-    if(Number(g.turn_user_id)!==Number(req.session.user_id)){await clientGame.query('ROLLBACK');return res.status(409).json({error:'Chưa tới lượt bạn.'});}
-    if(g.last_actor_id){ await clientGame.query(`UPDATE tien_menh_cards SET location='discard' WHERE game_id=$1 AND location='table'`,[gameId]); }
-    const me=(await clientGame.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND user_id=$2 FOR UPDATE`,[gameId,req.session.user_id])).rows[0];if(!me||!me.alive){await clientGame.query('ROLLBACK');return res.status(403).json({error:'Bạn đã bị loại.'});}
-    const cards=(await clientGame.query(`SELECT id,card_type FROM tien_menh_cards WHERE player_id=$1 AND location='hand' AND id=ANY($2::bigint[]) FOR UPDATE`,[me.id,cardIds])).rows;if(cards.length!==cardIds.length){await clientGame.query('ROLLBACK');return res.status(400).json({error:'Linh Bài không còn trong tay bạn.'});}
-    await clientGame.query(`UPDATE tien_menh_cards SET location='table' WHERE id=ANY($1::bigint[])`,[cardIds]);
-    await clientGame.query(`UPDATE tien_menh_games SET last_actor_id=$2,last_claim_type=$3,last_claim_count=$4,last_play=$5::jsonb,round_number=round_number+1 WHERE id=$1`,[gameId,req.session.user_id,claim,cardIds.length,JSON.stringify(cardIds)]);
-    await clientGame.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'play',$2,$3,$4::jsonb)`,[gameId,req.session.user_id,`${me.display_name} tuyên bố: “${cardIds.length} lá này đều là ${tienMenhCardInfo(claim).name}.”`,JSON.stringify({claim,count:cardIds.length})]);
-    const playersAfter=(await clientGame.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat FOR UPDATE`,[gameId])).rows;
+    const gameId=Number(req.body?.gameId),claim=String(req.body?.claimType||''),cardIds=[...new Set((Array.isArray(req.body?.cardIds)?req.body.cardIds:[]).map(Number).filter(Number.isInteger))];
+    if(!Number.isInteger(gameId)||!TIEN_MENH_CARD_TYPES.some(x=>x.key===claim)||cardIds.length<1||cardIds.length>3){return res.status(400).json({error:'Chọn từ 1 đến 3 Linh Bài và một lời công bố hợp lệ.'});}
+    await client.query('BEGIN');
+    const g=(await client.query(`SELECT * FROM tien_menh_games WHERE id=$1 AND status='active' FOR UPDATE`,[gameId])).rows[0];
+    if(!g){await client.query('ROLLBACK');return res.status(404).json({error:'Ván không còn hoạt động.'});}
+    if(g.last_actor_player_id){await client.query('ROLLBACK');return res.status(409).json({error:'Phải Bắt Vọng hoặc xử lý lượt trước trước khi đánh tiếp.'});}
+    const me=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND user_id=$2 FOR UPDATE`,[gameId,req.session.user_id])).rows[0];
+    if(!me||Number(g.turn_player_id||0)!==Number(me.id)){await client.query('ROLLBACK');return res.status(409).json({error:'Chưa tới lượt bạn.'});}
+    if(!me||!me.alive){await client.query('ROLLBACK');return res.status(403).json({error:'Bạn đã bị loại hoặc đã rời bàn.'});}
+    const cards=(await client.query(`SELECT id,card_type FROM tien_menh_cards WHERE player_id=$1 AND location='hand' AND id=ANY($2::bigint[]) FOR UPDATE`,[me.id,cardIds])).rows;
+    if(cards.length!==cardIds.length){await client.query('ROLLBACK');return res.status(400).json({error:'Linh Bài không còn trong tay bạn.'});}
+    await client.query(`UPDATE tien_menh_cards SET location='table' WHERE id=ANY($1::bigint[])`,[cardIds]);
+    const remaining=Number((await client.query(`SELECT COUNT(*)::int AS c FROM tien_menh_cards WHERE player_id=$1 AND location='hand'`,[me.id])).rows[0].c||0);
+    const force=remaining===0;
+    await client.query(`UPDATE tien_menh_games SET last_actor_id=$2,last_actor_player_id=$3,last_claim_type=$4,last_claim_count=$5,last_play=$6::jsonb,force_challenge=$7,round_number=round_number+1 WHERE id=$1`,[gameId,req.session.user_id,me.id,claim,cardIds.length,JSON.stringify(cardIds),force]);
+    await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'play',$2,$3,$4::jsonb)`,[gameId,req.session.user_id,`${me.display_name} đặt ${cardIds.length} Linh Bài và tuyên bố: “${cardIds.length} lá này đều là ${tienMenhCardInfo(claim).name}.”`,JSON.stringify({claim,count:cardIds.length,remaining,forceChallenge:force})]);
+    const playersAfter=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat FOR UPDATE`,[gameId])).rows;
     const nextAfter=tienMenhNextAlive(playersAfter,me.seat);
-    await clientGame.query(`UPDATE tien_menh_games SET turn_user_id=$2 WHERE id=$1`,[gameId,nextAfter?.user_id||null]);
-    await tienMenhAdvanceNpc(clientGame,gameId);
-    await clientGame.query('COMMIT');res.json({ok:true,message:'Đã đặt Linh Bài. Môn nhân kế tiếp có thể Bắt Vọng hoặc tiếp tục đặt bài.',claim,count:cardIds.length});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Đặt Linh Bài thất bại.'});}finally{client.release();}
+    if(!nextAfter){await client.query('ROLLBACK');return res.status(409).json({error:'Không xác định được lượt kế tiếp.'});}
+    await client.query(`UPDATE tien_menh_games SET turn_player_id=$2,turn_user_id=$3 WHERE id=$1`,[gameId,nextAfter.id,nextAfter.user_id]);
+    await tienMenhAdvanceNpc(client,gameId);
+    await client.query('COMMIT');
+    res.json({ok:true,message:force?'Bạn đã đặt lá cuối. Môn nhân kế tiếp BẮT BUỘC phải Bắt Vọng.':'Đã đặt Linh Bài. Môn nhân kế tiếp có quyền Bắt Vọng hoặc Đánh Bài Tiếp.',claim,count:cardIds.length,forceChallenge:force});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien menh play:',e);res.status(500).json({error:'Đặt Linh Bài thất bại.'});}finally{client.release();}
+});
+
+app.post('/api/tien-menh/leave',auth,async(req,res)=>{
+  const client=await dbConnect();
+  try{
+    const gameId=Number(req.body?.gameId); if(!Number.isInteger(gameId)) return res.status(400).json({error:'Bàn không hợp lệ.'});
+    await client.query('BEGIN');
+    const g=(await client.query(`SELECT * FROM tien_menh_games WHERE id=$1 AND status IN ('lobby','active') FOR UPDATE`,[gameId])).rows[0];
+    if(!g){await client.query('ROLLBACK');return res.status(404).json({error:'Bàn không còn hoạt động.'});}
+    const me=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND user_id=$2 FOR UPDATE`,[gameId,req.session.user_id])).rows[0];
+    if(!me){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không ở bàn này.'});}
+    if(g.status==='lobby'){
+      await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,Number(me.stake)]);
+      await client.query(`DELETE FROM tien_menh_players WHERE id=$1`,[me.id]);
+      await client.query(`UPDATE tien_menh_games SET pot=GREATEST(0,pot-$2) WHERE id=$1`,[gameId,Number(me.stake)]);
+      const remain=Number((await client.query(`SELECT COUNT(*)::int c FROM tien_menh_players WHERE game_id=$1`,[gameId])).rows[0].c);
+      if(remain===0) await client.query(`UPDATE tien_menh_games SET status='cancelled' WHERE id=$1`,[gameId]);
+    }else{
+      const wasLastActor=Number(g.last_actor_player_id||0)===Number(me.id);
+      await client.query(`UPDATE tien_menh_players SET alive=false,life=0,left_at=NOW() WHERE id=$1`,[me.id]);
+      if(wasLastActor) await client.query(`UPDATE tien_menh_cards SET location='discard' WHERE game_id=$1 AND location='table'`,[gameId]);
+      const alive=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND alive=true ORDER BY seat FOR UPDATE`,[gameId])).rows;
+      await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'leave',$2,$3,'{}'::jsonb)`,[gameId,req.session.user_id,`${me.display_name} đã rời bàn Tiên Mệnh.`]);
+      if(alive.length<=1){await tienMenhFinish(client,gameId,alive[0]?.user_id||null);} else {
+        const next=tienMenhNextAlive(alive,me.seat);
+        await client.query(`UPDATE tien_menh_games SET turn_player_id=$2,turn_user_id=$3,last_actor_id=NULL,last_actor_player_id=NULL,last_claim_type='',last_claim_count=0,last_play='[]'::jsonb,force_challenge=false WHERE id=$1`,[gameId,next?.id||null,next?.user_id||null]);
+        await tienMenhAdvanceNpc(client,gameId);
+      }
+    }
+    await client.query('COMMIT');res.json({ok:true,message:'Đã rời bàn Tiên Mệnh.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien menh leave:',e);res.status(500).json({error:'Không thể rời bàn.'});}finally{client.release();}
 });
 
 app.post('/api/tien-menh/challenge',auth,async(req,res)=>{
@@ -7696,24 +7764,24 @@ app.post('/api/tien-menh/challenge',auth,async(req,res)=>{
   try{
     const gameId=Number(req.body?.gameId);await client.query('BEGIN');
     const g=(await client.query(`SELECT * FROM tien_menh_games WHERE id=$1 AND status='active' FOR UPDATE`,[gameId])).rows[0];if(!g){await client.query('ROLLBACK');return res.status(404).json({error:'Ván không còn hoạt động.'});}
-    if(!g.last_actor_id||Number(g.last_actor_id)===Number(req.session.user_id)){await client.query('ROLLBACK');return res.status(400).json({error:'Không thể Bắt Vọng chính mình hoặc chưa có lời công bố.'});}
-    const challenger=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND user_id=$2 FOR UPDATE`,[gameId,req.session.user_id])).rows[0];const actor=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND user_id=$2 FOR UPDATE`,[gameId,g.last_actor_id])).rows[0];
+    if(!g.last_actor_player_id){await client.query('ROLLBACK');return res.status(400).json({error:'Chưa có lượt đặt bài để Bắt Vọng.'});}
+    const challenger=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 AND user_id=$2 FOR UPDATE`,[gameId,req.session.user_id])).rows[0];
+    if(!challenger||Number(g.turn_player_id||0)!==Number(challenger.id)){await client.query('ROLLBACK');return res.status(409).json({error:'Chỉ Môn Nhân ở lượt kế tiếp mới được Bắt Vọng.'});}
+    if(Number(g.last_actor_player_id)===Number(challenger.id)){await client.query('ROLLBACK');return res.status(400).json({error:'Không thể Bắt Vọng chính mình.'});}
+    const actor=(await client.query(`SELECT * FROM tien_menh_players WHERE id=$2 AND game_id=$1 FOR UPDATE`,[gameId,g.last_actor_player_id])).rows[0];
     if(!challenger?.alive||!actor?.alive){await client.query('ROLLBACK');return res.status(400).json({error:'Môn nhân đã bị loại.'});}
     const ids=Array.isArray(g.last_play)?g.last_play:[];const played=(await client.query(`SELECT id,card_type FROM tien_menh_cards WHERE id=ANY($1::bigint[]) AND location='table'`,[ids])).rows;
     const truth=played.length===Number(g.last_claim_count)&&tienMenhClaimTruth(played,g.last_claim_type);
-    const punished=truth?challenger:actor;
-    const newLife=Math.max(0,Number(punished.life)-1);
+    const punished=truth?challenger:actor;const newLife=Math.max(0,Number(punished.life)-1);
     await client.query(`UPDATE tien_menh_players SET life=$2,alive=$3 WHERE id=$1`,[punished.id,newLife,newLife>0]);
     await client.query(`UPDATE tien_menh_cards SET location='discard' WHERE id=ANY($1::bigint[])`,[ids]);
-    const msg=truth?`❤️ ${challenger.display_name} Bắt Vọng sai · Thiên Phạt -1 Sinh Mệnh.`:`🔥 ${challenger.display_name} Bắt Vọng chính xác · ${actor.display_name} chịu Nghiệp Hỏa -1 Sinh Mệnh.`;
-    await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'challenge',$2,$3,$4::jsonb)`,[gameId,req.session.user_id,msg,JSON.stringify({truth,claim:g.last_claim_type,played:played.map(x=>x.card_type),punishedId:punished.user_id})]);
-    const players=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat FOR UPDATE`,[gameId])).rows;
-    const alive=players.filter(p=>p.alive);
+    const msg=truth?`⚡ ${challenger.display_name} Bắt Vọng sai · Thiên Phạt -1 Sinh Mệnh.`:`🔥 ${challenger.display_name} Bắt Vọng chính xác · ${actor.display_name} chịu Nghiệp Hỏa -1 Sinh Mệnh.`;
+    await client.query(`INSERT INTO tien_menh_history(game_id,event_type,actor_id,message,payload) VALUES($1,'challenge',$2,$3,$4::jsonb)`,[gameId,req.session.user_id,msg,JSON.stringify({truth,claim:g.last_claim_type,played:played.map(x=>x.card_type),punishedId:punished.user_id,forceChallenge:Boolean(g.force_challenge)})]);
+    const players=(await client.query(`SELECT * FROM tien_menh_players WHERE game_id=$1 ORDER BY seat FOR UPDATE`,[gameId])).rows;const alive=players.filter(p=>p.alive);
     if(alive.length<=1){const fin=await tienMenhFinish(client,gameId,alive[0]?.user_id||null);await client.query('COMMIT');return res.json({ok:true,finished:true,truth,life:newLife,result:fin,message:msg});}
-    const next=tienMenhNextAlive(players,actor.seat);await client.query(`UPDATE tien_menh_games SET turn_user_id=$2,last_actor_id=NULL,last_claim_type='',last_claim_count=0,last_play='[]'::jsonb WHERE id=$1`,[gameId,next?.user_id||null]);
-    await tienMenhAdvanceNpc(client,gameId);
-    await client.query('COMMIT');res.json({ok:true,finished:false,truth,life:newLife,message:msg});
-  }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Bắt Vọng thất bại.'});}finally{client.release();}
+    const next=tienMenhNextAlive(alive,actor.seat);await client.query(`UPDATE tien_menh_games SET turn_player_id=$2,turn_user_id=$3,last_actor_id=NULL,last_actor_player_id=NULL,last_claim_type='',last_claim_count=0,last_play='[]'::jsonb,force_challenge=false WHERE id=$1`,[gameId,next?.id||null,next?.user_id||null]);
+    await tienMenhAdvanceNpc(client,gameId);await client.query('COMMIT');res.json({ok:true,finished:false,truth,life:newLife,message:msg});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('tien menh challenge:',e);res.status(500).json({error:'Bắt Vọng thất bại.'});}finally{client.release();}
 });
 
 // Schema migrations are required only once per process. Several endpoints call

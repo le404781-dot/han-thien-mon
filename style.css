@@ -1921,10 +1921,10 @@ body.function-only-focus .tien-khi-enhance-section.focus-active{
 @keyframes htmDiscSpin{to{transform:rotate(360deg)}}@keyframes audioPulse{50%{transform:scale(1.25);opacity:.65}}
 @media(max-width:700px){.audio-player-card{grid-template-columns:1fr;padding:22px;gap:20px}.audio-disc{width:178px;height:178px}.audio-disc-cover{width:92px;height:92px}.audio-controls-row{display:grid;grid-template-columns:1fr 1fr}.audio-main-btn,.audio-stop-btn{width:100%;min-width:0}.audio-volume{grid-column:1/-1;margin:3px 0 0;width:100%}.audio-volume input{flex:1;width:auto}.audio-time-row{grid-template-columns:38px 1fr 38px}}
 
-/* v3.7.80 · Lôi Đài countdown 28 giây */
+/* v3.7.82 · Lôi Đài countdown 28 giây */
 .challenge-countdown-banner{margin:14px 0;padding:14px 16px;border:1px solid var(--gold);border-radius:12px;background:linear-gradient(90deg,color-mix(in srgb,var(--surface) 82%,var(--gold) 18%),color-mix(in srgb,var(--surface) 94%,var(--jade) 6%));color:var(--jade);font-weight:900;text-align:center;letter-spacing:.04em;box-shadow:var(--shadow);font-variant-numeric:tabular-nums}.challenge-countdown-banner.countdown-active{animation:challengeCountdownPulse 1s ease-in-out infinite}.battle-countdown .challenge-move,.battle-countdown .battle-spit{opacity:.45;pointer-events:none}.battle-countdown .battle-turn-note{color:var(--red);font-weight:800}@keyframes challengeCountdownPulse{50%{transform:scale(1.012);box-shadow:0 8px 28px rgba(0,0,0,.10)}}
 
-/* v3.7.80 · TIÊN MỆNH */
+/* v3.7.82 · TIÊN MỆNH */
 .tien-menh-section{position:relative;overflow:hidden}
 .tien-menh-area{display:grid;gap:18px;max-width:1180px;margin:0 auto}
 .tien-menh-master-panel,.tien-menh-create,.tien-menh-game-card,.tien-menh-lobbies,.tien-menh-rules{border:1px solid rgba(180,140,70,.32);background:rgba(255,252,242,.72);border-radius:20px;padding:18px;box-shadow:0 12px 34px rgba(30,50,40,.06)}
@@ -1935,8 +1935,33 @@ body.function-only-focus .tien-khi-enhance-section.focus-active{
 #tien-menh.focus-active{overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:thin}
 #tien-menh.focus-active .tien-menh-area{min-height:100%;padding-bottom:80px}
 @media(max-width:700px){.tien-menh-players{grid-template-columns:repeat(2,minmax(0,1fr))}.tien-menh-create{align-items:stretch}.tien-menh-create label{flex:1 1 100%}.tien-menh-game-head{display:grid}.tien-menh-play-form{display:grid}.tien-menh-play-form select,.tien-menh-play-form button{width:100%}}
-/* v3.7.80 · focus navigation must also lock Audio and Tavern independently */
+/* v3.7.82 · focus navigation must also lock Audio and Tavern independently */
 .audio-player-section.focus-active,.tavern-section.focus-active{overscroll-behavior:contain!important;touch-action:pan-y!important;-webkit-overflow-scrolling:touch}
 body.function-only-focus .audio-player-section.focus-active,body.function-only-focus .tavern-section.focus-active{display:block!important;visibility:visible!important}
 
 .tien-menh-transfer{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.tien-menh-transfer select{padding:9px;border-radius:9px;border:1px solid rgba(120,90,40,.25);min-width:220px}
+/* v3.7.82 · Tiên Mệnh bàn 4 góc + animation */
+.tien-table-wrap{margin:16px 0;border-radius:26px;overflow:hidden;background:radial-gradient(circle at center,rgba(210,170,80,.13),rgba(20,70,60,.08) 52%,rgba(10,30,26,.04));padding:10px}
+.tien-table{position:relative;min-height:520px;border:2px solid rgba(170,125,45,.38);border-radius:28px;background:radial-gradient(ellipse at center,rgba(46,122,101,.18),rgba(17,55,47,.10) 58%,rgba(180,140,70,.08));box-shadow:inset 0 0 55px rgba(0,0,0,.10),0 18px 45px rgba(20,40,35,.12);overflow:hidden}
+.tien-table:before{content:"";position:absolute;inset:18%;border:1px solid rgba(180,140,70,.28);border-radius:50%;box-shadow:0 0 0 22px rgba(180,140,70,.035),0 0 0 23px rgba(180,140,70,.16);pointer-events:none}
+.tien-table-ornament{position:absolute;left:50%;top:50%;transform:translate(-50%,-58%);font-size:5rem;opacity:.14;animation:tienQi 5s ease-in-out infinite}
+.tien-table-title{position:absolute;left:50%;top:50%;transform:translate(-50%,28%);font-weight:1000;letter-spacing:.28em;color:rgba(130,88,30,.65);font-size:.78rem}
+.tien-table-center{position:absolute;inset:25% 24%;display:grid;place-items:center;text-align:center;z-index:2}
+.tien-seat{position:absolute;width:min(220px,29%);min-height:86px;display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:16px;border:1px solid rgba(160,120,50,.28);background:rgba(255,250,235,.86);backdrop-filter:blur(8px);box-shadow:0 9px 25px rgba(20,40,35,.12);z-index:3;transition:transform .35s ease,box-shadow .35s ease,opacity .35s ease}
+.dark .tien-seat{background:rgba(20,27,25,.88)}
+.tien-seat.top-left{left:14px;top:14px}.tien-seat.top-right{right:14px;top:14px}.tien-seat.bottom-left{left:14px;bottom:14px}.tien-seat.bottom-right{right:14px;bottom:14px}
+.tien-seat.active{transform:scale(1.035);box-shadow:0 0 0 2px rgba(198,146,45,.5),0 12px 30px rgba(80,55,20,.18);animation:tienTurn 1.7s ease-in-out infinite}
+.tien-seat.dead{opacity:.35;filter:grayscale(1)}
+.tien-seat-avatar{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;overflow:hidden;border:2px solid rgba(180,140,70,.45);background:rgba(255,255,255,.4);flex:none;font-size:1.8rem}.tien-seat-avatar img{width:100%;height:100%;object-fit:cover}.tien-seat-info{min-width:0;display:grid;gap:2px}.tien-seat-info b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tien-seat-info span,.tien-seat-info small{font-size:.72rem;color:var(--muted)}
+.tien-last-claim{animation:tienClaimIn .42s cubic-bezier(.2,.8,.2,1)}.tien-card-drop-zone{display:inline-grid;gap:2px;place-items:center;padding:13px 22px;border-radius:18px;border:1px solid rgba(180,140,50,.4);background:rgba(255,248,220,.76);box-shadow:0 10px 30px rgba(90,65,25,.12)}.tien-card-drop-zone span{font-size:2.6rem;animation:tienCardDrop .55s cubic-bezier(.16,1,.3,1)}.tien-card-drop-zone b{font-size:.8rem}.tien-last-claim p{margin:10px 0 0;max-width:430px}.tien-mandatory,.tien-force-warning{color:#a33225;font-weight:1000;animation:tienPulse 1.1s ease-in-out infinite}.tien-await{font-weight:900;display:grid;gap:6px}.tien-await small{font-weight:600;color:var(--muted)}
+.tien-menh-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;padding:13px;border-radius:16px;background:rgba(170,60,45,.055);border:1px solid rgba(170,60,45,.2)}.tien-menh-actions button{min-width:150px}.danger-outline{margin-top:12px;border-color:rgba(170,60,45,.35)}
+@keyframes tienCardDrop{0%{transform:translateY(-35px) scale(.75) rotate(-7deg);opacity:0}65%{transform:translateY(5px) scale(1.05) rotate(2deg);opacity:1}100%{transform:translateY(0) scale(1) rotate(0)}}
+@keyframes tienClaimIn{0%{opacity:0;transform:scale(.9)}100%{opacity:1;transform:scale(1)}}@keyframes tienTurn{0%,100%{box-shadow:0 0 0 1px rgba(198,146,45,.38),0 10px 28px rgba(80,55,20,.14)}50%{box-shadow:0 0 0 4px rgba(198,146,45,.18),0 13px 34px rgba(80,55,20,.2)}}@keyframes tienQi{50%{transform:translate(-50%,-58%) rotate(180deg) scale(1.04)}}@keyframes tienPulse{50%{transform:scale(1.03)}}
+@media(max-width:700px){.tien-table{min-height:600px}.tien-seat{width:42%;min-height:78px;padding:7px}.tien-seat-avatar{width:42px;height:42px;font-size:1.4rem}.tien-table-center{inset:24% 10%}.tien-table:before{inset:25% 7%}.tien-menh-actions{display:grid}.tien-menh-actions button{width:100%}}
+/* v3.7.82 · Tiên Mệnh spectator / live watch */
+.tien-menh-live-list{display:grid;gap:2px}.tien-menh-live-row{background:rgba(38,112,93,.035)}
+.tien-menh-spectator{margin-top:14px;padding:14px;border-radius:18px;border:1px solid rgba(38,112,93,.22);background:rgba(38,112,93,.045);animation:tienClaimIn .35s ease}.tien-menh-spectator[hidden]{display:none}
+.tien-spectator-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px}.tien-spectator-head h3{margin:.2rem 0}.tien-spectator-head small{color:var(--muted)}
+.tien-table.watch-table{min-height:560px}.tien-seat.watch{transition:transform .3s ease,opacity .3s ease}.tien-spectator-history{margin-top:14px;padding:12px;border-radius:14px;background:rgba(0,0,0,.035);max-height:240px;overflow:auto}.dark .tien-spectator-history{background:rgba(255,255,255,.04)}
+.tien-spectator-history h4{margin:0 0 8px}.tien-spectator-history>div{padding:6px 0;border-bottom:1px solid rgba(120,90,40,.10);font-size:.82rem}.tien-spectator-history time{font-variant-numeric:tabular-nums;color:var(--muted);margin-right:6px}.tien-spectator-loading{padding:20px;text-align:center;font-weight:800}
+@media(max-width:700px){.tien-spectator-head{display:grid}.tien-table.watch-table{min-height:620px}}

@@ -412,41 +412,73 @@ function startChallengeCountdown(battle){
 }
 
 
+window.htmRefreshTienMenhSpectator=async function(id){
+ const box=$('#tienMenhSpectator'); if(!box||box.hidden)return;
+ const esc=x=>String(x??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]));
+ const fmt=n=>Number(n||0).toLocaleString('vi-VN');
+ try{
+  const w=await api('/api/tien-menh/watch/'+Number(id),{headers:authHeaders()});const sg=w.game;
+  const types={thien_kiem:'⚔️ Thiên Kiếm',hoa_linh:'🔥 Hỏa Linh',bang_phach:'❄️ Băng Phách',long_hon:'🐉 Long Hồn',ma_hon:'👹 Ma Hồn',am_duong:'☯️ Âm Dương Linh Bài',thien_menh:'⭐ Thiên Mệnh Bài'};
+  const seats=(sg.players||[]).map(p=>`<article class="tien-seat watch ${p.alive?'':'dead'} ${Number(p.id)===Number(sg.turnPlayerId)?'active':''}"><div class="tien-seat-avatar">${/^https?:\/\//i.test(String(p.avatar||''))||String(p.avatar||'').startsWith('/')?`<img src="${esc(p.avatar)}" alt="" loading="lazy">`:`<span>${esc(p.avatar||'🧑🏻‍🎓')}</span>`}</div><div class="tien-seat-info"><b>${p.npc?'🤖 ':''}${esc(p.name)}</b><span>❤️ ${p.life}/3</span><small>💎 ${fmt(p.stake)}</small></div></article>`).join('');
+  const actor=(sg.players||[]).find(p=>Number(p.id)===Number(sg.lastActorPlayerId));
+  box.innerHTML=`<div class="tien-spectator-head"><div><span class="eyebrow">👁️ ĐANG XEM TRỰC TIẾP</span><h3>🏮 Bàn #${sg.id}</h3><small>Vòng ${sg.round} · 💎 ${fmt(sg.pot)} · Linh Bài bí mật được bảo toàn</small></div><button class="btn small ghost" id="tienMenhCloseSpectator">Đóng</button></div><div class="tien-table watch-table"><div class="tien-table-ornament">☯</div><div class="tien-table-title">TIÊN MỆNH · TRỰC TIẾP</div>${seats}<div class="tien-table-center">${sg.lastActorPlayerId?`<div class="tien-last-claim"><div class="tien-card-drop-zone"><span>🃏</span><b>${sg.lastClaimCount} Linh Bài</b></div><p>🗣️ ${esc(actor?.name||'Môn nhân')} tuyên bố: <strong>“${sg.lastClaimCount} lá này đều là ${esc(types[sg.lastClaimType]||'Linh Bài')}.”</strong></p>${sg.forceChallenge?'<div class="tien-mandatory">⚡ BẮT VỌNG BẮT BUỘC</div>':''}</div>`:`<div class="tien-await">⏳ Đang chờ lượt tiếp theo<small>Diễn biến được cập nhật tự động.</small></div>`}</div></div><div class="tien-spectator-history"><h4>📜 Diễn biến gần đây</h4>${(w.history||[]).slice(0,12).map(h=>`<div><time>${new Date(h.created_at).toLocaleTimeString('vi-VN')}</time> ${esc(h.message)}</div>`).join('')||'<p class="muted">Chưa có diễn biến.</p>'}</div>`;
+  $('#tienMenhCloseSpectator')?.addEventListener('click',()=>{window.__tienMenhSpectatorId=null;box.hidden=true;box.innerHTML='';});
+ }catch(e){if(e?.status===404){window.__tienMenhSpectatorId=null;box.innerHTML='<div class="empty-state compact"><h3>🏁 Bàn đã kết thúc</h3><p>Ván đấu không còn hoạt động.</p></div>';}else box.innerHTML=`<div class="empty-state compact"><h3>⚠️ Mất kết nối bàn</h3><p>${esc(e.message)}</p></div>`;}
+};
+
 async function loadTienMenh(){
  const area=$('#tienMenhArea'); if(!area||!getToken())return;
+ const esc=x=>String(x??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]));
+ const fmt=n=>Number(n||0).toLocaleString('vi-VN');
+ const types=[['thien_kiem','⚔️ Thiên Kiếm'],['hoa_linh','🔥 Hỏa Linh'],['bang_phach','❄️ Băng Phách'],['long_hon','🐉 Long Hồn'],['ma_hon','👹 Ma Hồn'],['am_duong','☯️ Âm Dương Linh Bài'],['thien_menh','⭐ Thiên Mệnh Bài']];
+ const avatar=v=>{const x=String(v||'🧑🏻‍🎓');return /^https?:\/\//i.test(x)||x.startsWith('/')||x.startsWith('data:image/')?`<img src="${esc(x)}" alt="" loading="lazy">`:`<span>${esc(x)}</span>`};
  try{
   const d=await api('/api/tien-menh/state',{headers:authHeaders()});
-  const types=[['thien_kiem','⚔️ Thiên Kiếm'],['hoa_linh','🔥 Hỏa Linh'],['bang_phach','❄️ Băng Phách'],['long_hon','🐉 Long Hồn'],['ma_hon','👹 Ma Hồn'],['am_duong','☯️ Âm Dương Linh Bài'],['thien_menh','⭐ Thiên Mệnh Bài']];
-  const g=d.game, fmt=n=>Number(n||0).toLocaleString('vi-VN');
   const master=d.master;
   const masterHtml=master?`<div class="tien-menh-master"><b>🏮 Mệnh Chủ: ${esc(master.display_name)}</b>${Number(master.user_id)===Number(currentUser?.id)?`<span> · Bạn đang giữ Mệnh Chủ</span><div class="tien-menh-transfer"><select id="tienMenhTransferTarget"><option value="">Chọn môn nhân để nhường vị</option>${(d.members||[]).map(m=>`<option value="${m.id}">${esc(m.display_name)} · @${esc(m.username)}</option>`).join('')}</select><button class="btn small ghost" id="tienMenhTransferBtn">👑 Nhường vị</button></div>`:''}</div>`:`<button class="btn primary" id="tienMenhApplyMaster">🏮 Ứng tuyển Mệnh Chủ</button>`;
+  const g=d.game;
   let gameHtml='';
   if(g){
    const me=g.players.find(p=>Number(p.userId)===Number(currentUser?.id));
-   const isTurn=Number(g.turnUserId)===Number(currentUser?.id)&&g.status==='active';
-   const canChallenge=g.lastActorId&&Number(g.lastActorId)!==Number(currentUser?.id)&&me?.alive;
-   const selected=new Set();
-   gameHtml=`<div class="tien-menh-game-card">
-    <div class="tien-menh-game-head"><div><span class="eyebrow">🏮 TIÊN MỆNH · ${g.mode==='offline'?'OFFLINE NPC':'ONLINE'}</span><h3>Ván #${g.id} · ${g.status==='lobby'?'Đang chờ môn nhân':'Đang diễn ra'}</h3></div><b>💎 ${fmt(g.pot)} linh thạch</b></div>
-    <div class="tien-menh-players">${g.players.map(p=>`<article class="tien-menh-player ${p.alive?'':'dead'} ${Number(p.userId)===Number(g.turnUserId)?'turn':''}"><b>${p.npc?'🤖 ':''}${esc(p.name)}</b><span>❤️ ${p.life}/3</span><small>💎 ${fmt(p.stake)}</small></article>`).join('')}</div>
-    ${g.status==='lobby'?`<p class="muted">Bàn cần ít nhất 2 môn nhân. Mỗi người tự đặt từ 1.000 đến 10.000.000.000 linh thạch.</p><button class="btn primary tien-menh-start" data-id="${g.id}" ${Number(g.players[0]?.userId)!==Number(currentUser?.id)||g.players.length<2?'disabled':''}>▶ Khai Ván</button>`:''}
-    ${g.status==='active'?`<div class="tien-menh-turn"><b>${isTurn?'⚡ Đến lượt bạn':'⏳ Lượt của '+esc(g.players.find(p=>Number(p.userId)===Number(g.turnUserId))?.name||'đối thủ')}</b>${g.lastActorId?`<p>🗣️ ${esc(g.players.find(p=>Number(p.userId)===Number(g.lastActorId))?.name||'Môn nhân')} tuyên bố: <b>${g.lastClaimCount} lá đều là ${esc((types.find(x=>x[0]===g.lastClaimType)||['','Linh Bài'])[1])}</b></p>`:''}</div>`:''}
-    ${isTurn&&!g.lastActorId?`<div class="tien-menh-hand"><b>🃏 Linh Bài bí mật của bạn</b><div class="tien-menh-hand-grid">${(g.ownHand||[]).map(c=>`<button type="button" class="tien-card-select" data-card-id="${c.id}" data-type="${esc(c.type)}"><span>${esc(c.icon)}</span><b>${esc(c.name)}</b></button>`).join('')}</div><div class="tien-menh-play-form"><select id="tienMenhClaim">${types.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select><button class="btn primary" id="tienMenhPlayBtn" data-id="${g.id}">🃏 Đặt Bài & Công Bố</button></div></div>`:''}
-    ${canChallenge?`<div class="tien-menh-challenge"><button class="btn danger" id="tienMenhCatchBtn" data-id="${g.id}">🔍 BẮT VỌNG!</button><small>Nếu lời công bố là vọng ngữ: người đặt bài chịu Nghiệp Hỏa. Nếu là chân ngôn: bạn chịu Thiên Phạt.</small></div>`:''}
-    ${g.status==='completed'?`<div class="tien-menh-finish">🏆 Ván đã kết thúc · Người thắng: ${esc(g.players.find(p=>Number(p.userId)===Number(g.winnerId))?.name||'—')} · +${fmt(g.winnerSpiritBonus)} linh lực · ${fmt(Math.max(0,g.pot-g.masterCommission))} linh thạch cho người thắng.</div>`:''}
-   </div>`;
+   const isTurn=Number(g.turnPlayerId||0)===Number(me?.id||0);
+   const hasClaim=Boolean(g.lastActorPlayerId||g.lastActorId);
+   const lastActor=g.players.find(p=>Number(p.id)===Number(g.lastActorPlayerId))||g.players.find(p=>Number(p.userId)===Number(g.lastActorId));
+   const canChallenge=isTurn&&hasClaim&&Number(lastActor?.id)!==Number(me?.id);
+   const mustChallenge=Boolean(g.forceChallenge)&&canChallenge;
+   const corners=['top-left','top-right','bottom-left','bottom-right'];
+   const cornerPlayers=g.players.slice(0,4);
+   const seats=cornerPlayers.map((p,i)=>`<article class="tien-seat ${corners[i]||''} ${p.alive?'':'dead'} ${Number(p.id)===Number(g.turnPlayerId)?'active':''}"><div class="tien-seat-avatar">${avatar(p.avatar)}</div><div class="tien-seat-info"><b>${p.npc?'🤖 ':''}${esc(p.name)}</b><span>❤️ ${p.life}/3</span><small>💎 ${fmt(p.stake)}</small></div></article>`).join('');
+   const handHtml=(isTurn&&!hasClaim&&!me?.npc)?`<div class="tien-menh-hand"><b>🃏 Linh Bài bí mật của bạn</b><div class="tien-menh-hand-grid">${(g.ownHand||[]).map(c=>`<button type="button" class="tien-card-select" data-card-id="${c.id}" data-type="${esc(c.type)}"><span>${esc(c.icon)}</span><b>${esc(c.name)}</b></button>`).join('')}</div><div class="tien-menh-play-form"><select id="tienMenhClaim">${types.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select><button class="btn primary" id="tienMenhPlayBtn" data-id="${g.id}">🃏 Đánh Bài Tiếp</button></div></div>`:'';
+   const actionHtml=canChallenge?`<div class="tien-menh-actions"><button class="btn danger" id="tienMenhCatchBtn" data-id="${g.id}">🔍 BẮT VỌNG</button><button class="btn ghost" id="tienMenhContinueBtn" data-id="${g.id}" ${mustChallenge?'disabled':''}>🃏 ĐÁNH BÀI TIẾP</button>${mustChallenge?'<b class="tien-force-warning">⚠️ Lá cuối đã được đặt — bắt buộc Bắt Vọng!</b>':''}</div>`:'';
+   gameHtml=`<div class="tien-menh-game-card"><div class="tien-menh-game-head"><div><span class="eyebrow">🏮 TIÊN MỆNH · ${g.mode==='offline'?'OFFLINE NPC':'ONLINE'}</span><h3>Ván #${g.id} · ${g.status==='lobby'?'Đang chờ môn nhân':'Đang diễn ra'}</h3></div><b>💎 ${fmt(g.pot)} linh thạch</b></div>${g.status==='active'?`<div class="tien-table-wrap"><div class="tien-table"><div class="tien-table-ornament">☯</div><div class="tien-table-title">TIÊN MỆNH</div>${seats}<div class="tien-table-center">${hasClaim?`<div class="tien-last-claim"><div class="tien-card-drop-zone"><span>🃏</span><b>${g.lastClaimCount} Linh Bài</b></div><p>🗣️ ${esc(lastActor?.name||'Môn nhân')} tuyên bố: <strong>“${g.lastClaimCount} lá này đều là ${(types.find(x=>x[0]===g.lastClaimType)||['','Linh Bài'])[1]}.”</strong></p>${mustChallenge?'<div class="tien-mandatory">⚡ BẮT VỌNG BẮT BUỘC</div>':''}</div>`:`<div class="tien-await">${isTurn?'⚡ Đến lượt bạn':'⏳ Đợi lượt tiếp theo'}<small>Mỗi lượt chỉ một Môn Nhân được hành động.</small></div>`}</div></div></div>`:''}<div class="tien-menh-turn"><b>${isTurn?(hasClaim?(mustChallenge?'⚡ Bạn phải Bắt Vọng':'⚡ Chọn Bắt Vọng hoặc Đánh Bài Tiếp'):'⚡ Đến lượt bạn'):'⏳ Lượt của '+esc(g.players.find(p=>Number(p.id)===Number(g.turnPlayerId))?.name||'đối thủ')}</b></div>${handHtml}${actionHtml}${g.status==='lobby'?`<p class="muted">Bàn cần ít nhất 2 Môn Nhân. Mỗi người đặt từ 1.000 đến 10.000.000.000 Linh Thạch.</p><button class="btn primary tien-menh-start" data-id="${g.id}" ${Number(g.players[0]?.userId)!==Number(currentUser?.id)||g.players.length<2?'disabled':''}>▶ Khai Ván</button>`:''}${g.status!=='completed'?`<button class="btn ghost danger-outline" id="tienMenhLeaveBtn" data-id="${g.id}">🚪 Rời Bàn</button>`:''}${g.status==='completed'?`<div class="tien-menh-finish">🏆 Người chiến thắng: ${esc(g.players.find(p=>Number(p.userId)===Number(g.winnerId))?.name||'—')} · +${fmt(g.winnerSpiritBonus)} Linh Lực · ${fmt(Math.max(0,g.pot-g.masterCommission))} Linh Thạch.</div>`:''}</div>`;
   }
-  const lobbyHtml=(d.openGames||[]).filter(x=>!g||Number(x.id)!==Number(g.id)).map(x=>`<article class="tien-menh-lobby"><div><b>🏮 Bàn #${x.id}</b><small>${x.playerCount}/${x.maxPlayers} môn nhân</small></div><button class="btn small primary tien-menh-join" data-id="${x.id}">Tham gia</button></article>`).join('')||'<p class="muted">Chưa có bàn online đang chờ.</p>';
-  area.innerHTML=`<div class="tien-menh-master-panel">${masterHtml}</div><div class="tien-menh-create"><div><h3>🎴 Tạo ván</h3><p>2–4 môn nhân · mỗi người đặt 1.000–10.000.000.000 linh thạch.</p></div><label>Mức đặt <input id="tienMenhStake" type="number" min="1000" max="10000000000" step="1000" value="1000" inputmode="numeric"></label><label>Số người tối đa <select id="tienMenhMax"><option>2</option><option>3</option><option selected>4</option></select></label><button class="btn primary" id="tienMenhCreate">🏮 Mở Bàn</button><button class="btn ghost" id="tienMenhOffline">🤖 Chơi Offline với NPC</button></div>${gameHtml}<div class="tien-menh-lobbies"><div class="section-head"><div><span class="eyebrow">🌐 BÀN ĐANG MỞ</span><h3>Tham gia Tiên Mệnh Online</h3></div></div>${lobbyHtml}</div><div class="tien-menh-rules"><h3>🏮 Luật Tiên Mệnh</h3><p>Mỗi người có 3 Sinh Mệnh. Đặt 1–3 Linh Bài và công bố loại bài. Chân ngôn khiến người Bắt Vọng chịu Thiên Phạt; vọng ngữ khiến người đặt bài chịu Nghiệp Hỏa. Sinh mệnh về 0 sẽ bị loại. Người cuối cùng còn sống nhận 10% linh lực của mình và phần linh thạch còn lại của pot sau phí Mệnh Chủ 15% trên phần cược của các môn nhân khác.</p><div>${types.map(x=>`<span>${x[1]}</span>`).join('')}</div></div>`;
-  $('#tienMenhApplyMaster')?.addEventListener('click',async()=>{try{await api('/api/tien-menh/master/apply',{method:'POST',headers:authHeaders()});window.htmPlayUiSound?.('success');await loadTienMenh();}catch(e){window.htmPlayUiSound?.('error');alert(e.message)}});
+  const lobbyHtml=(d.openGames||[]).filter(x=>!g||Number(x.id)!==Number(g.id)).map(x=>`<article class="tien-menh-lobby"><div><b>🏮 Bàn #${x.id}</b><small>${x.playerCount}/${x.maxPlayers} Môn Nhân</small></div><button class="btn small primary tien-menh-join" data-id="${x.id}">Tham gia</button></article>`).join('')||'<p class="muted">Chưa có bàn online đang chờ.</p>';
+  const liveHtml=(d.liveGames||[]).map(x=>`<article class="tien-menh-lobby tien-menh-live-row"><div><b>👁️ Bàn #${x.id}</b><small>❤️ ${x.aliveCount}/${x.playerCount} còn sống · 💎 ${fmt(x.pot)} · Vòng ${x.round}</small></div><button class="btn small ghost tien-menh-watch-btn" data-id="${x.id}">👁️ Xem trực tiếp</button></article>`).join('')||'<p class="muted">Hiện chưa có bàn online đang diễn ra.</p>';
+  area.innerHTML=`<div class="tien-menh-master-panel">${masterHtml}</div><div class="tien-menh-create"><div><h3>🎴 Tạo ván</h3><p>2–4 Môn Nhân · 1.000–10.000.000.000 Linh Thạch/người.</p></div><label>Mức đặt <input id="tienMenhStake" type="number" min="1000" max="10000000000" step="1000" value="1000" inputmode="numeric"></label><label>Số người tối đa <select id="tienMenhMax"><option>2</option><option>3</option><option selected>4</option></select></label><button class="btn primary" id="tienMenhCreate">🏮 Mở Bàn</button><button class="btn ghost" id="tienMenhOffline">🤖 Chơi Offline với NPC</button></div>${gameHtml}<div class="tien-menh-lobbies"><div class="section-head"><div><span class="eyebrow">🌐 BÀN ĐANG MỞ</span><h3>Tham gia Tiên Mệnh Online</h3></div></div>${lobbyHtml}</div><div class="tien-menh-lobbies tien-menh-watch-panel"><div class="section-head"><div><span class="eyebrow">👁️ THEO DÕI TIÊN MỆNH</span><h3>Các bàn đang diễn ra</h3><p class="muted">Môn nhân khác có thể chọn một bàn để xem diễn biến trực tiếp. Linh Bài bí mật không được tiết lộ.</p></div></div><div class="tien-menh-live-list">${liveHtml}</div><div id="tienMenhSpectator" class="tien-menh-spectator" hidden></div></div><div class="tien-menh-rules"><h3>🏮 Luật Tiên Mệnh</h3><p>2–4 Môn Nhân · 3 Sinh Mệnh · mỗi lượt chỉ người kế tiếp mới được Bắt Vọng. Nếu người đặt vừa đặt lá cuối cùng, người kế tiếp bắt buộc Bắt Vọng. Người sống cuối cùng nhận toàn bộ Linh Thạch tham gia và +10% Linh Lực hệ thống. Mệnh Chủ nhận 15% phần cược của các Môn Nhân khác.</p><div>${types.map(x=>`<span>${x[1]}</span>`).join('')}</div></div>`;
+  document.querySelectorAll('.tien-menh-watch-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+   const box=$('#tienMenhSpectator'); if(!box)return; window.__tienMenhSpectatorId=Number(btn.dataset.id); box.hidden=false; box.innerHTML='<div class="tien-spectator-loading">⏳ Đang kết nối bàn trực tiếp…</div>';
+   try{
+    const w=await api('/api/tien-menh/watch/'+Number(btn.dataset.id),{headers:authHeaders()}); const sg=w.game;
+    const typeMap=Object.fromEntries(types.map(x=>[x[0],x[1]]));
+    const esc2=x=>String(x??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]));
+    const seats=(sg.players||[]).map((p,i)=>`<article class="tien-seat watch ${p.alive?'':'dead'} ${Number(p.id)===Number(sg.turnPlayerId)?'active':''}"><div class="tien-seat-avatar">${/^https?:\/\//i.test(String(p.avatar||''))||String(p.avatar||'').startsWith('/')?`<img src="${esc2(p.avatar)}" alt="" loading="lazy">`:`<span>${esc2(p.avatar||'🧑🏻‍🎓')}</span>`}</div><div class="tien-seat-info"><b>${p.npc?'🤖 ':''}${esc2(p.name)}</b><span>❤️ ${p.life}/3</span><small>💎 ${fmt(p.stake)}</small></div></article>`).join('');
+    const actor=(sg.players||[]).find(p=>Number(p.id)===Number(sg.lastActorPlayerId));
+    box.innerHTML=`<div class="tien-spectator-head"><div><span class="eyebrow">👁️ ĐANG XEM TRỰC TIẾP</span><h3>🏮 Bàn #${sg.id}</h3><small>Vòng ${sg.round} · 💎 ${fmt(sg.pot)} · Không hiển thị Linh Bài trên tay người chơi</small></div><button class="btn small ghost" id="tienMenhCloseSpectator">Đóng</button></div><div class="tien-table watch-table"><div class="tien-table-ornament">☯</div><div class="tien-table-title">TIÊN MỆNH · TRỰC TIẾP</div>${seats}<div class="tien-table-center">${sg.lastActorPlayerId?`<div class="tien-last-claim"><div class="tien-card-drop-zone"><span>🃏</span><b>${sg.lastClaimCount} Linh Bài</b></div><p>🗣️ ${esc2(actor?.name||'Môn nhân')} tuyên bố: <strong>“${sg.lastClaimCount} lá này đều là ${esc2(typeMap[sg.lastClaimType]||'Linh Bài')}.”</strong></p>${sg.forceChallenge?'<div class="tien-mandatory">⚡ BẮT VỌNG BẮT BUỘC</div>':''}</div>`:`<div class="tien-await">⏳ Đang chờ lượt tiếp theo<small>Diễn biến được cập nhật tự động.</small></div>`}</div></div><div class="tien-spectator-history"><h4>📜 Diễn biến gần đây</h4>${(w.history||[]).slice(0,12).map(h=>`<div><time>${new Date(h.created_at).toLocaleTimeString('vi-VN')}</time> ${esc2(h.message)}</div>`).join('')||'<p class="muted">Chưa có diễn biến.</p>'}</div>`;
+    $('#tienMenhCloseSpectator')?.addEventListener('click',()=>{box.hidden=true;box.innerHTML='';});
+   }catch(e){box.innerHTML=`<div class="empty-state compact"><h3>⚠️ Không thể xem bàn</h3><p>${esc2(e.message)}</p></div>`;}
+  }));
+  $('#tienMenhApplyMaster')?.addEventListener
+('click',async()=>{try{await api('/api/tien-menh/master/apply',{method:'POST',headers:authHeaders()});window.htmPlayUiSound?.('success');await loadTienMenh();}catch(e){window.htmPlayUiSound?.('error');alert(e.message)}});
   $('#tienMenhTransferBtn')?.addEventListener('click',async()=>{const target=Number($('#tienMenhTransferTarget').value);if(!target)return;try{await api('/api/tien-menh/master/transfer',{method:'POST',headers:authHeaders(),body:JSON.stringify({targetId:target})});window.htmPlayUiSound?.('success');await loadTienMenh();}catch(e){window.htmPlayUiSound?.('error');alert(e.message)}});
-  $('#tienMenhCreate')?.addEventListener('click',async()=>{try{await api('/api/tien-menh/create',{method:'POST',headers:authHeaders(),body:JSON.stringify({stake:Number($('#tienMenhStake').value),maxPlayers:Number($('#tienMenhMax').value)})});await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){alert(e.message)}});
-  $('#tienMenhOffline')?.addEventListener('click',async()=>{try{await api('/api/tien-menh/offline',{method:'POST',headers:authHeaders(),body:JSON.stringify({stake:Number($('#tienMenhStake').value),npcCount:Number($('#tienMenhMax').value)-1})});await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){alert(e.message)}});
-  document.querySelectorAll('.tien-menh-join').forEach(b=>b.onclick=async()=>{const stake=Number(prompt('Nhập linh thạch đặt (1.000–10.000.000.000):','1000'));if(!Number.isSafeInteger(stake))return;try{await api('/api/tien-menh/join',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(b.dataset.id),stake})});await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){alert(e.message)}});
-  document.querySelector('.tien-menh-start')?.addEventListener('click',async e=>{try{await api('/api/tien-menh/start',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id)})});await loadTienMenh();}catch(x){alert(x.message)}});
-  document.querySelectorAll('.tien-card-select').forEach(b=>b.onclick=()=>{b.classList.toggle('selected');});
-  $('#tienMenhPlayBtn')?.addEventListener('click',async e=>{const ids=[...document.querySelectorAll('.tien-card-select.selected')].map(b=>Number(b.dataset.cardId));try{await api('/api/tien-menh/play',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id),cardIds:ids,claimType:$('#tienMenhClaim').value})});window.htmPlayUiSound?.('success');await loadTienMenh();}catch(x){window.htmPlayUiSound?.('error');alert(x.message)}});
+  $('#tienMenhCreate')?.addEventListener('click',async()=>{try{await api('/api/tien-menh/create',{method:'POST',headers:authHeaders(),body:JSON.stringify({stake:Number($('#tienMenhStake').value),maxPlayers:Number($('#tienMenhMax').value)})});window.htmPlayUiSound?.('open');await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){window.htmPlayUiSound?.('error');alert(e.message)}});
+  $('#tienMenhOffline')?.addEventListener('click',async()=>{try{await api('/api/tien-menh/offline',{method:'POST',headers:authHeaders(),body:JSON.stringify({stake:Number($('#tienMenhStake').value),npcCount:Number($('#tienMenhMax').value)-1})});window.htmPlayUiSound?.('open');await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){window.htmPlayUiSound?.('error');alert(e.message)}});
+  document.querySelectorAll('.tien-menh-join').forEach(b=>b.onclick=async()=>{const stake=Number(prompt('Nhập Linh Thạch đặt (1.000–10.000.000.000):','1000'));if(!Number.isSafeInteger(stake))return;try{await api('/api/tien-menh/join',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(b.dataset.id),stake})});window.htmPlayUiSound?.('success');await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){window.htmPlayUiSound?.('error');alert(e.message)}});
+  document.querySelector('.tien-menh-start')?.addEventListener('click',async e=>{try{await api('/api/tien-menh/start',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id)})});window.htmPlayUiSound?.('battle');await loadTienMenh();}catch(x){window.htmPlayUiSound?.('error');alert(x.message)}});
+  document.querySelectorAll('.tien-card-select').forEach(b=>b.onclick=()=>{b.classList.toggle('selected');window.htmPlayUiSound?.('tap');});
+  $('#tienMenhPlayBtn')?.addEventListener('click',async e=>{const ids=[...document.querySelectorAll('.tien-card-select.selected')].map(b=>Number(b.dataset.cardId));if(!ids.length){window.htmPlayUiSound?.('error');alert('Hãy chọn ít nhất 1 Linh Bài.');return;}try{await api('/api/tien-menh/play',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id),cardIds:ids,claimType:$('#tienMenhClaim').value})});window.htmPlayUiSound?.('battle');await loadTienMenh();}catch(x){window.htmPlayUiSound?.('error');alert(x.message)}});
+  $('#tienMenhContinueBtn')?.addEventListener('click',()=>{document.querySelector('.tien-card-select')?.scrollIntoView({behavior:'smooth',block:'center'});window.htmPlayUiSound?.('tap');});
   $('#tienMenhCatchBtn')?.addEventListener('click',async e=>{try{const r=await api('/api/tien-menh/challenge',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id)})});window.htmPlayUiSound?.(r.truth?'error':'success');await Promise.all([loadTienMenh(),loadProfile()]);}catch(x){window.htmPlayUiSound?.('error');alert(x.message)}});
+  $('#tienMenhLeaveBtn')?.addEventListener('click',async e=>{if(!confirm('Rời bàn? Khi ván đã bắt đầu, rời bàn sẽ bị tính là bị loại và phần cược đã khóa không hoàn lại.'))return;try{await api('/api/tien-menh/leave',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id)})});window.htmPlayUiSound?.('error');await Promise.all([loadTienMenh(),loadProfile()]);}catch(x){window.htmPlayUiSound?.('error');alert(x.message)}});
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>⚠️ Tiên Mệnh tạm thời chưa mở được</h3><p>${esc(e.message||'Lỗi máy chủ')}</p></div>`;}
 }
 
@@ -1894,13 +1926,13 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.80 · Trình phát nhạc ổn định: MP3 được phục vụ từ server và có bản nhúng dự phòng. */
+/* v3.7.82 · Trình phát nhạc ổn định: MP3 được phục vụ từ server và có bản nhúng dự phòng. */
 (function setupBackgroundMusicV373(){
  const audio=$('#backgroundMusic'), playBtn=$('#audioPlayBtn'), stopBtn=$('#audioStopBtn'), fxBtn=$('#audioFxBtn');
  const disc=$('#audioDisc'), seek=$('#audioSeek'), current=$('#audioCurrentTime'), duration=$('#audioDuration');
  const volume=$('#audioVolume'), volumeValue=$('#audioVolumeValue'), status=$('#audioStatus'), msg=$('#audioMsg'), liveDot=$('#audioLiveDot');
  if(!audio||!playBtn||!stopBtn)return;
- const V='3.7.80', VOL_KEY='htm_music_volume_v378';
+ const V='3.7.82', VOL_KEY='htm_music_volume_v378';
  const sources=['/audio/tinh-ve-background.mp3?v='+V];
  let sourceIndex=0, playToken=0, started=false, switching=false;
  const fmt=t=>{t=Number(t)||0;const m=Math.floor(t/60),s=Math.floor(t%60);return `${m}:${String(s).padStart(2,'0')}`};
@@ -2004,7 +2036,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 })();
 
 
-/* v3.7.80 · ÂM THANH TƯƠNG TÁC GIAO DIỆN
+/* v3.7.82 · ÂM THANH TƯƠNG TÁC GIAO DIỆN
  * Dùng Web Audio API để tạo hiệu ứng ngắn, không cần tải thêm file âm thanh.
  * Chỉ khởi tạo sau thao tác chạm/click của người dùng để tương thích iPhone/Safari.
  */
@@ -2017,11 +2049,12 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
   try{
    if(!ctx)ctx=new (window.AudioContext||window.webkitAudioContext)();
    if(ctx.state==='suspended')ctx.resume().catch(()=>{});
-   if(!master){master=ctx.createGain();master.gain.value=.14;master.connect(ctx.destination);}
+   if(!master){master=ctx.createGain();master.gain.value=.30;master.connect(ctx.destination);}
+   try{if(navigator.audioSession) navigator.audioSession.type='playback';}catch{}
    return ctx;
   }catch{return null;}
  }
- function tone(freq,duration,type='sine',delay=0,volume=.35){
+ function tone(freq,duration,type='sine',delay=0,volume=.62){
   const c=ensure(); if(!c)return;
   const now=c.currentTime+delay,o=c.createOscillator(),g=c.createGain();
   o.type=type;o.frequency.setValueAtTime(freq,now);g.gain.setValueAtTime(0.0001,now);g.gain.exponentialRampToValueAtTime(Math.max(.0001,volume),now+.012);g.gain.exponentialRampToValueAtTime(.0001,now+duration);o.connect(g);g.connect(master);o.start(now);o.stop(now+duration+.025);
@@ -2041,7 +2074,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
   if(c.state==='suspended'){c.resume().then(()=>playNow(kind)).catch(()=>{});}else playNow(kind);
  }
  window.htmPlayUiSound=play;
- document.addEventListener('pointerdown',()=>{ const c=ensure(); if(c){ const unlock=()=>{try{const o=c.createOscillator(),g=c.createGain();g.gain.value=0.00001;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.015);}catch{}}; if(c.state==='suspended') c.resume().then(unlock).catch(()=>{}); else unlock(); } },{passive:true,once:false});
+ document.addEventListener('pointerdown',()=>{ try{if(navigator.audioSession) navigator.audioSession.type='playback';}catch{} const c=ensure(); if(c){ const unlock=()=>{try{const o=c.createOscillator(),g=c.createGain();g.gain.value=0.00001;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.03);}catch{}}; if(c.state==='suspended') c.resume().then(unlock).catch(()=>{}); else unlock(); } },{passive:true,once:false});
  document.addEventListener('click',e=>{
   const el=e.target.closest('button,a'); if(!el)return;
   if(el.disabled||el.getAttribute('aria-disabled')==='true')return;
@@ -2064,4 +2097,12 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
   fxButton.addEventListener('click',()=>{const on=!enabled();localStorage.setItem(KEY,on?'on':'off');renderFx();if(on)play('success');});
   renderFx();
  }
+})();
+/* v3.7.82 · Tiên Mệnh live table refresh: cập nhật lượt/sinh mệnh nhanh nhưng chỉ khi đang mở bàn. */
+(function setupTienMenhLiveRefresh(){
+ let busy=false;
+ setInterval(async()=>{
+  if(busy||!getToken()||document.hidden||location.hash!=='#tien-menh')return;
+  busy=true;try{if(window.__tienMenhSpectatorId) await window.htmRefreshTienMenhSpectator(window.__tienMenhSpectatorId); else await loadTienMenh();}catch{}finally{busy=false;}
+ },2500);
 })();
