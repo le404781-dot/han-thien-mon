@@ -411,6 +411,45 @@ function startChallengeCountdown(battle){
  if(until>Date.now())__challengeCountdownTimer=setInterval(render,250);
 }
 
+
+async function loadTienMenh(){
+ const area=$('#tienMenhArea'); if(!area||!getToken())return;
+ try{
+  const d=await api('/api/tien-menh/state',{headers:authHeaders()});
+  const types=[['thien_kiem','⚔️ Thiên Kiếm'],['hoa_linh','🔥 Hỏa Linh'],['bang_phach','❄️ Băng Phách'],['long_hon','🐉 Long Hồn'],['ma_hon','👹 Ma Hồn'],['am_duong','☯️ Âm Dương Linh Bài'],['thien_menh','⭐ Thiên Mệnh Bài']];
+  const g=d.game, fmt=n=>Number(n||0).toLocaleString('vi-VN');
+  const master=d.master;
+  const masterHtml=master?`<div class="tien-menh-master"><b>🏮 Mệnh Chủ: ${esc(master.display_name)}</b>${Number(master.user_id)===Number(currentUser?.id)?`<span> · Bạn đang giữ Mệnh Chủ</span><div class="tien-menh-transfer"><select id="tienMenhTransferTarget"><option value="">Chọn môn nhân để nhường vị</option>${(d.members||[]).map(m=>`<option value="${m.id}">${esc(m.display_name)} · @${esc(m.username)}</option>`).join('')}</select><button class="btn small ghost" id="tienMenhTransferBtn">👑 Nhường vị</button></div>`:''}</div>`:`<button class="btn primary" id="tienMenhApplyMaster">🏮 Ứng tuyển Mệnh Chủ</button>`;
+  let gameHtml='';
+  if(g){
+   const me=g.players.find(p=>Number(p.userId)===Number(currentUser?.id));
+   const isTurn=Number(g.turnUserId)===Number(currentUser?.id)&&g.status==='active';
+   const canChallenge=g.lastActorId&&Number(g.lastActorId)!==Number(currentUser?.id)&&me?.alive;
+   const selected=new Set();
+   gameHtml=`<div class="tien-menh-game-card">
+    <div class="tien-menh-game-head"><div><span class="eyebrow">🏮 TIÊN MỆNH · ${g.mode==='offline'?'OFFLINE NPC':'ONLINE'}</span><h3>Ván #${g.id} · ${g.status==='lobby'?'Đang chờ môn nhân':'Đang diễn ra'}</h3></div><b>💎 ${fmt(g.pot)} linh thạch</b></div>
+    <div class="tien-menh-players">${g.players.map(p=>`<article class="tien-menh-player ${p.alive?'':'dead'} ${Number(p.userId)===Number(g.turnUserId)?'turn':''}"><b>${p.npc?'🤖 ':''}${esc(p.name)}</b><span>❤️ ${p.life}/3</span><small>💎 ${fmt(p.stake)}</small></article>`).join('')}</div>
+    ${g.status==='lobby'?`<p class="muted">Bàn cần ít nhất 2 môn nhân. Mỗi người tự đặt từ 1.000 đến 10.000.000.000 linh thạch.</p><button class="btn primary tien-menh-start" data-id="${g.id}" ${Number(g.players[0]?.userId)!==Number(currentUser?.id)||g.players.length<2?'disabled':''}>▶ Khai Ván</button>`:''}
+    ${g.status==='active'?`<div class="tien-menh-turn"><b>${isTurn?'⚡ Đến lượt bạn':'⏳ Lượt của '+esc(g.players.find(p=>Number(p.userId)===Number(g.turnUserId))?.name||'đối thủ')}</b>${g.lastActorId?`<p>🗣️ ${esc(g.players.find(p=>Number(p.userId)===Number(g.lastActorId))?.name||'Môn nhân')} tuyên bố: <b>${g.lastClaimCount} lá đều là ${esc((types.find(x=>x[0]===g.lastClaimType)||['','Linh Bài'])[1])}</b></p>`:''}</div>`:''}
+    ${isTurn&&!g.lastActorId?`<div class="tien-menh-hand"><b>🃏 Linh Bài bí mật của bạn</b><div class="tien-menh-hand-grid">${(g.ownHand||[]).map(c=>`<button type="button" class="tien-card-select" data-card-id="${c.id}" data-type="${esc(c.type)}"><span>${esc(c.icon)}</span><b>${esc(c.name)}</b></button>`).join('')}</div><div class="tien-menh-play-form"><select id="tienMenhClaim">${types.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select><button class="btn primary" id="tienMenhPlayBtn" data-id="${g.id}">🃏 Đặt Bài & Công Bố</button></div></div>`:''}
+    ${canChallenge?`<div class="tien-menh-challenge"><button class="btn danger" id="tienMenhCatchBtn" data-id="${g.id}">🔍 BẮT VỌNG!</button><small>Nếu lời công bố là vọng ngữ: người đặt bài chịu Nghiệp Hỏa. Nếu là chân ngôn: bạn chịu Thiên Phạt.</small></div>`:''}
+    ${g.status==='completed'?`<div class="tien-menh-finish">🏆 Ván đã kết thúc · Người thắng: ${esc(g.players.find(p=>Number(p.userId)===Number(g.winnerId))?.name||'—')} · +${fmt(g.winnerSpiritBonus)} linh lực · ${fmt(Math.max(0,g.pot-g.masterCommission))} linh thạch cho người thắng.</div>`:''}
+   </div>`;
+  }
+  const lobbyHtml=(d.openGames||[]).filter(x=>!g||Number(x.id)!==Number(g.id)).map(x=>`<article class="tien-menh-lobby"><div><b>🏮 Bàn #${x.id}</b><small>${x.playerCount}/${x.maxPlayers} môn nhân</small></div><button class="btn small primary tien-menh-join" data-id="${x.id}">Tham gia</button></article>`).join('')||'<p class="muted">Chưa có bàn online đang chờ.</p>';
+  area.innerHTML=`<div class="tien-menh-master-panel">${masterHtml}</div><div class="tien-menh-create"><div><h3>🎴 Tạo ván</h3><p>2–4 môn nhân · mỗi người đặt 1.000–10.000.000.000 linh thạch.</p></div><label>Mức đặt <input id="tienMenhStake" type="number" min="1000" max="10000000000" step="1000" value="1000" inputmode="numeric"></label><label>Số người tối đa <select id="tienMenhMax"><option>2</option><option>3</option><option selected>4</option></select></label><button class="btn primary" id="tienMenhCreate">🏮 Mở Bàn</button><button class="btn ghost" id="tienMenhOffline">🤖 Chơi Offline với NPC</button></div>${gameHtml}<div class="tien-menh-lobbies"><div class="section-head"><div><span class="eyebrow">🌐 BÀN ĐANG MỞ</span><h3>Tham gia Tiên Mệnh Online</h3></div></div>${lobbyHtml}</div><div class="tien-menh-rules"><h3>🏮 Luật Tiên Mệnh</h3><p>Mỗi người có 3 Sinh Mệnh. Đặt 1–3 Linh Bài và công bố loại bài. Chân ngôn khiến người Bắt Vọng chịu Thiên Phạt; vọng ngữ khiến người đặt bài chịu Nghiệp Hỏa. Sinh mệnh về 0 sẽ bị loại. Người cuối cùng còn sống nhận 10% linh lực của mình và phần linh thạch còn lại của pot sau phí Mệnh Chủ 15% trên phần cược của các môn nhân khác.</p><div>${types.map(x=>`<span>${x[1]}</span>`).join('')}</div></div>`;
+  $('#tienMenhApplyMaster')?.addEventListener('click',async()=>{try{await api('/api/tien-menh/master/apply',{method:'POST',headers:authHeaders()});window.htmPlayUiSound?.('success');await loadTienMenh();}catch(e){window.htmPlayUiSound?.('error');alert(e.message)}});
+  $('#tienMenhTransferBtn')?.addEventListener('click',async()=>{const target=Number($('#tienMenhTransferTarget').value);if(!target)return;try{await api('/api/tien-menh/master/transfer',{method:'POST',headers:authHeaders(),body:JSON.stringify({targetId:target})});window.htmPlayUiSound?.('success');await loadTienMenh();}catch(e){window.htmPlayUiSound?.('error');alert(e.message)}});
+  $('#tienMenhCreate')?.addEventListener('click',async()=>{try{await api('/api/tien-menh/create',{method:'POST',headers:authHeaders(),body:JSON.stringify({stake:Number($('#tienMenhStake').value),maxPlayers:Number($('#tienMenhMax').value)})});await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){alert(e.message)}});
+  $('#tienMenhOffline')?.addEventListener('click',async()=>{try{await api('/api/tien-menh/offline',{method:'POST',headers:authHeaders(),body:JSON.stringify({stake:Number($('#tienMenhStake').value),npcCount:Number($('#tienMenhMax').value)-1})});await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){alert(e.message)}});
+  document.querySelectorAll('.tien-menh-join').forEach(b=>b.onclick=async()=>{const stake=Number(prompt('Nhập linh thạch đặt (1.000–10.000.000.000):','1000'));if(!Number.isSafeInteger(stake))return;try{await api('/api/tien-menh/join',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(b.dataset.id),stake})});await Promise.all([loadTienMenh(),loadProfile()]);}catch(e){alert(e.message)}});
+  document.querySelector('.tien-menh-start')?.addEventListener('click',async e=>{try{await api('/api/tien-menh/start',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id)})});await loadTienMenh();}catch(x){alert(x.message)}});
+  document.querySelectorAll('.tien-card-select').forEach(b=>b.onclick=()=>{b.classList.toggle('selected');});
+  $('#tienMenhPlayBtn')?.addEventListener('click',async e=>{const ids=[...document.querySelectorAll('.tien-card-select.selected')].map(b=>Number(b.dataset.cardId));try{await api('/api/tien-menh/play',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id),cardIds:ids,claimType:$('#tienMenhClaim').value})});window.htmPlayUiSound?.('success');await loadTienMenh();}catch(x){window.htmPlayUiSound?.('error');alert(x.message)}});
+  $('#tienMenhCatchBtn')?.addEventListener('click',async e=>{try{const r=await api('/api/tien-menh/challenge',{method:'POST',headers:authHeaders(),body:JSON.stringify({gameId:Number(e.currentTarget.dataset.id)})});window.htmPlayUiSound?.(r.truth?'error':'success');await Promise.all([loadTienMenh(),loadProfile()]);}catch(x){window.htmPlayUiSound?.('error');alert(x.message)}});
+ }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>⚠️ Tiên Mệnh tạm thời chưa mở được</h3><p>${esc(e.message||'Lỗi máy chủ')}</p></div>`;}
+}
+
 async function loadChallenges(){
  const area=$('#challengeArea'); if(!area||!getToken())return;
  try{
@@ -673,7 +712,7 @@ function accountUI(user){
 }
 async function checkSession(){
  if(!getToken()){accountUI(null);renderGuestAreas();return;}
- try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadWealth();await loadTreasure();await loadTienBan();await loadDanCac();await loadDanDuong();await loadDanPhap();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadBlackMarket();await loadTienThai();await loadTienKhiEnhance();await loadProfessions();await loadQuests();await loadChallenges();await loadArenaLive();maybeShowTutorial();}
+ try{const d=await api('/api/me',{headers:authHeaders()});accountUI(d.user);await loadProfile();await loadTavern();await loadDisciples();await loadCultivationSafe();await loadCodex();await loadTienPhap();await loadSpiritRankings();await loadMansion();await loadChat();await loadMailbox();await loadSectPosts();await loadLeaderboard();await loadWealth();await loadTreasure();await loadTienBan();await loadDanCac();await loadDanDuong();await loadDanPhap();await loadDuocDuong();await loadBeastHouse();await loadBeastFace();await loadDuongThu();await loadBeastArena();await loadLinhPhap();await loadTuDi();await loadMarket();await loadBlackMarket();await loadTienThai();await loadTienKhiEnhance();await loadProfessions();await loadQuests();await loadChallenges();await loadTienMenh();await loadArenaLive();maybeShowTutorial();}
  catch(e){if(e?.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}else{console.warn('Phiên vẫn được giữ, lỗi tải dữ liệu tạm thời:',e);}}
 }
 function renderGuestAreas(){
@@ -731,7 +770,7 @@ function startRewardWatcher(){
 }
 
 async function loadProfile(){
- try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();loadDisciples();loadChallenges();loadCodex();loadTienPhap();loadSpiritRankings();loadMansion();if(!Boolean(currentProfile?.mansion?.active))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadDanCac();loadBeastHouse();loadLinhPhap();loadEquipment();loadBicanh();loadProfessions();loadQuests();renderLegendEditor();}
+ try{const d=await api('/api/profile',{headers:authHeaders()});currentProfile=d.profile;renderProfile(currentProfile);renderCultivation(currentProfile);loadFriends();loadDisciples();loadChallenges();loadTienMenh();loadCodex();loadTienPhap();loadSpiritRankings();loadMansion();if(!Boolean(currentProfile?.mansion?.active))startOnlineCultivation();else if(onlineTimer){clearInterval(onlineTimer);onlineTimer=null;}loadAchievements();loadTreasure();loadDanCac();loadBeastHouse();loadLinhPhap();loadEquipment();loadBicanh();loadProfessions();loadQuests();renderLegendEditor();}
  catch(e){if(e.status===401){localStorage.removeItem(tokenKey);accountUI(null);renderGuestAreas();}}
 }
 function renderProfile(p){
@@ -1787,7 +1826,7 @@ if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('colo
 setupTutorial();
 
 loadData();loadSect();checkSession();startRewardWatcher();
-setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();loadWealth();}},30000);
+setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();loadTienMenh();loadWealth();}},30000);
 setInterval(()=>{if(getToken()&&!document.hidden){loadGlobalAnnouncement();loadRedPackets();}},5000);
 setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},20000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
@@ -1797,7 +1836,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','tien-khi-enhance':'⚜️ Cường Hóa','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','wealth':'💎 Tài Phú','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','audio-player':'🔊 Âm Thanh','tavern':'🥂 Tửu Lâu','tien-menh':'🏮 Tiên Mệnh','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','tien-khi-enhance':'⚜️ Cường Hóa','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','wealth':'💎 Tài Phú','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
@@ -1855,13 +1894,13 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.79 · Trình phát nhạc ổn định: MP3 được phục vụ từ server và có bản nhúng dự phòng. */
+/* v3.7.80 · Trình phát nhạc ổn định: MP3 được phục vụ từ server và có bản nhúng dự phòng. */
 (function setupBackgroundMusicV373(){
- const audio=$('#backgroundMusic'), playBtn=$('#audioPlayBtn'), stopBtn=$('#audioStopBtn');
+ const audio=$('#backgroundMusic'), playBtn=$('#audioPlayBtn'), stopBtn=$('#audioStopBtn'), fxBtn=$('#audioFxBtn');
  const disc=$('#audioDisc'), seek=$('#audioSeek'), current=$('#audioCurrentTime'), duration=$('#audioDuration');
  const volume=$('#audioVolume'), volumeValue=$('#audioVolumeValue'), status=$('#audioStatus'), msg=$('#audioMsg'), liveDot=$('#audioLiveDot');
  if(!audio||!playBtn||!stopBtn)return;
- const V='3.7.79', VOL_KEY='htm_music_volume_v378';
+ const V='3.7.80', VOL_KEY='htm_music_volume_v378';
  const sources=['/audio/tinh-ve-background.mp3?v='+V];
  let sourceIndex=0, playToken=0, started=false, switching=false;
  const fmt=t=>{t=Number(t)||0;const m=Math.floor(t/60),s=Math.floor(t%60);return `${m}:${String(s).padStart(2,'0')}`};
@@ -1965,20 +2004,20 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 })();
 
 
-/* v3.7.79 · ÂM THANH TƯƠNG TÁC GIAO DIỆN
+/* v3.7.80 · ÂM THANH TƯƠNG TÁC GIAO DIỆN
  * Dùng Web Audio API để tạo hiệu ứng ngắn, không cần tải thêm file âm thanh.
  * Chỉ khởi tạo sau thao tác chạm/click của người dùng để tương thích iPhone/Safari.
  */
 (function setupFunctionSounds(){
  let ctx=null, master=null, lastAt=0;
- const KEY='htm_ui_sounds';
+ const KEY='htm_ui_sounds_v380';
  const enabled=()=>{try{return localStorage.getItem(KEY)!=='off';}catch{return true;}};
  function ensure(){
   if(!enabled())return null;
   try{
    if(!ctx)ctx=new (window.AudioContext||window.webkitAudioContext)();
    if(ctx.state==='suspended')ctx.resume().catch(()=>{});
-   if(!master){master=ctx.createGain();master.gain.value=.055;master.connect(ctx.destination);}
+   if(!master){master=ctx.createGain();master.gain.value=.14;master.connect(ctx.destination);}
    return ctx;
   }catch{return null;}
  }
@@ -1987,16 +2026,22 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
   const now=c.currentTime+delay,o=c.createOscillator(),g=c.createGain();
   o.type=type;o.frequency.setValueAtTime(freq,now);g.gain.setValueAtTime(0.0001,now);g.gain.exponentialRampToValueAtTime(Math.max(.0001,volume),now+.012);g.gain.exponentialRampToValueAtTime(.0001,now+duration);o.connect(g);g.connect(master);o.start(now);o.stop(now+duration+.025);
  }
- function play(kind){
+ function playNow(kind){
   const now=Date.now(); if(now-lastAt<55)return;lastAt=now;
-  if(kind==='success'){tone(523,.08,'sine',0,.28);tone(659,.10,'sine',.07,.24);tone(784,.13,'sine',.15,.20);}
+  if(kind==='success'){tone(523,.08,'sine',0,.42);tone(659,.10,'sine',.07,.34);tone(784,.13,'sine',.15,.28);}
   else if(kind==='error'){tone(220,.12,'sawtooth',0,.16);tone(165,.15,'sawtooth',.09,.12);}
   else if(kind==='battle'){tone(180,.07,'triangle',0,.22);tone(330,.09,'triangle',.06,.20);}
   else if(kind==='lock'){tone(260,.07,'square',0,.14);tone(390,.10,'square',.07,.12);}
   else if(kind==='open'){tone(392,.07,'sine',0,.18);tone(523,.10,'sine',.08,.16);}
-  else {tone(330,.055,'sine',0,.12);}
+  else {tone(330,.055,'sine',0,.20);}
+ }
+ function play(kind){
+  if(!enabled())return;
+  const c=ensure(); if(!c)return;
+  if(c.state==='suspended'){c.resume().then(()=>playNow(kind)).catch(()=>{});}else playNow(kind);
  }
  window.htmPlayUiSound=play;
+ document.addEventListener('pointerdown',()=>{ const c=ensure(); if(c){ const unlock=()=>{try{const o=c.createOscillator(),g=c.createGain();g.gain.value=0.00001;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.015);}catch{}}; if(c.state==='suspended') c.resume().then(unlock).catch(()=>{}); else unlock(); } },{passive:true,once:false});
  document.addEventListener('click',e=>{
   const el=e.target.closest('button,a'); if(!el)return;
   if(el.disabled||el.getAttribute('aria-disabled')==='true')return;
@@ -2013,4 +2058,10 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  },{passive:true});
  // Cho phép người dùng tắt/bật bằng console/localStorage mà không ảnh hưởng chức năng chính.
  window.htmUiSounds={enable(){localStorage.setItem(KEY,'on');},disable(){localStorage.setItem(KEY,'off');}};
+ const fxButton=document.querySelector('#audioFxBtn');
+ if(fxButton){
+  const renderFx=()=>{const on=enabled();fxButton.textContent=on?'🔔 Hiệu ứng: BẬT':'🔕 Hiệu ứng: TẮT';fxButton.setAttribute('aria-pressed',String(on));fxButton.classList.toggle('primary',on);};
+  fxButton.addEventListener('click',()=>{const on=!enabled();localStorage.setItem(KEY,on?'on':'off');renderFx();if(on)play('success');});
+  renderFx();
+ }
 })();
