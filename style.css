@@ -2106,7 +2106,7 @@ body.function-only-focus .audio-player-section.focus-active,body.function-only-f
  .tien-table-ornament{font-size:4rem;}
 }
 
-/* v3.7.88 · Tiên Mệnh: 30s turn clock + table chat + admin NPC control */
+/* v3.7.90 · Tiên Mệnh: audit/fix live chat state + hardened refresh */
 .tien-menh-admin-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px;margin-bottom:10px;border:1px solid rgba(198,158,70,.24);border-radius:14px;background:rgba(198,158,70,.06)}
 .tien-menh-admin-tools span{font-size:.78rem;color:var(--muted)}
 .tien-turn-main{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}

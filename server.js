@@ -7422,6 +7422,7 @@ const TIEN_MENH_CARD_TYPES=[
   {key:'thien_menh',name:'Thiên Mệnh Bài',icon:'⭐'}
 ];
 const TIEN_MENH_MAX_STAKE=10000000000;
+const TIEN_MENH_WIN_SPIRIT_RATE=0.01; // 1% Linh Lực hiện tại, server-authoritative
 let __ensureTienMenhSchemaPromise=null;
 async function ensureTienMenhSchema(){
   if(!__ensureTienMenhSchemaPromise) __ensureTienMenhSchemaPromise=ensureTienMenhSchemaImpl().catch(err=>{__ensureTienMenhSchemaPromise=null;throw err;});
@@ -7555,7 +7556,8 @@ async function tienMenhFinish(client,gameId,winnerId){
   if(winner.user_id && Number(winner.user_id)>0){
     const prof=(await client.query(`SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[winner.user_id])).rows[0];
     const spirit=Math.max(0,Number(prof?.spirit_power)||0);
-    spiritBonus=Math.max(0,Math.floor(spirit*0.10));
+    // Tiên Mệnh: thưởng Linh Lực khi thắng = 1% Linh Lực hiện tại.
+    spiritBonus=Math.max(0,Math.floor(spirit*TIEN_MENH_WIN_SPIRIT_RATE));
     const newSpirit=spirit+spiritBonus;
     const stone=Number(prof?.spirit_stones)||0;
     await client.query(`UPDATE profiles SET spirit_power=$2,spirit_stones=$3,updated_at=NOW() WHERE user_id=$1`,[winner.user_id,newSpirit,stone+payout]);
