@@ -2,6 +2,7 @@ const express = require('express');
 const compression = require('compression');
 const path = require('path');
 const fs = require('fs');
+const { AUDIO_MIME, AUDIO_BUFFER } = require('./audio-embedded');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 
@@ -2500,22 +2501,24 @@ async function addDailyActivity(userId, field, amount=1) {
 
 app.use(express.json({ limit: '2mb' }));
 
-// v3.7.75 · Audio delivery rebuilt for iPhone/Safari/Android/desktop.
-// Serve the same audio through both /audio/* and /assets/audio/* so old/new
-// client code and direct browser playback use exactly the same server path.
+// v3.7.78 · Audio delivery made independent of Render/static asset placement.
+// The MP3 is embedded in audio-embedded.js, so playback still works even when
+// Render's runtime does not contain assets/audio or root audio files.
 const AUDIO_FILES={
-  'tinh-ve-background.mp3':{file:'assets/audio/tinh-ve-background.mp3',type:'audio/mpeg'},
-  'tinh-ve-background.m4a':{file:'assets/audio/tinh-ve-background.m4a',type:'audio/mp4'},
-  'tinh-ve-background.ogg':{file:'assets/audio/tinh-ve-background.ogg',type:'audio/ogg'},
-  'tinh-ve-background.webm':{file:'assets/audio/tinh-ve-background.webm',type:'audio/webm'}
+  'tinh-ve-background.mp3':{files:[],type:AUDIO_MIME,embedded:true}
 };
 function audioPath(name){
   const item=AUDIO_FILES[String(name||'')];
   if(!item)return null;
-  const filePath=path.resolve(__dirname,item.file);
-  const root=path.resolve(__dirname,'assets/audio');
-  if(!filePath.startsWith(root+path.sep))return null;
-  return {item,filePath};
+  if(item.embedded && AUDIO_BUFFER.length>0){
+    return {item,filePath:null,rel:'<embedded>',source:'embedded',stat:{size:AUDIO_BUFFER.length,mtime:new Date(0),mtimeMs:0}};
+  }
+  for(const rel of item.files){
+    const filePath=path.resolve(__dirname,rel);
+    if(!filePath.startsWith(path.resolve(__dirname)+path.sep)) continue;
+    try{const st=fs.statSync(filePath); if(st.isFile()&&st.size>0) return {item,filePath,rel,source:'file',stat:st};}catch{}
+  }
+  return {item,filePath:path.resolve(__dirname,'<embedded-mp3>'),rel:'<embedded>',missing:true,source:'missing'};
 }
 function audioHeaders(res,item,stat){
   res.setHeader('Content-Type',item.type);
@@ -2525,20 +2528,13 @@ function audioHeaders(res,item,stat){
   res.setHeader('Expires','0');
   res.setHeader('Content-Disposition','inline');
   res.setHeader('X-Content-Type-Options','nosniff');
-  res.setHeader('Last-Modified',stat.mtime.toUTCString());
-  res.setHeader('ETag',`W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
-}
-function serveAudio(req,res){
-  const found=audioPath(req.params.name);
-  if(!found)return res.status(404).type('text/plain').send('Audio not found');
-  let stat;
-  try{stat=fs.statSync(found.filePath);}catch(e){
-    console.error('[audio] missing asset:',found.filePath,e&&e.message);
-    return res.status(503).type('text/plain').send('Audio asset unavailable');
+  if(stat){
+    res.setHeader('Last-Modified',stat.mtime.toUTCString());
+    res.setHeader('ETag',`W/"${stat.size}-${Math.floor(stat.mtimeMs||0)}"`);
   }
-  if(!stat.isFile())return res.status(404).type('text/plain').send('Audio not found');
-  audioHeaders(res,found.item,stat);
-  const total=stat.size;
+}
+function sendAudioBytes(req,res,found){
+  const total=found.stat.size;
   const range=req.headers.range;
   if(req.method==='HEAD'){
     res.setHeader('Content-Length',String(total));
@@ -2546,20 +2542,38 @@ function serveAudio(req,res){
   }
   if(!range){
     res.setHeader('Content-Length',String(total));
+    if(found.source==='embedded') return res.status(200).end(AUDIO_BUFFER);
     return fs.createReadStream(found.filePath).on('error',()=>{if(!res.headersSent)res.status(500);res.end();}).pipe(res);
   }
   const m=/^bytes=(\d*)-(\d*)$/i.exec(String(range).trim());
   if(!m)return res.status(416).set('Content-Range',`bytes */${total}`).end();
   let start=m[1]!==''?Number(m[1]):NaN;
   let end=m[2]!==''?Number(m[2]):NaN;
-  if(Number.isNaN(start)){const suffix=Number(m[2]);if(!Number.isFinite(suffix)||suffix<=0)return res.status(416).set('Content-Range',`bytes */${total}`).end();start=Math.max(total-suffix,0);end=total-1;}
-  else {if(!Number.isFinite(start)||start<0||start>=total)return res.status(416).set('Content-Range',`bytes */${total}`).end();if(Number.isNaN(end)||end>=total)end=total-1;}
+  if(Number.isNaN(start)){
+    const suffix=Number(m[2]);
+    if(!Number.isFinite(suffix)||suffix<=0)return res.status(416).set('Content-Range',`bytes */${total}`).end();
+    start=Math.max(total-suffix,0); end=total-1;
+  } else {
+    if(!Number.isFinite(start)||start<0||start>=total)return res.status(416).set('Content-Range',`bytes */${total}`).end();
+    if(Number.isNaN(end)||end>=total)end=total-1;
+  }
   if(end<start)return res.status(416).set('Content-Range',`bytes */${total}`).end();
   const len=end-start+1;
   res.status(206);
   res.setHeader('Content-Length',String(len));
   res.setHeader('Content-Range',`bytes ${start}-${end}/${total}`);
+  if(found.source==='embedded') return res.end(AUDIO_BUFFER.subarray(start,end+1));
   return fs.createReadStream(found.filePath,{start,end}).on('error',()=>{if(!res.headersSent)res.status(500);res.end();}).pipe(res);
+}
+function serveAudio(req,res){
+  const found=audioPath(req.params.name);
+  if(!found)return res.status(404).type('text/plain').send('Audio not found');
+  if(found.source==='missing'){
+    console.error('[audio] missing asset and no embedded fallback:',found.filePath);
+    return res.status(503).type('text/plain').send('Audio asset unavailable');
+  }
+  audioHeaders(res,found.item,found.stat);
+  return sendAudioBytes(req,res,found);
 }
 app.get('/audio/:name',serveAudio);
 app.head('/audio/:name',serveAudio);
@@ -2567,12 +2581,15 @@ app.get('/assets/audio/:name',serveAudio);
 app.head('/assets/audio/:name',serveAudio);
 app.get('/api/audio-health',(req,res)=>{
   const audio=Object.entries(AUDIO_FILES).map(([name,item])=>{
-    const filePath=path.resolve(__dirname,item.file);
-    try{const st=fs.statSync(filePath);return {name,exists:st.isFile(),bytes:st.size,type:item.type,url:`/audio/${name}`};}
-    catch(e){return {name,exists:false,bytes:0,type:item.type,url:`/audio/${name}`,error:String(e&&e.message||e)};}
+    const found=audioPath(name);
+    if(found && found.source!=='missing'){
+      return {name,exists:true,bytes:found.stat.size,type:item.type,url:`/audio/${name}`,resolved:found.rel,source:found.source};
+    }
+    return {name,exists:false,bytes:0,type:item.type,url:`/audio/${name}`,resolved:found&&found.rel,error:`Audio file not found: ${found&&found.filePath||name}`};
   });
+  const primary=audio.find(x=>x.name==='tinh-ve-background.mp3');
   res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');
-  res.json({ok:audio.every(x=>x.exists&&x.bytes>0),audio});
+  res.json({ok:Boolean(primary&&primary.exists&&primary.bytes>0),primary:{name:'tinh-ve-background.mp3',embedded:AUDIO_BUFFER.length>0,bytes:AUDIO_BUFFER.length},audio});
 });
 
 app.use(express.static(__dirname, {

@@ -1836,16 +1836,14 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.74 · Trình phát nhạc ổn định: chỉ nạp audio sau thao tác Khởi Nhạc. */
+/* v3.7.78 · Trình phát nhạc ổn định: MP3 được phục vụ từ server và có bản nhúng dự phòng. */
 (function setupBackgroundMusicV373(){
  const audio=$('#backgroundMusic'), playBtn=$('#audioPlayBtn'), stopBtn=$('#audioStopBtn');
  const disc=$('#audioDisc'), seek=$('#audioSeek'), current=$('#audioCurrentTime'), duration=$('#audioDuration');
  const volume=$('#audioVolume'), volumeValue=$('#audioVolumeValue'), status=$('#audioStatus'), msg=$('#audioMsg'), liveDot=$('#audioLiveDot');
  if(!audio||!playBtn||!stopBtn)return;
- const V='3.7.75', VOL_KEY='htm_music_volume_v375';
- const base=['/audio/tinh-ve-background.mp3','/audio/tinh-ve-background.m4a','/audio/tinh-ve-background.ogg','/audio/tinh-ve-background.webm'];
- const legacy=['/assets/audio/tinh-ve-background.mp3','/assets/audio/tinh-ve-background.m4a','/assets/audio/tinh-ve-background.ogg','/assets/audio/tinh-ve-background.webm'];
- const sources=[...base,...legacy].map(x=>x+'?v='+V);
+ const V='3.7.78', VOL_KEY='htm_music_volume_v378';
+ const sources=['/audio/tinh-ve-background.mp3?v='+V];
  let sourceIndex=0, playToken=0, started=false, switching=false;
  const fmt=t=>{t=Number(t)||0;const m=Math.floor(t/60),s=Math.floor(t%60);return `${m}:${String(s).padStart(2,'0')}`};
  const setStatus=playing=>{status.textContent=playing?'🟢 ĐANG PHÁT':'🔴 ĐANG NGƯNG';status.style.color=playing?'var(--jade)':'var(--red)';disc.classList.toggle('is-playing',playing);liveDot.classList.toggle('is-playing',playing);playBtn.disabled=playing;stopBtn.disabled=!playing;playBtn.textContent=playing?'🔊 Đang Phát':'🔊 Khởi Nhạc';};

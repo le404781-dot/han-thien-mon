@@ -1,15 +1,15 @@
-const CACHE_NAME = 'han-thien-mon-3.7.74-clean-icon';
+const CACHE_NAME = 'han-thien-mon-3.7.78-audio-embedded';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/style.css?v=3.7.74',
-  '/script.js?v=3.7.74',
-  '/manifest.webmanifest?v=3.7.74',
-  '/icons/icon-192-3-7-74.png?v=3.7.74',
-  '/icons/icon-512-3-7-74.png?v=3.7.74',
-  '/icons/icon-1024-3-7-74.png?v=3.7.74',
-  '/icons/apple-touch-icon-3-7-74.png?v=3.7.74',
-  '/icons/favicon-3-7-74.png?v=3.7.74'
+  '/style.css?v=3.7.78',
+  '/script.js?v=3.7.78',
+  '/manifest.webmanifest?v=3.7.78',
+  '/icons/icon-192-3-7-74.png?v=3.7.78',
+  '/icons/icon-512-3-7-74.png?v=3.7.78',
+  '/icons/icon-1024-3-7-74.png?v=3.7.78',
+  '/icons/apple-touch-icon-3-7-74.png?v=3.7.78',
+  '/icons/favicon-3-7-74.png?v=3.7.78'
 ];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(APP_SHELL)).then(() => self.skipWaiting()));
