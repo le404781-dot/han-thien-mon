@@ -1848,12 +1848,16 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    Đồng thời không dùng watchdog 1.8s: file ~5MB có thể cần lâu hơn để bắt đầu
    trên mạng di động/Render cold-start. Chỉ fallback sau khi chờ đủ lâu. */
 (function setupBackgroundMusic(){
- const audioHost=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
+ const audioHost=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue'),nativeBtn=$('#audioNativeBtn');
  if(!audioHost||!playBtn||!stopBtn)return;
- const musicKey='htm_background_music',volumeKey='htm_background_volume',VERSION='3.7.65';
+ const VERSION='3.7.66',musicKey='htm_background_music',volumeKey='htm_background_volume';
+ // Ordered by broad real-world browser support. MP3/M4A cover legacy iOS/Safari;
+ // OGG/WebM-Opus cover Chromium/Firefox/Linux and modern desktop browsers.
  const SOURCES=[
-   {path:'/assets/audio/tinh-ve-background.mp3',type:'audio/mpeg'},
-   {path:'/assets/audio/tinh-ve-background.m4a',type:'audio/mp4'}
+   {path:'/assets/audio/tinh-ve-background.mp3',type:'audio/mpeg',label:'MP3'},
+   {path:'/assets/audio/tinh-ve-background.m4a',type:'audio/mp4',label:'AAC/M4A'},
+   {path:'/assets/audio/tinh-ve-background.ogg',type:'audio/ogg; codecs="opus"',label:'OGG/Opus'},
+   {path:'/assets/audio/tinh-ve-background.webm',type:'audio/webm; codecs="opus"',label:'WebM/Opus'}
  ];
  const absoluteUrl=(path)=>new URL(path+'?v='+VERSION,window.location.origin).href;
  let savedVolume=parseFloat(localStorage.getItem(volumeKey));
@@ -1862,7 +1866,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  if(volume)volume.value=String(savedVolume);
  if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
  let audio=audioHost,sourceIndex=0,desiredPlay=localStorage.getItem(musicKey)==='on';
- let watchdogTimer=null,retryTimer=null,healthTimer=null,playbackEventSeen=false,gestureGeneration=0,retryCount=0;
+ let watchdogTimer=null,retryTimer=null,healthTimer=null,gestureGeneration=0,playbackEventSeen=false,retryCount=0;
 
  function setStatus(playing,text){
    if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
@@ -1878,36 +1882,29 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
    if(healthTimer){clearTimeout(healthTimer);healthTimer=null;}
  }
- function healIOSAudioSession(forceCycle=false){
+ function healIOSAudioSession(){
+   // Best-effort only. Unsupported browsers simply skip this path.
    try{
      const session=navigator.audioSession;
-     if(!session)return;
-     if(forceCycle){
-       // iOS/WebKit can cache a stale audio-session category at the system
-       // audio layer. Merely assigning playback again may be deduplicated.
-       // Force a real category transition, then restore media playback on the
-       // next task. This is a documented workaround for the current iOS
-       // silent-tab failure mode.
-       session.type='ambient';
+     if(session&&'type' in session){
+       try{session.type='ambient';}catch{}
        setTimeout(()=>{try{if(desiredPlay)session.type='playback';}catch{}},0);
-     }else if(session.type!=='playback'){
-       session.type='playback';
      }
    }catch{}
  }
  function configure(el,index){
-   el.loop=true;el.preload='auto';el.autoplay=false;el.muted=false;el.volume=savedVolume;
+   el.loop=true;el.preload='auto';el.autoplay=false;el.muted=false;el.volume=savedVolume;el.defaultMuted=false;
    el.setAttribute('playsinline','');el.setAttribute('webkit-playsinline','');el.setAttribute('x-webkit-airplay','allow');
    el.src=absoluteUrl(SOURCES[index].path);
+   el.load();
  }
  function replaceAudio(index=0){
    clearTimers();
    try{audio.pause();}catch{}
    const fresh=document.createElement('audio');
-   fresh.id='backgroundMusic';fresh.setAttribute('aria-label','Nhạc nền Hàn Thiên Môn');
+   fresh.id='backgroundMusic';fresh.controls=true;fresh.loop=true;fresh.preload='metadata';fresh.setAttribute('aria-label','Trình phát nhạc nền Hàn Thiên Môn');
    configure(fresh,index);
    if(audio&&audio.parentNode)audio.replaceWith(fresh);
-   else if(audioHost&&audioHost.parentNode)audioHost.replaceWith(fresh);
    audio=fresh;sourceIndex=index;bindAudioEvents(audio);return audio;
  }
  function markPlaying(){
@@ -1917,45 +1914,45 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    if(!desiredPlay||retryTimer)return;
    retryTimer=setTimeout(()=>{retryTimer=null;if(desiredPlay)start(false,index);},delay);
  }
- function nextSourceOrRetry(reason='unknown'){
+ function failOrNext(reason){
    if(!desiredPlay)return;
    clearTimers();
-   if(sourceIndex+1<SOURCES.length && reason==='media-error'){
+   if(reason==='media-error'&&sourceIndex+1<SOURCES.length){
      const next=sourceIndex+1;
-     setStatus(false,'Đang thử định dạng âm thanh dự phòng…');
-     scheduleRetry(next,250);
+     setStatus(false,'Đang thử định dạng âm thanh tương thích khác…');
+     scheduleRetry(next,120);
      return;
    }
    retryCount+=1;
    if(retryCount<=2){
-     setStatus(false,'iPhone đang khởi tạo lại đường âm thanh…');
-     scheduleRetry(sourceIndex,1200*retryCount);
+     setStatus(false,'Đang khôi phục đường âm thanh…');
+     scheduleRetry(sourceIndex,1000*retryCount);
    }else{
-     setStatus(false,'iPhone chưa xác nhận được đường âm thanh. Chạm Khởi Nhạc để thử lại.');
+     setStatus(false,'Trình duyệt chưa phát được nhạc. Hãy dùng Trình phát tương thích bên dưới.');
+     if(nativeBtn)nativeBtn.hidden=false;
    }
  }
- function handleAudioError(){nextSourceOrRetry('media-error');}
  function bindAudioEvents(el){
    el.addEventListener('playing',markPlaying,{passive:true});
-   el.addEventListener('canplay',()=>{if(desiredPlay&&!playbackEventSeen)msg&&(msg.textContent='Đã tải nhạc · đang mở âm thanh…');},{passive:true});
-   el.addEventListener('play',()=>mediaMeta(),{passive:true});
+   el.addEventListener('play',()=>{mediaMeta();if(!playbackEventSeen)setStatus(false,'Đang phát nhạc…');},{passive:true});
+   el.addEventListener('canplay',()=>{if(desiredPlay&&!playbackEventSeen&&msg)msg.textContent='Đã tải nhạc · đang mở âm thanh…';},{passive:true});
    el.addEventListener('pause',()=>{
-     if(!el.ended&&desiredPlay)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');
+     if(!el.ended&&desiredPlay&&!el.seeking)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');
      else if(!el.ended)setStatus(false,'Đã ngưng nhạc nền.');
    },{passive:true});
-   el.addEventListener('ended',()=>{if(desiredPlay)start(false,sourceIndex);},{passive:true});
-   el.addEventListener('error',handleAudioError,{passive:true});
+   el.addEventListener('ended',()=>{if(desiredPlay){try{el.currentTime=0;}catch{}start(false,sourceIndex);}},{passive:true});
+   el.addEventListener('error',()=>failOrNext('media-error'),{passive:true});
  }
- bindAudioEvents(audio);configure(audio,0);
+ bindAudioEvents(audio);
+ configure(audio,0);
 
  function checkAudioHealthBackground(){
-   // Diagnostic only. Tuyệt đối không chặn audio.play() sau một thao tác chạm.
    fetch('/api/audio-health?ts='+Date.now(),{cache:'no-store',credentials:'same-origin'})
      .then(r=>r.json().then(data=>({ok:r.ok,data})))
      .then(({ok,data})=>{
        if(!desiredPlay||playbackEventSeen)return;
        if(!ok||!data||!data.ok||!Array.isArray(data.audio)||data.audio.some(x=>!x.exists||Number(x.bytes)<=0)){
-         msg&&(msg.textContent='Máy chủ chưa cung cấp đủ tệp nhạc.');
+         if(msg)msg.textContent='Máy chủ chưa cung cấp đủ tệp nhạc.';
        }
      }).catch(()=>{});
  }
@@ -1963,63 +1960,70 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    desiredPlay=true;localStorage.setItem(musicKey,'on');
    const gen=++gestureGeneration,idx=forcedIndex==null?sourceIndex:forcedIndex;
    clearTimers();
-   if(fromGesture){retryCount=0;healIOSAudioSession(true);audio=replaceAudio(idx);}
-   else if(idx!==sourceIndex){healIOSAudioSession(true);audio=replaceAudio(idx);}
+   if(fromGesture){retryCount=0;healIOSAudioSession();audio=replaceAudio(idx);}
+   else if(idx!==sourceIndex){audio=replaceAudio(idx);}
    else{audio.loop=true;audio.muted=false;audio.volume=savedVolume;}
-   audio.volume=savedVolume;sourceIndex=idx;playbackEventSeen=false;
+   audio.volume=savedVolume;audio.muted=false;sourceIndex=idx;playbackEventSeen=false;
    setStatus(false,'Đang mở âm thanh…');
-
-   // CRITICAL: gọi play() NGAY trong call stack của thao tác chạm.
-   // Không await fetch, không await AudioSession, không chờ health-check trước.
+   // No await before play(): preserve the user's click/tap activation on every browser.
    let playPromise;
-   try{
-     // User gesture is still active here. The session reset above is the
-     // recovery path; play() itself remains in the same click call stack.
-     playPromise=audio.play();
-   }catch(e){
-     handlePlayFailure(e,fromGesture,gen);return;
-   }
+   try{playPromise=audio.play();}
+   catch(e){handlePlayFailure(e,fromGesture,gen);return;}
    if(playPromise&&typeof playPromise.then==='function'){
      playPromise.then(()=>{
        if(gen!==gestureGeneration||!desiredPlay)return;
-       // play() resolve không đồng nghĩa iOS đã phát ra loa; chờ event 'playing'.
-       watchdogTimer=setTimeout(()=>{
-         watchdogTimer=null;
-         if(desiredPlay&&!playbackEventSeen)nextSourceOrRetry('watchdog');
-       },8000);
+       watchdogTimer=setTimeout(()=>{watchdogTimer=null;if(desiredPlay&&!playbackEventSeen)failOrNext('watchdog');},10000);
      }).catch(e=>handlePlayFailure(e,fromGesture,gen));
    }else{
-     watchdogTimer=setTimeout(()=>{if(desiredPlay&&!playbackEventSeen)nextSourceOrRetry('watchdog');},8000);
+     watchdogTimer=setTimeout(()=>{if(desiredPlay&&!playbackEventSeen)failOrNext('watchdog');},10000);
    }
    if(fromGesture)checkAudioHealthBackground();
  }
  function handlePlayFailure(e,fromGesture,gen){
    if(gen!==gestureGeneration||!desiredPlay)return;
    const name=String(e&&e.name||'');
-   if(name==='NotAllowedError'){
-     setStatus(false,'iPhone chưa cho phép phát âm thanh. Hãy chạm Khởi Nhạc lại một lần.');
-   }else if(name==='AbortError'){
-     setStatus(false,'iPhone vừa ngắt đường âm thanh. Chạm Khởi Nhạc để mở lại.');
-   }else{
-     nextSourceOrRetry('media-error');
-   }
+   if(name==='NotAllowedError')setStatus(false,'Trình duyệt chặn tự động phát. Hãy chạm nút Khởi Nhạc hoặc nút ▶ trên trình phát.');
+   else if(name==='AbortError')setStatus(false,'Đường âm thanh vừa bị ngắt. Đang thử lại…');
+   else failOrNext('media-error');
  }
  function stop(){
    desiredPlay=false;localStorage.setItem(musicKey,'off');gestureGeneration++;clearTimers();retryCount=0;
    try{audio.pause();audio.currentTime=0;}catch{}
    setStatus(false,'Đã ngưng nhạc nền.');
  }
+ function nativePlay(){
+   desiredPlay=true;localStorage.setItem(musicKey,'on');retryCount=0;clearTimers();
+   if(nativeBtn)nativeBtn.hidden=true;
+   try{
+     // Hand control back to the browser's native source selection. This is the
+     // final compatibility path: the UA can choose MP3/M4A/OGG/WebM itself.
+     audio.removeAttribute('src');
+     audio.innerHTML='';
+     SOURCES.forEach(source=>{
+       const sourceEl=document.createElement('source');
+       sourceEl.src=absoluteUrl(source.path);
+       sourceEl.type=source.type;
+       audio.appendChild(sourceEl);
+     });
+     audio.controls=true;audio.loop=true;audio.muted=false;audio.volume=savedVolume;
+     audio.load();
+     const p=audio.play();
+     if(p&&typeof p.catch==='function')p.catch(()=>{});
+   }catch{}
+ }
  playBtn.addEventListener('click',()=>start(true));
  stopBtn.addEventListener('click',stop);
+ if(nativeBtn)nativeBtn.addEventListener('click',nativePlay);
  if(volume)volume.addEventListener('input',()=>{
    savedVolume=Math.max(0,Math.min(1,Number(volume.value)));localStorage.setItem(volumeKey,String(savedVolume));
    if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';try{audio.volume=savedVolume;}catch{}
  });
  document.addEventListener('visibilitychange',()=>{
-   if(document.visibilityState==='visible'&&desiredPlay&&audio.paused)setStatus(false,'Nhạc đã tạm dừng bởi iOS · chạm Khởi Nhạc để tiếp tục.');
+   if(document.visibilityState==='visible'&&desiredPlay&&audio.paused)setStatus(false,'Nhạc đã tạm dừng bởi hệ điều hành · chạm Khởi Nhạc để tiếp tục.');
  });
  if('mediaSession' in navigator){
    try{navigator.mediaSession.setActionHandler('play',()=>start(true));navigator.mediaSession.setActionHandler('pause',stop);navigator.mediaSession.setActionHandler('stop',stop);}catch{}
  }
- setStatus(false,desiredPlay?'Đã ghi nhớ phát nhạc · chạm Khởi Nhạc để mở khóa âm thanh.':'Đang ngưng nhạc.');
+ setStatus(false,desiredPlay?'Đã ghi nhớ phát nhạc · chạm Khởi Nhạc để mở âm thanh.':'Đang ngưng nhạc.');
+ if(nativeBtn)nativeBtn.hidden=true;
 })();
