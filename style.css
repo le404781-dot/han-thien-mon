@@ -2130,3 +2130,5 @@ body.function-only-focus .audio-player-section.focus-active,body.function-only-f
 .tien-chat-log{contain:content}
 
 .battle-turn-timer{margin:10px 0;padding:10px 14px;border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 88%,var(--gold) 12%);text-align:center;font-weight:900;font-variant-numeric:tabular-nums}.battle-turn-timer{letter-spacing:.03em}.active-battle:not(.battle-countdown) .battle-turn-timer{animation:challengeCountdownPulse 1.2s ease-in-out infinite}
+.challenge-admin-settings{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 14px;padding:12px 14px;border:1px solid rgba(190,145,65,.32);border-radius:14px;background:rgba(190,145,65,.07)}
+.challenge-admin-settings span{font-weight:800}.challenge-admin-settings small{color:var(--muted);flex:1 1 260px}.spit-global-status{margin:10px 0;padding:10px 12px;border-radius:10px;background:rgba(190,145,65,.08);font-weight:800}.battle-auto-result-hint{margin:10px 0;padding:12px 14px;border-radius:12px;background:rgba(38,112,93,.08);line-height:1.5}.battle-auto-result-hint b{color:var(--jade)}
