@@ -1896,7 +1896,7 @@ body.function-only-focus .tien-khi-enhance-section.focus-active{
 .pending-spit-toggle{white-space:nowrap}
 @media(max-width:760px){.challenge-replay-row{grid-template-columns:1fr}.challenge-replay-row .btn{width:100%}.pending-spit-toggle{grid-column:2}}
 
-/* v3.7.72 · Trình phát nhạc mới kiểu streaming */
+/* v3.7.73 · Trình phát nhạc mới kiểu streaming */
 .audio-player-section{padding-top:70px;padding-bottom:70px}
 .audio-player-card{display:grid;grid-template-columns:230px 1fr;gap:34px;align-items:center;border:1px solid var(--gold);background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--paper) 86%,var(--jade) 14%));padding:30px;box-shadow:var(--shadow);border-radius:18px}
 .audio-disc-wrap{display:grid;place-items:center}
@@ -1920,3 +1920,6 @@ body.function-only-focus .tien-khi-enhance-section.focus-active{
 .audio-note{margin-top:15px;padding:11px 13px;border:1px solid var(--line);background:color-mix(in srgb,var(--surface) 80%,var(--bg));color:var(--muted);font-size:.74rem;border-radius:10px}.audio-note b{color:var(--red)}
 @keyframes htmDiscSpin{to{transform:rotate(360deg)}}@keyframes audioPulse{50%{transform:scale(1.25);opacity:.65}}
 @media(max-width:700px){.audio-player-card{grid-template-columns:1fr;padding:22px;gap:20px}.audio-disc{width:178px;height:178px}.audio-disc-cover{width:92px;height:92px}.audio-controls-row{display:grid;grid-template-columns:1fr 1fr}.audio-main-btn,.audio-stop-btn{width:100%;min-width:0}.audio-volume{grid-column:1/-1;margin:3px 0 0;width:100%}.audio-volume input{flex:1;width:auto}.audio-time-row{grid-template-columns:38px 1fr 38px}}
+
+/* v3.7.79 · Lôi Đài countdown 28 giây */
+.challenge-countdown-banner{margin:14px 0;padding:14px 16px;border:1px solid var(--gold);border-radius:12px;background:linear-gradient(90deg,color-mix(in srgb,var(--surface) 82%,var(--gold) 18%),color-mix(in srgb,var(--surface) 94%,var(--jade) 6%));color:var(--jade);font-weight:900;text-align:center;letter-spacing:.04em;box-shadow:var(--shadow);font-variant-numeric:tabular-nums}.challenge-countdown-banner.countdown-active{animation:challengeCountdownPulse 1s ease-in-out infinite}.battle-countdown .challenge-move,.battle-countdown .battle-spit{opacity:.45;pointer-events:none}.battle-countdown .battle-turn-note{color:var(--red);font-weight:800}@keyframes challengeCountdownPulse{50%{transform:scale(1.012);box-shadow:0 8px 28px rgba(0,0,0,.10)}}

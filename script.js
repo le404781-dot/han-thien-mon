@@ -376,7 +376,7 @@ async function pollChallengeRealtime(){
    if(window.__challengeLastState){window.__challengeLastState=null;await loadChallenges();}
    return;
   }
-  const sig=[b.id,b.status,b.round,b.turnUserId,b.challengerHp,b.opponentHp,b.lastActorId,b.lastAction].join('|');
+  const sig=[b.id,b.status,b.round,b.turnUserId,b.challengerHp,b.opponentHp,b.lastActorId,b.lastAction,b.countdownUntil].join('|');
   const previous=window.__challengeLastState||'';
   const prevParts=previous?previous.split('|'):[];
   const turnChanged=Boolean(previous)&&String(prevParts[3])!==String(b.turnUserId);
@@ -394,6 +394,23 @@ async function pollChallengeRealtime(){
  }finally{window.challengeRealtimeBusy=false;}
 }
 
+
+let __challengeCountdownTimer=null;
+function stopChallengeCountdown(){if(__challengeCountdownTimer){clearInterval(__challengeCountdownTimer);__challengeCountdownTimer=null;}}
+function startChallengeCountdown(battle){
+ stopChallengeCountdown();
+ const id=Number(battle?.id||0); const until=Number(battle?.countdownUntil?new Date(battle.countdownUntil).getTime():0);
+ const render=()=>{
+   const el=document.querySelector(`[data-challenge-countdown="${id}"]`);
+   if(!el){if(Date.now()>=until)stopChallengeCountdown();return;}
+   const remain=Math.max(0,until-Date.now());
+   if(remain>0){el.textContent=`⏳ Chuẩn bị khai chiến · ${Math.ceil(remain/1000)} giây`;el.classList.add('countdown-active');}
+   else{el.textContent='⚔️ Countdown kết thúc · Lôi Đài đang khai chiến...';el.classList.remove('countdown-active');stopChallengeCountdown();}
+ };
+ render();
+ if(until>Date.now())__challengeCountdownTimer=setInterval(render,250);
+}
+
 async function loadChallenges(){
  const area=$('#challengeArea'); if(!area||!getToken())return;
  try{
@@ -403,8 +420,11 @@ async function loadChallenges(){
   const debuffActive=me.challenge_debuff_until&&new Date(me.challenge_debuff_until)>new Date();
   const pct=(hp,max)=>Math.min(100,Math.max(0,Math.round((Number(hp||0)/Math.max(1,Number(max||1)))*100)));
   const hpColor=(hp,max)=>pct(hp,max)<=25?'danger':pct(hp,max)<=55?'warn':'';
-  const battleHtml=battle?`<div class="challenge-block active-battle">
-    <div class="challenge-subhead"><span class="eyebrow">🔥 LÔI ĐÀI ONLINE ĐANG DIỄN RA</span><b>Vòng ${Number(battle.round||0)}</b></div>
+  const battleCountdownMs=Number(battle?.countdownRemainingMs||0);
+  const battleCountdown=Boolean(battleCountdownMs>0 || (battle?.countdownUntil && new Date(battle.countdownUntil).getTime()>Date.now()));
+  const battleHtml=battle?`<div class="challenge-block active-battle ${battleCountdown?'battle-countdown':''}">
+    <div class="challenge-subhead"><span class="eyebrow">🔥 LÔI ĐÀI ONLINE ${battleCountdown?'ĐÃ KHAI MỞ':'ĐANG DIỄN RA'}</span><b>${battleCountdown?'28 GIÂY':'Vòng '+Number(battle.round||0)}</b></div>
+    ${battleCountdown?`<div class="challenge-countdown-banner" data-challenge-countdown="${battle.id}">⏳ Chuẩn bị khai chiến · ${Math.ceil(battleCountdownMs/1000)} giây</div>`:''}
     <div class="battle-arena">
       <article data-battle-fighter="challenger" class="battle-fighter ${Number(battle.turnUserId)===Number(battle.challengerId)?'turn':''}">
        <div class="battle-fighter-top"><span class="challenge-avatar">${esc(battle.challengerAvatar||'⚔')}</span><div><b>${esc(battle.challengerName||'Người khiêu chiến')}</b><small>${esc(battle.challengerRank||'')} · ${Number(battle.challengerSpirit||0).toLocaleString('vi-VN')} linh lực</small></div></div>
@@ -418,24 +438,24 @@ async function loadChallenges(){
        <div class="battle-hp"><i data-battle-hp-bar="opponent" class="${hpColor(battle.opponentHp,battle.opponentMaxHp)}" style="width:${pct(battle.opponentHp,battle.opponentMaxHp)}%"></i></div>
       </article>
     </div>
-    <div class="battle-turn-note" data-battle-turn-note>${battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
+    <div class="battle-turn-note" data-battle-turn-note>${battleCountdown?'<b>🛡️ Lôi đài đã mở.</b> Hai bên chuẩn bị giao chiến, chưa thể ra đòn.':battle.yourTurn?'<b>⚡ Đến lượt bạn!</b> Chọn một tuyệt chiêu để ra đòn.':'⏳ Đang chờ đối thủ tung tuyệt chiêu...'}</div>
     <div class="battle-last-action" data-battle-last-action ${battle.lastAction?'':'hidden'}>${battle.lastAction?`${esc(battle.lastAction)} · <b>-${Number(battle.lastDamage||0).toLocaleString('vi-VN')} HP</b>`:''}</div>
-    <div class="challenge-moves"><div class="challenge-moves-title"><b>⚔ CHỌN CHIÊU — BẤM LÀ RA ĐÒN</b><small>Ba chiêu có sát thương cố định theo trạng thái lôi đài. Con số trên nút chính là HP sẽ bị trừ.</small></div><div class="challenge-move-grid">${(battle.moveOptions||[]).map(m=>`<button type="button" class="challenge-move" data-id="${battle.id}" data-move-id="${m.id}" ${battle.yourTurn?'':'disabled'}><span class="challenge-move-icon">${esc(m.icon||'⚔️')}</span><span class="challenge-move-copy"><b>${esc(m.name)}</b><small>${esc(m.description||'')}</small></span><strong>-${Number(m.damage||0).toLocaleString('vi-VN')} HP</strong><em>▶ RA CHIÊU</em></button>`).join('')}</div></div>
-    <div class="battle-actions"><button class="btn primary battle-auto battle-auto-main" data-id="${battle.id}">${window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH'}</button>${battle.spitAllowed&&battle.yourTurn?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn primary battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
-    <div class="battle-action-row"><small>${window.challengeAutoAttack?'🤖 Tự động sẽ chọn chiêu có sát thương cao nhất khi tới lượt.':'Chọn một trong 3 nút chiêu để ra đòn ngay khi tới lượt.'}</small></div>
+    <div class="challenge-moves"><div class="challenge-moves-title"><b>⚔ CHỌN CHIÊU — BẤM LÀ RA ĐÒN</b><small>Ba chiêu có sát thương cố định theo trạng thái lôi đài. Con số trên nút chính là HP sẽ bị trừ.</small></div><div class="challenge-move-grid">${(battle.moveOptions||[]).map(m=>`<button type="button" class="challenge-move" data-id="${battle.id}" data-move-id="${m.id}" ${battle.yourTurn&&!battleCountdown?'':'disabled'}><span class="challenge-move-icon">${esc(m.icon||'⚔️')}</span><span class="challenge-move-copy"><b>${esc(m.name)}</b><small>${esc(m.description||'')}</small></span><strong>-${Number(m.damage||0).toLocaleString('vi-VN')} HP</strong><em>▶ RA CHIÊU</em></button>`).join('')}</div></div>
+    <div class="battle-actions"><button class="btn primary battle-auto battle-auto-main" data-id="${battle.id}">${window.challengeAutoAttack?'🤖 TỰ ĐỘNG ĐÁNH: BẬT':'🤖 TỰ ĐỘNG ĐÁNH'}</button>${battle.spitAllowed&&battle.yourTurn&&!battleCountdown?`<button class="btn danger battle-spit" data-id="${battle.id}">💦 NHỔ 1 NGỤM NƯỚC BỌT</button>`:''}<button class="btn primary battle-leave" data-id="${battle.id}">🏳️ RỜI LÔI ĐÀI · TÍNH THẤT BẠI</button></div>
+    <div class="battle-action-row"><small>${battleCountdown?'⏳ Sau khi hết 28 giây, hệ thống sẽ tự động tính toàn bộ trận đấu.':window.challengeAutoAttack?'🤖 Tự động sẽ chọn chiêu có sát thương cao nhất khi tới lượt.':'Chọn một trong 3 nút chiêu để ra đòn ngay khi tới lượt.'}</small></div>
     <small class="battle-rule">Sát thương phụ thuộc Công lực, trang bị, công pháp được chọn và chênh lệch cảnh giới; cảnh giới cao hơn gây sát thương lớn hơn, cảnh giới thấp hơn bị giảm mạnh.</small>
    </div>`:'';
   area.innerHTML=`
    ${debuffActive?`<div class="challenge-debuff"><b>☠ ${esc(me.challenge_debuff_text||'Khiêu chiến thất bại: đang chịu debuff.')}</b><small>Debuff còn hiệu lực đến ${new Date(me.challenge_debuff_until).toLocaleString('vi-VN')}</small></div>`:''}
    ${battleHtml}
    ${publicBattles.length?`<div class="challenge-block betting-block"><div class="challenge-subhead"><span class="eyebrow">💎 SÀN ĐẶT CƯỢC LÔI ĐÀI</span><b>Mọi môn nhân đều có thể tham gia</b></div><div class="challenge-list">${publicBattles.map(x=>{const pool=Number(x.bet_pool||0),a=Number(x.challenger_bet||0),b=Number(x.opponent_bet||0);return `<article class="challenge-card bet-card"><span class="challenge-avatar">⚔</span><div><b>${esc(x.challenger_name)} VS ${esc(x.opponent_name)}</b><small>💎 Tổng cược: ${pool.toLocaleString('vi-VN')} · ${esc(x.challenger_name)}: ${a.toLocaleString('vi-VN')} · ${esc(x.opponent_name)}: ${b.toLocaleString('vi-VN')}</small></div><div class="bet-actions"><select class="bet-target" data-id="${x.id}"><option value="${x.challenger_id}">Cược ${esc(x.challenger_name)}</option><option value="${x.opponent_id}">Cược ${esc(x.opponent_name)}</option></select><input class="bet-amount" data-id="${x.id}" type="number" min="1" value="100" inputmode="numeric"><button class="btn small primary challenge-bet" data-id="${x.id}">💎 Đặt cược</button></div></article>`}).join('')}</div></div>`:''}
-   <div class="challenge-limit-banner"><span>⚔ Lượt Khiêu Chiến</span><b>${Number(usage.used)}/${Number(usage.limit)} trong 24 giờ</b><small>${challengeLimitReached?'⛔ Đã hết lượt':'Còn '+Number(usage.remaining)+' lượt'}</small></div><div class="challenge-rules"><div><span class="eyebrow">⚔ ONLINE · LÔI ĐÀI</span><h3>Tự động quyết đấu</h3><p>Đối phương đồng thuận là Lôi Đài lập tức khai mở. Hệ thống tự tính toán, tự ra chiêu, hiển thị sát thương và kết quả; không cần hai bên bấm nút.</p></div><div><span class="eyebrow">🌓 OFFLINE · MÔ PHỎNG</span><h3>Đánh với bản mô phỏng</h3><p>Không cần đối phương online. Chế độ này vẫn dùng quy tắc chênh cảnh giới.</p></div><div><span class="eyebrow">☯ QUY LUẬT CẢNH GIỚI</span><h3>Sát thương theo cảnh giới</h3><p>Cùng cảnh giới sẽ cân bằng hơn; cảnh giới cao hơn có hệ số sát thương tăng, cảnh giới thấp hơn bị giảm sát thương.</p></div></div>
+   <div class="challenge-limit-banner"><span>⚔ Lượt Khiêu Chiến</span><b>${Number(usage.used)}/${Number(usage.limit)} trong 24 giờ</b><small>${challengeLimitReached?'⛔ Đã hết lượt':'Còn '+Number(usage.remaining)+' lượt'}</small></div><div class="challenge-rules"><div><span class="eyebrow">⚔ ONLINE · LÔI ĐÀI</span><h3>Tự động quyết đấu</h3><p>Đối phương đồng thuận là Lôi Đài khai mở và bắt đầu đếm ngược 28 giây. Hết thời gian, hệ thống tự tính toán, tự ra chiêu, hiển thị sát thương và kết quả; không cần hai bên bấm nút.</p></div><div><span class="eyebrow">🌓 OFFLINE · MÔ PHỎNG</span><h3>Đánh với bản mô phỏng</h3><p>Không cần đối phương online. Chế độ này vẫn dùng quy tắc chênh cảnh giới.</p></div><div><span class="eyebrow">☯ QUY LUẬT CẢNH GIỚI</span><h3>Sát thương theo cảnh giới</h3><p>Cùng cảnh giới sẽ cân bằng hơn; cảnh giới cao hơn có hệ số sát thương tăng, cảnh giới thấp hơn bị giảm sát thương.</p></div></div>
    ${pending.length?`<div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📨 LỜI MỜI LÔI ĐÀI</span><b>${pending.length} lời mời đang chờ</b></div><div class="challenge-list">${pending.map(x=>{const gap=Math.abs(Number(x.realmIndex??realmIndexOf(x.rank))-(Number(currentProfile?.realmIndex)||0));const spitAvailable=gap>=2;return `<article class="challenge-card incoming"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.challenger_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${spitAvailable?`<small class="spit-warning">⚠️ Chênh ${gap} cảnh giới · ${x.spit_enabled!==false?'Có thể Nhổ 1 Ngụm Nước Bọt':'Đã tắt Nhổ 1 Ngụm Nước Bọt'}</small>`:''}</div>${spitAvailable?`<button class="btn small ${x.spit_enabled!==false?'danger':'ghost'} pending-spit-toggle" data-id="${x.id}" data-enabled="${x.spit_enabled!==false}">💦 Nhổ: ${x.spit_enabled!==false?'BẬT':'TẮT'}</button>`:''}<button class="btn small primary challenge-accept" data-id="${x.id}">Đồng thuận</button><button class="btn small ghost challenge-reject" data-id="${x.id}">Từ chối</button></article>`}).join('')}</div><small class="battle-rule">Khi chênh từ 2 cảnh giới, tùy chọn Nhổ 1 Ngụm Nước Bọt được đồng bộ cho cả hai môn nhân trước khi khai mở lôi đài.</small></div>`:''}
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">🎯 CHỌN ĐỐI THỦ</span><b>${users.length} môn nhân</b></div><div class="challenge-list">${users.length?users.map(x=>`<article class="challenge-card"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${Number(x.challenge_debuff_percent||0)>0?`<small class="debuff-mini">☠ Đang chịu debuff ${x.challenge_debuff_percent}%</small>`:''}</div><div class="challenge-card-actions"><button class="btn small primary challenge-online" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>⚔ Online</button><button class="btn small ghost challenge-offline" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>🌓 Offline</button></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có môn nhân khác để khiêu chiến.</p></div>`}</div></div>
    <div class="challenge-block replay-block"><div class="challenge-subhead"><span class="eyebrow">🔁 XEM LẠI KHIÊU CHIẾN</span><b>${replays.length?`${replays.length} trận còn ${Math.max(0,Math.ceil((new Date(replays[0].replayUntil).getTime()-Date.now())/1000))} giây`:'Không có trận đang lưu'}</b></div><div class="challenge-replay-list">${replays.length?replays.map(r=>`<article class="challenge-replay-row"><div><b>⚔ ${esc(r.challengerName)} VS ${esc(r.opponentName)}</b><small>${r.realmGap>=2?'⚠️ Chênh '+r.realmGap+' cảnh giới':''} · ${r.spit?'💦 Đã Nhổ 1 Ngụm Nước Bọt':'⚔ Tự động quyết đấu'} · hết hạn ${new Date(r.replayUntil).toLocaleTimeString('vi-VN')}</small></div><button class="btn small primary challenge-replay-btn" data-replay-id="${r.id}">▶ Xem lại</button></article>`).join(''):'<div class="empty-state compact"><p>Diễn biến trận online chỉ được lưu để xem lại trong 3 phút.</p></div>'}</div></div>
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📜 CHIẾN TÍCH</span><b>${history.length} trận gần đây</b></div><div class="challenge-history">${history.length?history.map(h=>{const meId=Number(currentUser?.id),won=Number(h.winner_id)===meId,pendingStatus=h.status==='pending',activeStatus=h.status==='accepted';return `<article class="challenge-history-row"><span>${h.mode==='online'?'⚔':'🌓'}</span><div><b>${won?'🏆 Thắng':h.status==='rejected'?'Từ chối':activeStatus?'⚔ Đang giao chiến':pendingStatus?'⌛ Chờ':'💀 Thất bại'}</b><small>${esc(Number(h.challenger_id)===meId?h.opponent_name:h.challenger_name)} · ${new Date(h.created_at).toLocaleString('vi-VN')}</small></div><div class="challenge-result-text">${won?`+${Number(h.reward_spirit||0).toLocaleString('vi-VN')} linh lực${h.reward_item_name?` · ${esc(h.reward_item_name)} ×${h.reward_quantity}`:''}`:esc(h.penalty_text||'')}</div></article>`}).join(''):`<div class="empty-state compact"><p>Chưa có chiến tích.</p></div>`}</div></div>
    <p id="challengeMsg" class="train-msg"></p>`;
-  if(battle){window.__challengeLiveState=battle; setChallengeAuto(window.challengeAutoAttack===true);}
+  if(battle){window.__challengeLiveState=battle; setChallengeAuto(window.challengeAutoAttack===true); if(Number(battle.countdownRemainingMs||0)>0 || battle.countdownUntil)startChallengeCountdown(battle);}else stopChallengeCountdown();
   document.querySelectorAll('.pending-spit-toggle').forEach(b=>b.onclick=async()=>{
     const id=Number(b.dataset.id),enabled=b.dataset.enabled!=='true'; b.disabled=true;
     try{await api('/api/challenges/online/spit-setting',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:id,enabled})}); await loadChallenges();}
@@ -461,7 +481,7 @@ async function loadChallenges(){
   document.querySelectorAll('.challenge-bet').forEach(b=>b.onclick=()=>placeChallengeBet(Number(b.dataset.id)));
   const hasOnlineBattle=Boolean(d.activeBattle);
   if(hasOnlineBattle){
-   window.__challengeLastState=[d.activeBattle.id,d.activeBattle.status,d.activeBattle.round,d.activeBattle.turnUserId,d.activeBattle.challengerHp,d.activeBattle.opponentHp,d.activeBattle.lastActorId,d.activeBattle.lastAction].join('|');
+   window.__challengeLastState=[d.activeBattle.id,d.activeBattle.status,d.activeBattle.round,d.activeBattle.turnUserId,d.activeBattle.challengerHp,d.activeBattle.opponentHp,d.activeBattle.lastActorId,d.activeBattle.lastAction,d.activeBattle.countdownUntil].join('|');
    if(!window.challengeRealtimeTimer)window.challengeRealtimeTimer=setInterval(pollChallengeRealtime,2000);
   }else{
    window.__challengeLastState=null;
@@ -528,10 +548,9 @@ async function respondChallenge(requestId,action,spitEnabled=null){
   const x=await api('/api/challenges/online/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,action,...(spitEnabled===null?{}:{spitEnabled})})});
   msg.textContent=action==='reject'?`🏳️ ${x.message}`:`⚔ ${x.message}`;
   if(action==='accept' && x.battle){
-    window.__challengeLastReplayId=Number(x.battle.id||requestId);
-    if(Number(x.battle.realmGap||0)>=2)msg.textContent=`⚠️ Chênh ${Number(x.battle.realmGap)} cảnh giới · ${x.battle.spit?'💦 Đã bật và sử dụng Nhổ 1 Ngụm Nước Bọt':'💦 Nhổ 1 Ngụm Nước Bọt đã tắt'} · `+msg.textContent;
-    // Không còn thao tác chọn chiêu: hệ thống đã tính xong ngay khi đồng thuận.
-    await renderAutoChallengeResult(x.battle);
+    window.__challengeLastReplayId=null;
+    msg.textContent=`⚔ ${x.message}`;
+    await loadChallenges();
     return;
   }
   await Promise.all([loadProfile(),loadChallenges(),loadLeaderboard()]);
@@ -1836,13 +1855,13 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.78 · Trình phát nhạc ổn định: MP3 được phục vụ từ server và có bản nhúng dự phòng. */
+/* v3.7.79 · Trình phát nhạc ổn định: MP3 được phục vụ từ server và có bản nhúng dự phòng. */
 (function setupBackgroundMusicV373(){
  const audio=$('#backgroundMusic'), playBtn=$('#audioPlayBtn'), stopBtn=$('#audioStopBtn');
  const disc=$('#audioDisc'), seek=$('#audioSeek'), current=$('#audioCurrentTime'), duration=$('#audioDuration');
  const volume=$('#audioVolume'), volumeValue=$('#audioVolumeValue'), status=$('#audioStatus'), msg=$('#audioMsg'), liveDot=$('#audioLiveDot');
  if(!audio||!playBtn||!stopBtn)return;
- const V='3.7.78', VOL_KEY='htm_music_volume_v378';
+ const V='3.7.79', VOL_KEY='htm_music_volume_v378';
  const sources=['/audio/tinh-ve-background.mp3?v='+V];
  let sourceIndex=0, playToken=0, started=false, switching=false;
  const fmt=t=>{t=Number(t)||0;const m=Math.floor(t/60),s=Math.floor(t%60);return `${m}:${String(s).padStart(2,'0')}`};
@@ -1943,4 +1962,55 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    apply(next);
  });
  apply(locked());
+})();
+
+
+/* v3.7.79 · ÂM THANH TƯƠNG TÁC GIAO DIỆN
+ * Dùng Web Audio API để tạo hiệu ứng ngắn, không cần tải thêm file âm thanh.
+ * Chỉ khởi tạo sau thao tác chạm/click của người dùng để tương thích iPhone/Safari.
+ */
+(function setupFunctionSounds(){
+ let ctx=null, master=null, lastAt=0;
+ const KEY='htm_ui_sounds';
+ const enabled=()=>{try{return localStorage.getItem(KEY)!=='off';}catch{return true;}};
+ function ensure(){
+  if(!enabled())return null;
+  try{
+   if(!ctx)ctx=new (window.AudioContext||window.webkitAudioContext)();
+   if(ctx.state==='suspended')ctx.resume().catch(()=>{});
+   if(!master){master=ctx.createGain();master.gain.value=.055;master.connect(ctx.destination);}
+   return ctx;
+  }catch{return null;}
+ }
+ function tone(freq,duration,type='sine',delay=0,volume=.35){
+  const c=ensure(); if(!c)return;
+  const now=c.currentTime+delay,o=c.createOscillator(),g=c.createGain();
+  o.type=type;o.frequency.setValueAtTime(freq,now);g.gain.setValueAtTime(0.0001,now);g.gain.exponentialRampToValueAtTime(Math.max(.0001,volume),now+.012);g.gain.exponentialRampToValueAtTime(.0001,now+duration);o.connect(g);g.connect(master);o.start(now);o.stop(now+duration+.025);
+ }
+ function play(kind){
+  const now=Date.now(); if(now-lastAt<55)return;lastAt=now;
+  if(kind==='success'){tone(523,.08,'sine',0,.28);tone(659,.10,'sine',.07,.24);tone(784,.13,'sine',.15,.20);}
+  else if(kind==='error'){tone(220,.12,'sawtooth',0,.16);tone(165,.15,'sawtooth',.09,.12);}
+  else if(kind==='battle'){tone(180,.07,'triangle',0,.22);tone(330,.09,'triangle',.06,.20);}
+  else if(kind==='lock'){tone(260,.07,'square',0,.14);tone(390,.10,'square',.07,.12);}
+  else if(kind==='open'){tone(392,.07,'sine',0,.18);tone(523,.10,'sine',.08,.16);}
+  else {tone(330,.055,'sine',0,.12);}
+ }
+ window.htmPlayUiSound=play;
+ document.addEventListener('click',e=>{
+  const el=e.target.closest('button,a'); if(!el)return;
+  if(el.disabled||el.getAttribute('aria-disabled')==='true')return;
+  const id=el.id||'', cls=String(el.className||'');
+  let kind='tap';
+  if(id==='audioPlayBtn')kind='open';
+  else if(id==='audioStopBtn')kind='tap';
+  else if(id==='screenLockBtn')kind='lock';
+  else if(/challenge-accept|mail-accept|randomGifts|codex-learn|buy|purchase|use|equip|feed|train|submit/i.test(id+' '+cls))kind='success';
+  else if(/reject|danger|delete|remove|leave|stop/i.test(id+' '+cls))kind='error';
+  else if(/challenge|battle|arena|spit|move/i.test(id+' '+cls))kind='battle';
+  else if(el.tagName==='A')kind='open';
+  play(kind);
+ },{passive:true});
+ // Cho phép người dùng tắt/bật bằng console/localStorage mà không ảnh hưởng chức năng chính.
+ window.htmUiSounds={enable(){localStorage.setItem(KEY,'on');},disable(){localStorage.setItem(KEY,'off');}};
 })();
