@@ -2105,3 +2105,37 @@ body.function-only-focus .audio-player-section.focus-active,body.function-only-f
  .tien-table-title{font-size:.65rem;letter-spacing:.18em;}
  .tien-table-ornament{font-size:4rem;}
 }
+
+/* v3.7.88 · Tiên Mệnh: 30s turn clock + table chat + admin NPC control */
+.tien-menh-admin-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px;margin-bottom:10px;border:1px solid rgba(198,158,70,.24);border-radius:14px;background:rgba(198,158,70,.06)}
+.tien-menh-admin-tools span{font-size:.78rem;color:var(--muted)}
+.tien-turn-main{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
+.tien-turn-timer{display:inline-flex;align-items:center;justify-content:center;min-width:74px;padding:7px 10px;border-radius:999px;border:1px solid rgba(38,112,93,.24);background:rgba(38,112,93,.08);font-weight:1000;font-variant-numeric:tabular-nums;letter-spacing:.03em;transition:transform .18s ease,background .18s ease,border-color .18s ease}
+.tien-turn-timer.urgent{border-color:rgba(177,66,43,.5);background:rgba(177,66,43,.10);color:#a33424;animation:tienTimerPulse .8s ease-in-out infinite}
+.tien-turn-timer.expired{opacity:.7}
+.tien-turn-hint{display:block;margin-top:5px;color:var(--muted);font-size:.72rem}
+.tien-menh-table-chat{margin-top:14px;padding:12px;border:1px solid rgba(38,112,93,.2);border-radius:18px;background:linear-gradient(135deg,rgba(216,232,225,.32),rgba(245,232,198,.20));box-shadow:inset 0 0 25px rgba(255,255,255,.06)}
+.dark .tien-menh-table-chat{background:linear-gradient(135deg,rgba(22,51,48,.52),rgba(64,51,29,.20))}
+.tien-table-chat-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.tien-table-chat-head b{display:block;font-size:.86rem}
+.tien-table-chat-head small{color:var(--muted);font-size:.68rem}
+.tien-table-chat-window{height:145px;overflow:auto;padding:8px;border-radius:12px;background:rgba(5,25,27,.055);scroll-behavior:smooth;display:grid;align-content:start;gap:6px}
+.dark .tien-table-chat-window{background:rgba(255,255,255,.035)}
+.tien-table-chat-msg{display:grid;grid-template-columns:auto 1fr auto;align-items:baseline;gap:7px;padding:6px 8px;border-radius:10px;background:rgba(255,255,255,.38);font-size:.76rem}
+.dark .tien-table-chat-msg{background:rgba(255,255,255,.055)}
+.tien-table-chat-msg.mine{background:rgba(38,112,93,.10)}
+.tien-table-chat-msg b{font-size:.7rem;white-space:nowrap}
+.tien-table-chat-msg span{min-width:0;overflow-wrap:anywhere}
+.tien-table-chat-msg time{font-size:.62rem;color:var(--muted);white-space:nowrap}
+.tien-table-chat-form{display:flex;gap:7px;margin-top:8px}
+.tien-table-chat-form input{flex:1;min-width:0;padding:10px 12px;border-radius:11px;border:1px solid rgba(120,90,40,.20);background:rgba(255,255,255,.72);outline:none}
+.dark .tien-table-chat-form input{background:rgba(0,0,0,.18);color:inherit}
+.tien-table-chat-form input:focus{border-color:rgba(38,112,93,.48);box-shadow:0 0 0 3px rgba(38,112,93,.08)}
+@keyframes tienTimerPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
+@media(max-width:700px){
+ .tien-menh-admin-tools{display:grid;grid-template-columns:1fr}.tien-menh-admin-tools .btn{width:100%}
+ .tien-turn-main{align-items:stretch;flex-direction:column;gap:7px}.tien-turn-timer{width:100%}
+ .tien-table-chat-head{align-items:flex-start;flex-direction:column}.tien-table-chat-window{height:130px}.tien-table-chat-msg{grid-template-columns:1fr auto}.tien-table-chat-msg time{grid-column:2;grid-row:1}.tien-table-chat-msg span{grid-column:1/-1}
+ .tien-table-chat-form{position:sticky;bottom:0}
+}
+@media(prefers-reduced-motion:reduce){.tien-turn-timer.urgent{animation:none!important}}
