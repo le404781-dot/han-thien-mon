@@ -1848,182 +1848,164 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    Đồng thời không dùng watchdog 1.8s: file ~5MB có thể cần lâu hơn để bắt đầu
    trên mạng di động/Render cold-start. Chỉ fallback sau khi chờ đủ lâu. */
 (function setupBackgroundMusic(){
- const audioHost=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue'),nativeBtn=$('#audioNativeBtn');
- if(!audioHost||!playBtn||!stopBtn)return;
- const VERSION='3.7.66',musicKey='htm_background_music',volumeKey='htm_background_volume';
- // Ordered by broad real-world browser support. MP3/M4A cover legacy iOS/Safari;
- // OGG/WebM-Opus cover Chromium/Firefox/Linux and modern desktop browsers.
+ const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn');
+ const status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue'),nativeBtn=$('#audioNativeBtn');
+ if(!audio||!playBtn||!stopBtn)return;
+
+ const VERSION='3.7.67';
+ const musicKey='htm_background_music',volumeKey='htm_background_volume';
  const SOURCES=[
-   {path:'/assets/audio/tinh-ve-background.mp3',type:'audio/mpeg',label:'MP3'},
-   {path:'/assets/audio/tinh-ve-background.m4a',type:'audio/mp4',label:'AAC/M4A'},
-   {path:'/assets/audio/tinh-ve-background.ogg',type:'audio/ogg; codecs="opus"',label:'OGG/Opus'},
-   {path:'/assets/audio/tinh-ve-background.webm',type:'audio/webm; codecs="opus"',label:'WebM/Opus'}
+   {path:'/assets/audio/tinh-ve-background.mp3?v='+VERSION,type:'audio/mpeg'},
+   {path:'/assets/audio/tinh-ve-background.m4a?v='+VERSION,type:'audio/mp4'},
+   {path:'/assets/audio/tinh-ve-background.ogg?v='+VERSION,type:'audio/ogg; codecs="opus"'},
+   {path:'/assets/audio/tinh-ve-background.webm?v='+VERSION,type:'audio/webm; codecs="opus"'}
  ];
- const absoluteUrl=(path)=>new URL(path+'?v='+VERSION,window.location.origin).href;
+
  let savedVolume=parseFloat(localStorage.getItem(volumeKey));
  if(!Number.isFinite(savedVolume))savedVolume=.35;
  savedVolume=Math.max(0,Math.min(1,savedVolume));
+
+ // IMPORTANT: keep ONE persistent HTMLAudioElement.
+ // Do not replace it, do not fetch a health endpoint before play(), and do not
+ // call load() repeatedly. This is the same basic browser media pipeline used
+ // by web music players: native <audio> + multiple <source> fallbacks.
+ audio.controls=true;
+ audio.preload='auto';
+ audio.autoplay=false;
+ audio.loop=true;
+ audio.muted=false;
+ audio.volume=savedVolume;
+ audio.setAttribute('playsinline','');
+ audio.setAttribute('webkit-playsinline','');
+ audio.setAttribute('x-webkit-airplay','allow');
+ audio.removeAttribute('src');
+ audio.innerHTML='';
+ SOURCES.forEach(source=>{
+   const el=document.createElement('source');
+   el.src=source.path;
+   el.type=source.type;
+   audio.appendChild(el);
+ });
+
  if(volume)volume.value=String(savedVolume);
  if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
- let audio=audioHost,sourceIndex=0,desiredPlay=localStorage.getItem(musicKey)==='on';
- let watchdogTimer=null,retryTimer=null,healthTimer=null,gestureGeneration=0,playbackEventSeen=false,retryCount=0;
 
  function setStatus(playing,text){
-   if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
+   if(status){
+     status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';
+     status.classList.toggle('audio-playing',playing);
+   }
    if(msg)msg.textContent=text;
-   playBtn.disabled=playing;stopBtn.disabled=!playing;
+   playBtn.disabled=playing;
+   stopBtn.disabled=!playing;
  }
+
  function mediaMeta(){
    if(!('mediaSession' in navigator)||typeof MediaMetadata==='undefined')return;
-   try{navigator.mediaSession.metadata=new MediaMetadata({title:'Tinh Vệ · Hàn Thiên Môn',artist:'Hàn Thiên Môn',album:'Nhạc nền tiên hiệp'});}catch{}
- }
- function clearTimers(){
-   if(watchdogTimer){clearTimeout(watchdogTimer);watchdogTimer=null;}
-   if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
-   if(healthTimer){clearTimeout(healthTimer);healthTimer=null;}
- }
- function healIOSAudioSession(){
-   // Best-effort only. Unsupported browsers simply skip this path.
    try{
-     const session=navigator.audioSession;
-     if(session&&'type' in session){
-       try{session.type='ambient';}catch{}
-       setTimeout(()=>{try{if(desiredPlay)session.type='playback';}catch{}},0);
-     }
+     navigator.mediaSession.metadata=new MediaMetadata({
+       title:'Tinh Vệ · Hàn Thiên Môn',
+       artist:'Hàn Thiên Môn',
+       album:'Nhạc nền tiên hiệp'
+     });
    }catch{}
  }
- function configure(el,index){
-   el.loop=true;el.preload='auto';el.autoplay=false;el.muted=false;el.volume=savedVolume;el.defaultMuted=false;
-   el.setAttribute('playsinline','');el.setAttribute('webkit-playsinline','');el.setAttribute('x-webkit-airplay','allow');
-   el.src=absoluteUrl(SOURCES[index].path);
-   el.load();
- }
- function replaceAudio(index=0){
-   clearTimers();
-   try{audio.pause();}catch{}
-   const fresh=document.createElement('audio');
-   fresh.id='backgroundMusic';fresh.controls=true;fresh.loop=true;fresh.preload='metadata';fresh.setAttribute('aria-label','Trình phát nhạc nền Hàn Thiên Môn');
-   configure(fresh,index);
-   if(audio&&audio.parentNode)audio.replaceWith(fresh);
-   audio=fresh;sourceIndex=index;bindAudioEvents(audio);return audio;
- }
- function markPlaying(){
-   playbackEventSeen=true;retryCount=0;clearTimers();mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');
- }
- function scheduleRetry(index,delay){
-   if(!desiredPlay||retryTimer)return;
-   retryTimer=setTimeout(()=>{retryTimer=null;if(desiredPlay)start(false,index);},delay);
- }
- function failOrNext(reason){
-   if(!desiredPlay)return;
-   clearTimers();
-   if(reason==='media-error'&&sourceIndex+1<SOURCES.length){
-     const next=sourceIndex+1;
-     setStatus(false,'Đang thử định dạng âm thanh tương thích khác…');
-     scheduleRetry(next,120);
+
+ audio.addEventListener('loadstart',()=>{
+   if(!audio.paused&&msg)msg.textContent='Đang kết nối nhạc nền…';
+ });
+ audio.addEventListener('loadedmetadata',()=>{
+   if(msg&&!audio.paused)msg.textContent='Đã nhận bản nhạc · đang phát…';
+ });
+ audio.addEventListener('canplay',()=>{
+   if(msg&&!audio.paused)msg.textContent='Đã sẵn sàng phát nhạc nền.';
+ });
+ audio.addEventListener('playing',()=>{
+   mediaMeta();
+   setStatus(true,'Nhạc nền đang phát liên tục.');
+ });
+ audio.addEventListener('play',()=>mediaMeta());
+ audio.addEventListener('pause',()=>{
+   if(!audio.ended)setStatus(false,'Đã tạm dừng · chạm Khởi Nhạc để tiếp tục.');
+ });
+ audio.addEventListener('ended',()=>{
+   if(audio.loop)return;
+   try{audio.currentTime=0;}catch{}
+ });
+ audio.addEventListener('error',()=>{
+   setStatus(false,'Không tải được bản nhạc. Hãy chạm ▶ trên trình phát hoặc thử lại.');
+   if(nativeBtn)nativeBtn.hidden=false;
+ });
+
+ function playFromGesture(){
+   // No async operation, fetch, timeout or source replacement before play().
+   // This preserves the user's tap/click activation on Safari/iOS and other browsers.
+   audio.volume=savedVolume;
+   audio.muted=false;
+   localStorage.setItem(musicKey,'on');
+   setStatus(false,'Đang mở nhạc…');
+
+   let promise;
+   try{
+     promise=audio.play();
+   }catch(error){
+     setStatus(false,'Trình duyệt chưa cho phép phát. Hãy chạm ▶ trên trình phát.');
+     if(nativeBtn)nativeBtn.hidden=false;
      return;
    }
-   retryCount+=1;
-   if(retryCount<=2){
-     setStatus(false,'Đang khôi phục đường âm thanh…');
-     scheduleRetry(sourceIndex,1000*retryCount);
-   }else{
-     setStatus(false,'Trình duyệt chưa phát được nhạc. Hãy dùng Trình phát tương thích bên dưới.');
-     if(nativeBtn)nativeBtn.hidden=false;
-   }
- }
- function bindAudioEvents(el){
-   el.addEventListener('playing',markPlaying,{passive:true});
-   el.addEventListener('play',()=>{mediaMeta();if(!playbackEventSeen)setStatus(false,'Đang phát nhạc…');},{passive:true});
-   el.addEventListener('canplay',()=>{if(desiredPlay&&!playbackEventSeen&&msg)msg.textContent='Đã tải nhạc · đang mở âm thanh…';},{passive:true});
-   el.addEventListener('pause',()=>{
-     if(!el.ended&&desiredPlay&&!el.seeking)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');
-     else if(!el.ended)setStatus(false,'Đã ngưng nhạc nền.');
-   },{passive:true});
-   el.addEventListener('ended',()=>{if(desiredPlay){try{el.currentTime=0;}catch{}start(false,sourceIndex);}},{passive:true});
-   el.addEventListener('error',()=>failOrNext('media-error'),{passive:true});
- }
- bindAudioEvents(audio);
- configure(audio,0);
 
- function checkAudioHealthBackground(){
-   fetch('/api/audio-health?ts='+Date.now(),{cache:'no-store',credentials:'same-origin'})
-     .then(r=>r.json().then(data=>({ok:r.ok,data})))
-     .then(({ok,data})=>{
-       if(!desiredPlay||playbackEventSeen)return;
-       if(!ok||!data||!data.ok||!Array.isArray(data.audio)||data.audio.some(x=>!x.exists||Number(x.bytes)<=0)){
-         if(msg)msg.textContent='Máy chủ chưa cung cấp đủ tệp nhạc.';
+   if(promise&&typeof promise.catch==='function'){
+     promise.catch(error=>{
+       const name=String(error&&error.name||'');
+       if(name==='NotAllowedError'){
+         setStatus(false,'Hãy chạm ▶ trên trình phát để mở âm thanh.');
+       }else{
+         setStatus(false,'Không phát được nhạc nền. Hãy chạm ▶ để thử lại.');
        }
-     }).catch(()=>{});
- }
- function start(fromGesture=false,forcedIndex=null){
-   desiredPlay=true;localStorage.setItem(musicKey,'on');
-   const gen=++gestureGeneration,idx=forcedIndex==null?sourceIndex:forcedIndex;
-   clearTimers();
-   if(fromGesture){retryCount=0;healIOSAudioSession();audio=replaceAudio(idx);}
-   else if(idx!==sourceIndex){audio=replaceAudio(idx);}
-   else{audio.loop=true;audio.muted=false;audio.volume=savedVolume;}
-   audio.volume=savedVolume;audio.muted=false;sourceIndex=idx;playbackEventSeen=false;
-   setStatus(false,'Đang mở âm thanh…');
-   // No await before play(): preserve the user's click/tap activation on every browser.
-   let playPromise;
-   try{playPromise=audio.play();}
-   catch(e){handlePlayFailure(e,fromGesture,gen);return;}
-   if(playPromise&&typeof playPromise.then==='function'){
-     playPromise.then(()=>{
-       if(gen!==gestureGeneration||!desiredPlay)return;
-       watchdogTimer=setTimeout(()=>{watchdogTimer=null;if(desiredPlay&&!playbackEventSeen)failOrNext('watchdog');},10000);
-     }).catch(e=>handlePlayFailure(e,fromGesture,gen));
-   }else{
-     watchdogTimer=setTimeout(()=>{if(desiredPlay&&!playbackEventSeen)failOrNext('watchdog');},10000);
-   }
-   if(fromGesture)checkAudioHealthBackground();
- }
- function handlePlayFailure(e,fromGesture,gen){
-   if(gen!==gestureGeneration||!desiredPlay)return;
-   const name=String(e&&e.name||'');
-   if(name==='NotAllowedError')setStatus(false,'Trình duyệt chặn tự động phát. Hãy chạm nút Khởi Nhạc hoặc nút ▶ trên trình phát.');
-   else if(name==='AbortError')setStatus(false,'Đường âm thanh vừa bị ngắt. Đang thử lại…');
-   else failOrNext('media-error');
- }
- function stop(){
-   desiredPlay=false;localStorage.setItem(musicKey,'off');gestureGeneration++;clearTimers();retryCount=0;
-   try{audio.pause();audio.currentTime=0;}catch{}
-   setStatus(false,'Đã ngưng nhạc nền.');
- }
- function nativePlay(){
-   desiredPlay=true;localStorage.setItem(musicKey,'on');retryCount=0;clearTimers();
-   if(nativeBtn)nativeBtn.hidden=true;
-   try{
-     // Hand control back to the browser's native source selection. This is the
-     // final compatibility path: the UA can choose MP3/M4A/OGG/WebM itself.
-     audio.removeAttribute('src');
-     audio.innerHTML='';
-     SOURCES.forEach(source=>{
-       const sourceEl=document.createElement('source');
-       sourceEl.src=absoluteUrl(source.path);
-       sourceEl.type=source.type;
-       audio.appendChild(sourceEl);
+       if(nativeBtn)nativeBtn.hidden=false;
      });
-     audio.controls=true;audio.loop=true;audio.muted=false;audio.volume=savedVolume;
-     audio.load();
-     const p=audio.play();
-     if(p&&typeof p.catch==='function')p.catch(()=>{});
-   }catch{}
+   }
  }
- playBtn.addEventListener('click',()=>start(true));
+
+ function stop(){
+   localStorage.setItem(musicKey,'off');
+   try{
+     audio.pause();
+     audio.currentTime=0;
+   }catch{}
+   setStatus(false,'Đã ngưng nhạc nền.');
+   if(nativeBtn)nativeBtn.hidden=true;
+ }
+
+ function nativePlay(){
+   // Native browser controls use the same persistent media element.
+   // No JS reconstruction is performed here.
+   if(nativeBtn)nativeBtn.hidden=true;
+   playFromGesture();
+ }
+
+ playBtn.addEventListener('click',playFromGesture);
  stopBtn.addEventListener('click',stop);
  if(nativeBtn)nativeBtn.addEventListener('click',nativePlay);
+
  if(volume)volume.addEventListener('input',()=>{
-   savedVolume=Math.max(0,Math.min(1,Number(volume.value)));localStorage.setItem(volumeKey,String(savedVolume));
-   if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';try{audio.volume=savedVolume;}catch{}
+   savedVolume=Math.max(0,Math.min(1,Number(volume.value)));
+   localStorage.setItem(volumeKey,String(savedVolume));
+   if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
+   audio.volume=savedVolume;
  });
- document.addEventListener('visibilitychange',()=>{
-   if(document.visibilityState==='visible'&&desiredPlay&&audio.paused)setStatus(false,'Nhạc đã tạm dừng bởi hệ điều hành · chạm Khởi Nhạc để tiếp tục.');
- });
+
  if('mediaSession' in navigator){
-   try{navigator.mediaSession.setActionHandler('play',()=>start(true));navigator.mediaSession.setActionHandler('pause',stop);navigator.mediaSession.setActionHandler('stop',stop);}catch{}
+   try{
+     navigator.mediaSession.setActionHandler('play',playFromGesture);
+     navigator.mediaSession.setActionHandler('pause',()=>audio.pause());
+     navigator.mediaSession.setActionHandler('stop',stop);
+   }catch{}
  }
- setStatus(false,desiredPlay?'Đã ghi nhớ phát nhạc · chạm Khởi Nhạc để mở âm thanh.':'Đang ngưng nhạc.');
+
+ // A previous version tried to resume automatically from localStorage.
+ // Do not do that: audible autoplay is intentionally user-initiated.
+ const wasPlaying=localStorage.getItem(musicKey)==='on';
+ setStatus(false,wasPlaying?'Chạm Khởi Nhạc hoặc ▶ để tiếp tục nhạc nền.':'Đang ngưng nhạc nền.');
  if(nativeBtn)nativeBtn.hidden=true;
 })();
