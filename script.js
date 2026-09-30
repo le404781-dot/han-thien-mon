@@ -1836,7 +1836,12 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.64 · Audio iPhone/Safari/Render final fix.
+/* v3.7.65 · Audio iPhone/Safari/Render final fix.
+   v3.7.64 proved that the media element can reach the play() path but iOS
+   may keep a stale system audio-session category. This version force-cycles
+   ambient -> playback on every explicit Khởi Nhạc gesture, then calls play()
+   without awaiting network/API work.
+
    Quan trọng: KHÔNG await fetch/Promise nào trước audio.play() khi nút được
    kích bằng thao tác chạm. iOS Safari có thể làm mất transient user activation
    sau một await, khiến play() bị từ chối hoặc media pipeline không được mở.
@@ -1845,7 +1850,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupBackgroundMusic(){
  const audioHost=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
  if(!audioHost||!playBtn||!stopBtn)return;
- const musicKey='htm_background_music',volumeKey='htm_background_volume',VERSION='3.7.64';
+ const musicKey='htm_background_music',volumeKey='htm_background_volume',VERSION='3.7.65';
  const SOURCES=[
    {path:'/assets/audio/tinh-ve-background.mp3',type:'audio/mpeg'},
    {path:'/assets/audio/tinh-ve-background.m4a',type:'audio/mp4'}
@@ -1873,10 +1878,21 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
    if(healthTimer){clearTimeout(healthTimer);healthTimer=null;}
  }
- function healIOSAudioSession(){
+ function healIOSAudioSession(forceCycle=false){
    try{
      const session=navigator.audioSession;
-     if(session&&session.type!=='playback')session.type='playback';
+     if(!session)return;
+     if(forceCycle){
+       // iOS/WebKit can cache a stale audio-session category at the system
+       // audio layer. Merely assigning playback again may be deduplicated.
+       // Force a real category transition, then restore media playback on the
+       // next task. This is a documented workaround for the current iOS
+       // silent-tab failure mode.
+       session.type='ambient';
+       setTimeout(()=>{try{if(desiredPlay)session.type='playback';}catch{}},0);
+     }else if(session.type!=='playback'){
+       session.type='playback';
+     }
    }catch{}
  }
  function configure(el,index){
@@ -1947,8 +1963,8 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    desiredPlay=true;localStorage.setItem(musicKey,'on');
    const gen=++gestureGeneration,idx=forcedIndex==null?sourceIndex:forcedIndex;
    clearTimers();
-   if(fromGesture){retryCount=0;healIOSAudioSession();audio=replaceAudio(idx);}
-   else if(idx!==sourceIndex){healIOSAudioSession();audio=replaceAudio(idx);}
+   if(fromGesture){retryCount=0;healIOSAudioSession(true);audio=replaceAudio(idx);}
+   else if(idx!==sourceIndex){healIOSAudioSession(true);audio=replaceAudio(idx);}
    else{audio.loop=true;audio.muted=false;audio.volume=savedVolume;}
    audio.volume=savedVolume;sourceIndex=idx;playbackEventSeen=false;
    setStatus(false,'Đang mở âm thanh…');
@@ -1957,7 +1973,8 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    // Không await fetch, không await AudioSession, không chờ health-check trước.
    let playPromise;
    try{
-     healIOSAudioSession();
+     // User gesture is still active here. The session reset above is the
+     // recovery path; play() itself remains in the same click call stack.
      playPromise=audio.play();
    }catch(e){
      handlePlayFailure(e,fromGesture,gen);return;
