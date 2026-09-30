@@ -1836,68 +1836,172 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.61 · Trình phát nhạc nền ổn định cho iPhone/Safari/Chrome.
-   Không await canplay/load trước audio.play(): trên iOS, await trước play()
-   có thể làm mất user-activation và Safari từ chối phát dù người dùng vừa bấm nút. */
+/* v3.7.62 · Audio iPhone/Safari hardening.
+   Nguyên nhân cần xử lý: trên một số phiên iOS/WebKit, HTMLAudioElement có thể
+   resolve play() và UI báo đang phát nhưng audio pipeline của phần tử cũ không
+   còn phát ra tiếng. Không dựa riêng vào Promise của play(); mỗi lần Khởi Nhạc
+   tạo một media element sạch, ưu tiên MP3 và chỉ fallback AAC/M4A khi lỗi tải.
+   Không gọi load() lặp lại trên cùng element. */
 (function setupBackgroundMusic(){
- const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
- if(!audio||!playBtn||!stopBtn)return;
+ const audioHost=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
+ if(!audioHost||!playBtn||!stopBtn)return;
  const musicKey='htm_background_music',volumeKey='htm_background_volume';
+ const SOURCES=[
+   {url:'assets/audio/tinh-ve-background.mp3?v=3.7.62',type:'audio/mpeg'},
+   {url:'assets/audio/tinh-ve-background.m4a?v=3.7.62',type:'audio/mp4'}
+ ];
  let savedVolume=parseFloat(localStorage.getItem(volumeKey));
  if(!Number.isFinite(savedVolume))savedVolume=.35;
  savedVolume=Math.max(0,Math.min(1,savedVolume));
- audio.volume=savedVolume; audio.loop=true; audio.muted=false;
  if(volume)volume.value=String(savedVolume);
  if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
+ let audio=audioHost;
+ let sourceIndex=0;
  let desiredPlay=localStorage.getItem(musicKey)==='on';
  let retryTimer=null;
+ let watchdogTimer=null;
+ let playbackEventSeen=false;
+ let gestureGeneration=0;
+
  function setStatus(playing,text){
    if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
    if(msg)msg.textContent=text;
    playBtn.disabled=playing;stopBtn.disabled=!playing;
  }
  function mediaMeta(){
-   if(!('mediaSession' in navigator))return;
+   if(!('mediaSession' in navigator)||typeof MediaMetadata==='undefined')return;
    try{navigator.mediaSession.metadata=new MediaMetadata({title:'Tinh Vệ · Hàn Thiên Môn',artist:'Hàn Thiên Môn',album:'Nhạc nền tiên hiệp'});}catch{}
  }
- async function start(fromGesture=false){
-   desiredPlay=true; localStorage.setItem(musicKey,'on');
-   audio.loop=true; audio.muted=false; audio.volume=savedVolume;
-   // QUAN TRỌNG: gọi play() ngay trong chuỗi xử lý click, không chờ canplay.
-   // Safari có thể tự buffer sau khi play() được gọi; chờ canplay trước đó làm mất user gesture.
+ function clearTimers(){
+   if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
+   if(watchdogTimer){clearTimeout(watchdogTimer);watchdogTimer=null;}
+ }
+ function configure(el,index){
+   el.loop=true;
+   el.preload='auto';
+   el.autoplay=false;
+   el.muted=false;
+   el.volume=savedVolume;
+   el.setAttribute('playsinline','');
+   el.setAttribute('webkit-playsinline','');
+   el.setAttribute('x-webkit-airplay','allow');
+   el.src=SOURCES[index].url;
+ }
+ function replaceAudio(index=0){
+   clearTimers();
+   try{audio.pause();}catch{}
+   const fresh=document.createElement('audio');
+   fresh.id='backgroundMusic';
+   fresh.setAttribute('aria-label','Nhạc nền Hàn Thiên Môn');
+   configure(fresh,index);
+   try{audio.replaceWith(fresh);}catch{audioHost.replaceWith(fresh);}
+   audio=fresh;
+   sourceIndex=index;
+   bindAudioEvents(audio);
+   return audio;
+ }
+ function markPlaying(){
+   playbackEventSeen=true;
+   clearTimers();
+   mediaMeta();
+   setStatus(true,'Nhạc nền đang phát liên tục.');
+ }
+ function handleAudioError(){
+   clearTimers();
+   if(desiredPlay && sourceIndex+1<SOURCES.length){
+     const next=sourceIndex+1;
+     setStatus(false,'Đang chuyển sang định dạng âm thanh dự phòng…');
+     setTimeout(()=>start(false,next),0);
+   }else if(desiredPlay){
+     setStatus(false,'Không thể phát tệp nhạc. Hãy chạm Khởi Nhạc để thử lại.');
+   }else setStatus(false,'Đã ngưng nhạc nền.');
+ }
+ function bindAudioEvents(el){
+   el.addEventListener('playing',markPlaying,{passive:true});
+   el.addEventListener('play',()=>{mediaMeta();},{passive:true});
+   el.addEventListener('pause',()=>{
+     if(!el.ended&&desiredPlay)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');
+     else if(!el.ended)setStatus(false,'Đã ngưng nhạc nền.');
+   },{passive:true});
+   el.addEventListener('ended',()=>{if(desiredPlay)start(false,sourceIndex);},{passive:true});
+   el.addEventListener('error',handleAudioError,{passive:true});
+   el.addEventListener('stalled',()=>{
+     if(desiredPlay&&!retryTimer){
+       retryTimer=setTimeout(()=>{retryTimer=null;if(desiredPlay&&audio.paused)start(false,sourceIndex);},1800);
+     }
+   },{passive:true});
+ }
+ bindAudioEvents(audio);
+ configure(audio,0);
+
+ async function start(fromGesture=false,forcedIndex=null){
+   desiredPlay=true;
+   localStorage.setItem(musicKey,'on');
+   const gen=++gestureGeneration;
+   const idx=forcedIndex==null?sourceIndex:forcedIndex;
+   // Một thao tác người dùng luôn nhận một element mới nếu element cũ đang bị
+   // kẹt silent. Việc này tránh giữ lại media pipeline lỗi của WebKit.
+   if(fromGesture || idx!==sourceIndex || audio===audioHost){
+     audio=replaceAudio(idx);
+   }else{
+     audio.loop=true;audio.muted=false;audio.volume=savedVolume;
+   }
+   audio.volume=savedVolume;
+   sourceIndex=idx;
+   playbackEventSeen=false;
+   setStatus(false,'Đang mở âm thanh…');
    try{
      const promise=audio.play();
      if(promise&&typeof promise.then==='function')await promise;
-     mediaMeta();
-     setStatus(true,'Nhạc nền đang phát liên tục.');
+     if(gen!==gestureGeneration||!desiredPlay)return;
+     // Không báo ĐANG PHÁT chỉ vì play() resolve. Chờ event "playing".
+     clearTimers();
+     watchdogTimer=setTimeout(()=>{
+       watchdogTimer=null;
+       if(desiredPlay&&!playbackEventSeen){
+         if(sourceIndex+1<SOURCES.length)start(false,sourceIndex+1);
+         else setStatus(false,'Trình duyệt đã nhận lệnh phát nhưng chưa xác nhận âm thanh. Chạm Khởi Nhạc thêm lần nữa.');
+       }
+     },1600);
    }catch(e){
-     if(fromGesture){
-       setStatus(false,'Safari chưa mở âm thanh. Chạm “Khởi Nhạc” thêm một lần hoặc kiểm tra chế độ im lặng/âm lượng của iPhone.');
+     if(gen!==gestureGeneration||!desiredPlay)return;
+     if(sourceIndex+1<SOURCES.length){
+       start(false,sourceIndex+1);
+     }else if(fromGesture){
+       setStatus(false,'Safari chưa cho phép phát âm thanh. Hãy chạm Khởi Nhạc lại một lần.');
      }else{
        setStatus(false,'Đã ghi nhớ phát nhạc · chạm màn hình để mở khóa âm thanh.');
      }
    }
  }
  function stop(){
-   desiredPlay=false;localStorage.setItem(musicKey,'off');
-   if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
-   audio.pause();try{audio.currentTime=0;}catch{}
+   desiredPlay=false;localStorage.setItem(musicKey,'off');gestureGeneration++;
+   clearTimers();
+   try{audio.pause();audio.currentTime=0;}catch{}
    setStatus(false,'Đã ngưng nhạc nền.');
  }
  playBtn.addEventListener('click',()=>start(true));
  stopBtn.addEventListener('click',stop);
- if(volume)volume.addEventListener('input',()=>{savedVolume=Math.max(0,Math.min(1,Number(volume.value)));audio.volume=savedVolume;localStorage.setItem(volumeKey,String(savedVolume));if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';});
- audio.addEventListener('play',()=>{mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');});
- audio.addEventListener('pause',()=>{if(!audio.ended&&desiredPlay)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');else if(!audio.ended)setStatus(false,'Đã ngưng nhạc nền.');});
- audio.addEventListener('ended',()=>{if(desiredPlay){audio.currentTime=0;start(false);}});
- audio.addEventListener('error',()=>setStatus(false,'Không đọc được tệp nhạc. Đã kiểm tra MP3/AAC; hãy tải lại trang để nhận tệp mới nhất.'));
- audio.addEventListener('stalled',()=>{if(desiredPlay&&!retryTimer){retryTimer=setTimeout(()=>{retryTimer=null;if(audio.paused)start(false);},1200);}});
- document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&desiredPlay&&audio.paused)start(false);});
- // Nếu người dùng đã bật nhạc từ phiên trước, chỉ thử tự nối lại sau một cử chỉ mới.
- ['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev,()=>{if(desiredPlay&&audio.paused)start(false);},{passive:true}));
+ if(volume)volume.addEventListener('input',()=>{
+   savedVolume=Math.max(0,Math.min(1,Number(volume.value)));
+   localStorage.setItem(volumeKey,String(savedVolume));
+   if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
+   try{audio.volume=savedVolume;}catch{}
+ });
+ document.addEventListener('visibilitychange',()=>{
+   if(document.visibilityState==='visible'&&desiredPlay&&audio.paused){
+     // Không tự gọi play() trong visibilitychange; chỉ đánh dấu để lần chạm
+     // tiếp theo tạo media element mới và nhận user gesture của iOS.
+     setStatus(false,'Nhạc đã tạm dừng bởi iOS · chạm Khởi Nhạc để tiếp tục.');
+   }
+ });
  if('mediaSession' in navigator){
-   try{navigator.mediaSession.setActionHandler('play',()=>start(true));navigator.mediaSession.setActionHandler('pause',stop);navigator.mediaSession.setActionHandler('stop',stop);}catch{}
+   try{
+     navigator.mediaSession.setActionHandler('play',()=>start(true));
+     navigator.mediaSession.setActionHandler('pause',stop);
+     navigator.mediaSession.setActionHandler('stop',stop);
+   }catch{}
  }
- setStatus(false,desiredPlay?'Đã ghi nhớ phát nhạc · chạm màn hình để mở khóa âm thanh.':'Đang ngưng nhạc.');
+ setStatus(false,desiredPlay?'Đã ghi nhớ phát nhạc · chạm Khởi Nhạc để mở khóa âm thanh.':'Đang ngưng nhạc.');
 })();
 
