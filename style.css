@@ -1910,3 +1910,10 @@ body.function-only-focus .tien-khi-enhance-section.focus-active{
 @keyframes autoAttack{0%{transform:translateX(0) scale(1)}45%{transform:translateX(22px) scale(1.04)}100%{transform:translateX(0) scale(1)}}@keyframes autoHit{0%{transform:translateX(0)}25%{transform:translateX(-10px) rotate(-1deg)}50%{transform:translateX(10px) rotate(1deg)}100%{transform:translateX(0)}}@keyframes autoDamageFloat{0%{opacity:0;transform:translate(-50%,0) scale(.7)}20%{opacity:1}100%{opacity:0;transform:translate(-50%,-42px) scale(1.1)}}@keyframes autoVsPulse{50%{transform:scale(1.14);filter:brightness(1.25)}}@keyframes autoArenaSweep{to{transform:rotate(360deg)}}
 @media(max-width:700px){.auto-battle-result{padding:12px}.auto-battle-arena{grid-template-columns:1fr 58px 1fr;gap:7px}.auto-battle-fighter{min-height:165px;padding:10px}.auto-battle-avatar{width:64px;height:64px;font-size:30px}.auto-battle-name b{font-size:.9rem}.auto-battle-name small{font-size:.68rem}.auto-battle-vs{font-size:1.25rem}.auto-battle-log-row{grid-template-columns:30px 1fr auto;font-size:.72rem}.auto-battle-title small{font-size:.7rem}}
 @media(prefers-reduced-motion:reduce){.auto-battle-result::before,.auto-battle-vs{animation:none!important}.auto-battle-attack,.auto-battle-hit,.auto-battle-damage{animation:none!important}}
+/* v3.7.60 · Khiêu Chiến Online: xem lại 3 phút + đồng bộ tùy chọn Nhổ */
+.challenge-replay-list{display:grid;gap:8px}
+.challenge-replay-row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:12px;border:1px solid rgba(190,145,65,.24);border-radius:12px;background:rgba(255,255,255,.035)}
+.challenge-replay-row b,.challenge-replay-row small{display:block}.challenge-replay-row small{margin-top:4px;color:var(--muted);line-height:1.45}
+.spit-warning{color:#f1c879!important;font-weight:800}
+.pending-spit-toggle{white-space:nowrap}
+@media(max-width:760px){.challenge-replay-row{grid-template-columns:1fr}.challenge-replay-row .btn{width:100%}.pending-spit-toggle{grid-column:2}}

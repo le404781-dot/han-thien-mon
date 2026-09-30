@@ -321,7 +321,7 @@ async function renderAutoChallengeResult(battle){
  const meId=Number(currentUser?.id||0), winnerId=Number(battle.winnerId||0);
  const pct=(hp,max)=>Math.min(100,Math.max(0,Math.round(Number(hp||0)/Math.max(1,Number(max||1))*100)));
  const fighter=(side,name,rank,spirit,avatar,maxHp)=>`<article data-auto-fighter="${side}" class="auto-battle-fighter"><div class="auto-battle-avatar">${avatarHtml(avatar||'⚔')}</div><div class="auto-battle-name"><b>${esc(name||'Môn nhân')}</b><small>${esc(rank||'')} · ${Number(spirit||0).toLocaleString('vi-VN')} linh lực</small></div><div class="auto-battle-hp"><i data-auto-hp="${side}" style="width:100%"></i></div><b class="auto-battle-hp-label" data-auto-hp-label="${side}">${Number(maxHp||0).toLocaleString('vi-VN')} / ${Number(maxHp||0).toLocaleString('vi-VN')} HP</b></article>`;
- area.innerHTML=`<div class="auto-battle-result active-battle"><div class="auto-battle-title"><span class="eyebrow">⚔ LÔI ĐÀI ONLINE · TỰ ĐỘNG QUYẾT ĐẤU</span><h3>${esc(battle.challengerName)} <span>VS</span> ${esc(battle.opponentName)}</h3><small>Đối phương đã đồng thuận · hệ thống tự tính toán toàn bộ trận đấu</small></div><div class="auto-battle-arena">${fighter('a',battle.challengerName,battle.challengerRank,battle.challengerSpirit,battle.challengerAvatar,battle.challengerMaxHp)}<div class="auto-battle-vs">⚡<strong>VS</strong>⚡</div>${fighter('b',battle.opponentName,battle.opponentRank,battle.opponentSpirit,battle.opponentAvatar,battle.opponentMaxHp)}</div><div class="auto-battle-impact" id="autoBattleImpact">⚔️ Lôi đài khai mở...</div><div class="auto-battle-log" id="autoBattleLog"></div><div class="auto-battle-result-final" id="autoBattleFinal">⏳ Hệ thống đang vận chuyển chiến đấu...</div></div>`;
+ area.innerHTML=`<div class="auto-battle-result active-battle"><div class="auto-battle-title"><span class="eyebrow">⚔ LÔI ĐÀI ONLINE · TỰ ĐỘNG QUYẾT ĐẤU</span><h3>${esc(battle.challengerName)} <span>VS</span> ${esc(battle.opponentName)}</h3><small>Đối phương đã đồng thuận · hệ thống tự tính toán toàn bộ trận đấu</small>${Number(battle.realmGap||0)>=2?`<div class="spit-warning">⚠️ Chênh ${Number(battle.realmGap)} cảnh giới · 💦 Nhổ 1 Ngụm Nước Bọt: <b>${battle.spitEnabled!==false?'BẬT':'TẮT'}</b> · trạng thái đã đồng bộ cho cả hai môn nhân</div>`:''}</div><div class="auto-battle-arena">${fighter('a',battle.challengerName,battle.challengerRank,battle.challengerSpirit,battle.challengerAvatar,battle.challengerMaxHp)}<div class="auto-battle-vs">⚡<strong>VS</strong>⚡</div>${fighter('b',battle.opponentName,battle.opponentRank,battle.opponentSpirit,battle.opponentAvatar,battle.opponentMaxHp)}</div><div class="auto-battle-impact" id="autoBattleImpact">⚔️ Lôi đài khai mở...</div><div class="auto-battle-log" id="autoBattleLog"></div><div class="auto-battle-result-final" id="autoBattleFinal">⏳ Hệ thống đang vận chuyển chiến đấu...</div></div>`;
  const setHp=(side,hp,max)=>{const bar=document.querySelector(`[data-auto-hp="${side}"]`),label=document.querySelector(`[data-auto-hp-label="${side}"]`),m=Math.max(1,Number(max)||1),v=Math.max(0,Number(hp)||0);if(bar)bar.style.width=pct(v,m)+'%';if(label)label.textContent=`${Math.round(v).toLocaleString('vi-VN')} / ${Math.round(m).toLocaleString('vi-VN')} HP`;};
  let hpA=Number(battle.challengerMaxHp)||1,hpB=Number(battle.opponentMaxHp)||1;
  setHp('a',hpA,battle.challengerMaxHp);setHp('b',hpB,battle.opponentMaxHp);
@@ -365,8 +365,14 @@ async function pollChallengeRealtime(){
  try{
   const d=await api('/api/challenges/online/state',{headers:authHeaders()});
   const b=d.activeBattle||null;
+  const recent=d.recentResult||null;
   if(!b){
    setChallengeAuto(false);
+   if(recent && Number(recent.id)!==Number(window.__challengeLastReplayId||0)){
+    window.__challengeLastReplayId=Number(recent.id);
+    await renderAutoChallengeResult(recent);
+    return;
+   }
    if(window.__challengeLastState){window.__challengeLastState=null;await loadChallenges();}
    return;
   }
@@ -392,7 +398,7 @@ async function loadChallenges(){
  const area=$('#challengeArea'); if(!area||!getToken())return;
  try{
   const d=await api('/api/challenges',{headers:authHeaders()});
-  const users=d.users||[], pending=d.pending||[], history=d.history||[], me=d.me||{}, battle=d.activeBattle||null, publicBattles=d.activeBattles||[], usage=d.usage||{used:0,limit:30,remaining:30,windowHours:24};
+  const users=d.users||[], pending=d.pending||[], history=d.history||[], replays=d.replays||[], me=d.me||{}, battle=d.activeBattle||null, publicBattles=d.activeBattles||[], usage=d.usage||{used:0,limit:30,remaining:30,windowHours:24};
   const challengeLimitReached=Number(usage.remaining)<=0;
   const debuffActive=me.challenge_debuff_until&&new Date(me.challenge_debuff_until)>new Date();
   const pct=(hp,max)=>Math.min(100,Math.max(0,Math.round((Number(hp||0)/Math.max(1,Number(max||1)))*100)));
@@ -424,14 +430,21 @@ async function loadChallenges(){
    ${battleHtml}
    ${publicBattles.length?`<div class="challenge-block betting-block"><div class="challenge-subhead"><span class="eyebrow">💎 SÀN ĐẶT CƯỢC LÔI ĐÀI</span><b>Mọi môn nhân đều có thể tham gia</b></div><div class="challenge-list">${publicBattles.map(x=>{const pool=Number(x.bet_pool||0),a=Number(x.challenger_bet||0),b=Number(x.opponent_bet||0);return `<article class="challenge-card bet-card"><span class="challenge-avatar">⚔</span><div><b>${esc(x.challenger_name)} VS ${esc(x.opponent_name)}</b><small>💎 Tổng cược: ${pool.toLocaleString('vi-VN')} · ${esc(x.challenger_name)}: ${a.toLocaleString('vi-VN')} · ${esc(x.opponent_name)}: ${b.toLocaleString('vi-VN')}</small></div><div class="bet-actions"><select class="bet-target" data-id="${x.id}"><option value="${x.challenger_id}">Cược ${esc(x.challenger_name)}</option><option value="${x.opponent_id}">Cược ${esc(x.opponent_name)}</option></select><input class="bet-amount" data-id="${x.id}" type="number" min="1" value="100" inputmode="numeric"><button class="btn small primary challenge-bet" data-id="${x.id}">💎 Đặt cược</button></div></article>`}).join('')}</div></div>`:''}
    <div class="challenge-limit-banner"><span>⚔ Lượt Khiêu Chiến</span><b>${Number(usage.used)}/${Number(usage.limit)} trong 24 giờ</b><small>${challengeLimitReached?'⛔ Đã hết lượt':'Còn '+Number(usage.remaining)+' lượt'}</small></div><div class="challenge-rules"><div><span class="eyebrow">⚔ ONLINE · LÔI ĐÀI</span><h3>Tự động quyết đấu</h3><p>Đối phương đồng thuận là Lôi Đài lập tức khai mở. Hệ thống tự tính toán, tự ra chiêu, hiển thị sát thương và kết quả; không cần hai bên bấm nút.</p></div><div><span class="eyebrow">🌓 OFFLINE · MÔ PHỎNG</span><h3>Đánh với bản mô phỏng</h3><p>Không cần đối phương online. Chế độ này vẫn dùng quy tắc chênh cảnh giới.</p></div><div><span class="eyebrow">☯ QUY LUẬT CẢNH GIỚI</span><h3>Sát thương theo cảnh giới</h3><p>Cùng cảnh giới sẽ cân bằng hơn; cảnh giới cao hơn có hệ số sát thương tăng, cảnh giới thấp hơn bị giảm sát thương.</p></div></div>
-   ${pending.length?`<div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📨 LỜI MỜI LÔI ĐÀI</span><b>${pending.length} lời mời đang chờ</b></div><div class="challenge-list">${pending.map(x=>`<article class="challenge-card incoming"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.challenger_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small></div><button class="btn small primary challenge-accept" data-id="${x.id}">Đồng thuận</button><button class="btn small ghost challenge-reject" data-id="${x.id}">Từ chối</button></article>`).join('')}</div></div>`:''}
+   ${pending.length?`<div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📨 LỜI MỜI LÔI ĐÀI</span><b>${pending.length} lời mời đang chờ</b></div><div class="challenge-list">${pending.map(x=>{const gap=Math.abs(Number(x.realmIndex??realmIndexOf(x.rank))-(Number(currentProfile?.realmIndex)||0));const spitAvailable=gap>=2;return `<article class="challenge-card incoming"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.challenger_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${spitAvailable?`<small class="spit-warning">⚠️ Chênh ${gap} cảnh giới · ${x.spit_enabled!==false?'Có thể Nhổ 1 Ngụm Nước Bọt':'Đã tắt Nhổ 1 Ngụm Nước Bọt'}</small>`:''}</div>${spitAvailable?`<button class="btn small ${x.spit_enabled!==false?'danger':'ghost'} pending-spit-toggle" data-id="${x.id}" data-enabled="${x.spit_enabled!==false}">💦 Nhổ: ${x.spit_enabled!==false?'BẬT':'TẮT'}</button>`:''}<button class="btn small primary challenge-accept" data-id="${x.id}">Đồng thuận</button><button class="btn small ghost challenge-reject" data-id="${x.id}">Từ chối</button></article>`}).join('')}</div><small class="battle-rule">Khi chênh từ 2 cảnh giới, tùy chọn Nhổ 1 Ngụm Nước Bọt được đồng bộ cho cả hai môn nhân trước khi khai mở lôi đài.</small></div>`:''}
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">🎯 CHỌN ĐỐI THỦ</span><b>${users.length} môn nhân</b></div><div class="challenge-list">${users.length?users.map(x=>`<article class="challenge-card"><span class="challenge-avatar">${avatarHtml(x.avatar,'',x.realmIndex??realmIndexOf(x.rank),x.auraRank)}</span><div><b>${esc(x.display_name)}</b><small>${esc(x.rank)} · ${Number(x.spirit_power||0).toLocaleString('vi-VN')} linh lực</small>${Number(x.challenge_debuff_percent||0)>0?`<small class="debuff-mini">☠ Đang chịu debuff ${x.challenge_debuff_percent}%</small>`:''}</div><div class="challenge-card-actions"><button class="btn small primary challenge-online" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>⚔ Online</button><button class="btn small ghost challenge-offline" data-id="${x.id}" ${battle||challengeLimitReached?'disabled':''}>🌓 Offline</button></div></article>`).join(''):`<div class="empty-state compact"><p>Chưa có môn nhân khác để khiêu chiến.</p></div>`}</div></div>
+   <div class="challenge-block replay-block"><div class="challenge-subhead"><span class="eyebrow">🔁 XEM LẠI KHIÊU CHIẾN</span><b>${replays.length?`${replays.length} trận còn ${Math.max(0,Math.ceil((new Date(replays[0].replayUntil).getTime()-Date.now())/1000))} giây`:'Không có trận đang lưu'}</b></div><div class="challenge-replay-list">${replays.length?replays.map(r=>`<article class="challenge-replay-row"><div><b>⚔ ${esc(r.challengerName)} VS ${esc(r.opponentName)}</b><small>${r.realmGap>=2?'⚠️ Chênh '+r.realmGap+' cảnh giới':''} · ${r.spit?'💦 Đã Nhổ 1 Ngụm Nước Bọt':'⚔ Tự động quyết đấu'} · hết hạn ${new Date(r.replayUntil).toLocaleTimeString('vi-VN')}</small></div><button class="btn small primary challenge-replay-btn" data-replay-id="${r.id}">▶ Xem lại</button></article>`).join(''):'<div class="empty-state compact"><p>Diễn biến trận online chỉ được lưu để xem lại trong 3 phút.</p></div>'}</div></div>
    <div class="challenge-block"><div class="challenge-subhead"><span class="eyebrow">📜 CHIẾN TÍCH</span><b>${history.length} trận gần đây</b></div><div class="challenge-history">${history.length?history.map(h=>{const meId=Number(currentUser?.id),won=Number(h.winner_id)===meId,pendingStatus=h.status==='pending',activeStatus=h.status==='accepted';return `<article class="challenge-history-row"><span>${h.mode==='online'?'⚔':'🌓'}</span><div><b>${won?'🏆 Thắng':h.status==='rejected'?'Từ chối':activeStatus?'⚔ Đang giao chiến':pendingStatus?'⌛ Chờ':'💀 Thất bại'}</b><small>${esc(Number(h.challenger_id)===meId?h.opponent_name:h.challenger_name)} · ${new Date(h.created_at).toLocaleString('vi-VN')}</small></div><div class="challenge-result-text">${won?`+${Number(h.reward_spirit||0).toLocaleString('vi-VN')} linh lực${h.reward_item_name?` · ${esc(h.reward_item_name)} ×${h.reward_quantity}`:''}`:esc(h.penalty_text||'')}</div></article>`}).join(''):`<div class="empty-state compact"><p>Chưa có chiến tích.</p></div>`}</div></div>
    <p id="challengeMsg" class="train-msg"></p>`;
   if(battle){window.__challengeLiveState=battle; setChallengeAuto(window.challengeAutoAttack===true);}
+  document.querySelectorAll('.pending-spit-toggle').forEach(b=>b.onclick=async()=>{
+    const id=Number(b.dataset.id),enabled=b.dataset.enabled!=='true'; b.disabled=true;
+    try{await api('/api/challenges/online/spit-setting',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:id,enabled})}); await loadChallenges();}
+    catch(e){alert(e.message);b.disabled=false;}
+  });
+  document.querySelectorAll('.challenge-replay-btn').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=replays.find(x=>Number(x.id)===Number(b.dataset.replayId));if(r){window.__challengeLastReplayId=Number(r.id);await renderAutoChallengeResult(r);}}finally{b.disabled=false;}});
   document.querySelectorAll('.challenge-online').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'online'));
   document.querySelectorAll('.challenge-offline').forEach(b=>b.onclick=()=>runChallenge(Number(b.dataset.id),'offline'));
-  document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept'));
+  document.querySelectorAll('.challenge-accept').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'accept',null));
   document.querySelectorAll('.challenge-reject').forEach(b=>b.onclick=()=>respondChallenge(Number(b.dataset.id),'reject'));
   document.querySelectorAll('.challenge-move').forEach(b=>b.onclick=()=>{if(!b.disabled)useUltimate(Number(b.dataset.id),Number(b.dataset.moveId));});
   document.querySelectorAll('.battle-auto').forEach(b=>b.onclick=async()=>{
@@ -509,12 +522,14 @@ async function runChallenge(userId,mode){
  finally{if(b)b.disabled=false;}
 }
 
-async function respondChallenge(requestId,action){
+async function respondChallenge(requestId,action,spitEnabled=null){
  const msg=$('#challengeMsg');
  try{
-  const x=await api('/api/challenges/online/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,action})});
+  const x=await api('/api/challenges/online/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId,action,...(spitEnabled===null?{}:{spitEnabled})})});
   msg.textContent=action==='reject'?`🏳️ ${x.message}`:`⚔ ${x.message}`;
   if(action==='accept' && x.battle){
+    window.__challengeLastReplayId=Number(x.battle.id||requestId);
+    if(Number(x.battle.realmGap||0)>=2)msg.textContent=`⚠️ Chênh ${Number(x.battle.realmGap)} cảnh giới · ${x.battle.spit?'💦 Đã bật và sử dụng Nhổ 1 Ngụm Nước Bọt':'💦 Nhổ 1 Ngụm Nước Bọt đã tắt'} · `+msg.textContent;
     // Không còn thao tác chọn chiêu: hệ thống đã tính xong ngay khi đồng thuận.
     await renderAutoChallengeResult(x.battle);
     return;
@@ -1821,18 +1836,21 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.6.57 · Trình phát nhạc nền kiểu streaming · MP4/AAC + MP3 fallback + Media Session */
+/* v3.7.61 · Trình phát nhạc nền ổn định cho iPhone/Safari/Chrome.
+   Không await canplay/load trước audio.play(): trên iOS, await trước play()
+   có thể làm mất user-activation và Safari từ chối phát dù người dùng vừa bấm nút. */
 (function setupBackgroundMusic(){
  const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn'),status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
  if(!audio||!playBtn||!stopBtn)return;
  const musicKey='htm_background_music',volumeKey='htm_background_volume';
  let savedVolume=parseFloat(localStorage.getItem(volumeKey));
- if(!Number.isFinite(savedVolume))savedVolume=.5;
+ if(!Number.isFinite(savedVolume))savedVolume=.35;
  savedVolume=Math.max(0,Math.min(1,savedVolume));
- audio.volume=savedVolume; if(volume)volume.value=String(savedVolume);
+ audio.volume=savedVolume; audio.loop=true; audio.muted=false;
+ if(volume)volume.value=String(savedVolume);
  if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
  let desiredPlay=localStorage.getItem(musicKey)==='on';
- let loadingPromise=null;
+ let retryTimer=null;
  function setStatus(playing,text){
    if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
    if(msg)msg.textContent=text;
@@ -1842,38 +1860,40 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    if(!('mediaSession' in navigator))return;
    try{navigator.mediaSession.metadata=new MediaMetadata({title:'Tinh Vệ · Hàn Thiên Môn',artist:'Hàn Thiên Môn',album:'Nhạc nền tiên hiệp'});}catch{}
  }
- async function waitForReady(){
-   if(audio.readyState>=2)return;
-   if(loadingPromise)return loadingPromise;
-   loadingPromise=new Promise((resolve,reject)=>{
-     const ok=()=>{cleanup();resolve();}, bad=()=>{cleanup();reject(new Error('audio-load'))};
-     const cleanup=()=>{audio.removeEventListener('canplay',ok);audio.removeEventListener('error',bad);};
-     audio.addEventListener('canplay',ok,{once:true});audio.addEventListener('error',bad,{once:true});
-     audio.load();
-   }).finally(()=>{loadingPromise=null;});
-   return loadingPromise;
- }
  async function start(fromGesture=false){
    desiredPlay=true; localStorage.setItem(musicKey,'on');
+   audio.loop=true; audio.muted=false; audio.volume=savedVolume;
+   // QUAN TRỌNG: gọi play() ngay trong chuỗi xử lý click, không chờ canplay.
+   // Safari có thể tự buffer sau khi play() được gọi; chờ canplay trước đó làm mất user gesture.
    try{
-     audio.loop=true; audio.muted=false; audio.volume=savedVolume;
-     await waitForReady();
-     await audio.play();
-     mediaMeta(); setStatus(true,'Nhạc nền đang phát liên tục.');
+     const promise=audio.play();
+     if(promise&&typeof promise.then==='function')await promise;
+     mediaMeta();
+     setStatus(true,'Nhạc nền đang phát liên tục.');
    }catch(e){
-     setStatus(false,fromGesture?'Không phát được âm thanh. Hãy chạm Khởi Nhạc thêm một lần.':'Đã ghi nhớ phát nhạc. Chạm vào trang để trình duyệt cho phép âm thanh.');
+     if(fromGesture){
+       setStatus(false,'Safari chưa mở âm thanh. Chạm “Khởi Nhạc” thêm một lần hoặc kiểm tra chế độ im lặng/âm lượng của iPhone.');
+     }else{
+       setStatus(false,'Đã ghi nhớ phát nhạc · chạm màn hình để mở khóa âm thanh.');
+     }
    }
  }
- function stop(){desiredPlay=false;localStorage.setItem(musicKey,'off');audio.pause();try{audio.currentTime=0;}catch{}setStatus(false,'Đã ngưng nhạc nền.');}
+ function stop(){
+   desiredPlay=false;localStorage.setItem(musicKey,'off');
+   if(retryTimer){clearTimeout(retryTimer);retryTimer=null;}
+   audio.pause();try{audio.currentTime=0;}catch{}
+   setStatus(false,'Đã ngưng nhạc nền.');
+ }
  playBtn.addEventListener('click',()=>start(true));
  stopBtn.addEventListener('click',stop);
  if(volume)volume.addEventListener('input',()=>{savedVolume=Math.max(0,Math.min(1,Number(volume.value)));audio.volume=savedVolume;localStorage.setItem(volumeKey,String(savedVolume));if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';});
  audio.addEventListener('play',()=>{mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');});
  audio.addEventListener('pause',()=>{if(!audio.ended&&desiredPlay)setStatus(false,'Tạm dừng · chạm Khởi Nhạc để tiếp tục.');else if(!audio.ended)setStatus(false,'Đã ngưng nhạc nền.');});
  audio.addEventListener('ended',()=>{if(desiredPlay){audio.currentTime=0;start(false);}});
- audio.addEventListener('error',()=>setStatus(false,'Không đọc được luồng nhạc. Đang thử định dạng dự phòng…'));
- audio.addEventListener('stalled',()=>{if(desiredPlay)setTimeout(()=>{if(audio.paused)start(false);},800);});
+ audio.addEventListener('error',()=>setStatus(false,'Không đọc được tệp nhạc. Đã kiểm tra MP3/AAC; hãy tải lại trang để nhận tệp mới nhất.'));
+ audio.addEventListener('stalled',()=>{if(desiredPlay&&!retryTimer){retryTimer=setTimeout(()=>{retryTimer=null;if(audio.paused)start(false);},1200);}});
  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&desiredPlay&&audio.paused)start(false);});
+ // Nếu người dùng đã bật nhạc từ phiên trước, chỉ thử tự nối lại sau một cử chỉ mới.
  ['pointerdown','touchend','keydown'].forEach(ev=>document.addEventListener(ev,()=>{if(desiredPlay&&audio.paused)start(false);},{passive:true}));
  if('mediaSession' in navigator){
    try{navigator.mediaSession.setActionHandler('play',()=>start(true));navigator.mediaSession.setActionHandler('pause',stop);navigator.mediaSession.setActionHandler('stop',stop);}catch{}
