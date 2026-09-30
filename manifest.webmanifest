@@ -1,50 +1,21 @@
 {
-  "id": "/?app=han-thien-mon-3-7-72",
+  "id": "/?app=han-thien-mon-3-7-74",
   "name": "Hàn Thiên Môn",
   "short_name": "Hàn Thiên Môn",
   "description": "Sơn môn tiên hiệp Hàn Thiên Môn",
   "lang": "vi",
-  "start_url": "/",
+  "start_url": "/?app=han-thien-mon-3-7-74",
   "scope": "/",
   "display": "standalone",
-  "display_override": [
-    "standalone",
-    "minimal-ui",
-    "browser"
-  ],
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "portrait-primary",
   "background_color": "#f4f1e0",
   "theme_color": "#173f35",
   "icons": [
-    {
-      "src": "/icons/icon-192-3-7-71.png?v=3.7.72",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icons/icon-512-3-7-71.png?v=3.7.72",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icons/icon-1024-3-7-71.png?v=3.7.72",
-      "sizes": "1024x1024",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icons/icon-192-3-7-71.png?v=3.7.72",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/icons/icon-512-3-7-71.png?v=3.7.72",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    }
+    {"src":"/icons/icon-192-3-7-74.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"/icons/icon-512-3-7-74.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"/icons/icon-1024-3-7-74.png","sizes":"1024x1024","type":"image/png","purpose":"any"},
+    {"src":"/icons/icon-192-3-7-74.png","sizes":"192x192","type":"image/png","purpose":"maskable"},
+    {"src":"/icons/icon-512-3-7-74.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
   ]
 }

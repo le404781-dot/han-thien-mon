@@ -1,14 +1,15 @@
-const CACHE_NAME = 'han-thien-mon-3.7.72';
+const CACHE_NAME = 'han-thien-mon-3.7.74-clean-icon';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/style.css?v=3.7.72',
-  '/script.js?v=3.7.72',
-  '/manifest.webmanifest?v=3.7.72',
-  '/icons/icon-192-3-7-71.png?v=3.7.72',
-  '/icons/icon-512-3-7-71.png?v=3.7.72',
-  '/icons/icon-1024-3-7-71.png?v=3.7.72',
-  '/icons/apple-touch-icon-3-7-71.png?v=3.7.72'
+  '/style.css?v=3.7.74',
+  '/script.js?v=3.7.74',
+  '/manifest.webmanifest?v=3.7.74',
+  '/icons/icon-192-3-7-74.png?v=3.7.74',
+  '/icons/icon-512-3-7-74.png?v=3.7.74',
+  '/icons/icon-1024-3-7-74.png?v=3.7.74',
+  '/icons/apple-touch-icon-3-7-74.png?v=3.7.74',
+  '/icons/favicon-3-7-74.png?v=3.7.74'
 ];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(APP_SHELL)).then(() => self.skipWaiting()));
@@ -22,6 +23,8 @@ self.addEventListener('fetch', event => {
   if (url.origin !== location.origin || req.method !== 'GET') return;
   if (url.pathname.startsWith('/api/')) return;
   if (url.pathname.startsWith('/audio/') || /\.(mp3|m4a|ogg|webm)$/i.test(url.pathname)) return;
+  // Never cache manifest or icon responses: iOS Home Screen must always be able to see the newest icon URL.
+  if (url.pathname === '/manifest.webmanifest' || url.pathname.startsWith('/icons/')) return;
   event.respondWith(fetch(req).then(res => {
     if (res.ok && res.type !== 'opaque') {
       const copy = res.clone();

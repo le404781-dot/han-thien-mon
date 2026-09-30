@@ -2500,7 +2500,7 @@ async function addDailyActivity(userId, field, amount=1) {
 
 app.use(express.json({ limit: '2mb' }));
 
-// v3.7.72 · Audio streaming route with HTTP Range support.
+// v3.7.73 · Audio streaming route with HTTP Range support.
 const AUDIO_FILES={
  'tinh-ve-background.mp3':{file:'assets/audio/tinh-ve-background.mp3',type:'audio/mpeg'},
  'tinh-ve-background.m4a':{file:'assets/audio/tinh-ve-background.m4a',type:'audio/mp4'},
@@ -2535,8 +2535,10 @@ app.use(express.static(__dirname, {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Accept-Ranges', 'bytes');
-    } else if (/\.(?:png|jpe?g|webp|svg|ico)$/i.test(filePath)) {
-      res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=2592000, stale-while-revalidate=604800' : 'no-cache');
+    } else if (/\/icons\//i.test(filePath) || /\.(?:png|jpe?g|webp|svg|ico)$/i.test(filePath)) {
+      // PWA icons are versioned and must not be served from an old browser cache.
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
     } else {
       res.setHeader('Cache-Control', 'public, max-age=600');
     }

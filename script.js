@@ -1836,35 +1836,68 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.72 · Trình phát nhạc mới: 1 HTMLAudioElement, không fetch trước play(). */
-(function setupBackgroundMusicV372(){
+/* v3.7.74 · Trình phát nhạc ổn định: chỉ nạp audio sau thao tác Khởi Nhạc. */
+(function setupBackgroundMusicV373(){
  const audio=$('#backgroundMusic'), playBtn=$('#audioPlayBtn'), stopBtn=$('#audioStopBtn');
  const disc=$('#audioDisc'), seek=$('#audioSeek'), current=$('#audioCurrentTime'), duration=$('#audioDuration');
  const volume=$('#audioVolume'), volumeValue=$('#audioVolumeValue'), status=$('#audioStatus'), msg=$('#audioMsg'), liveDot=$('#audioLiveDot');
  if(!audio||!playBtn||!stopBtn)return;
- const V='3.7.72', VOL_KEY='htm_music_volume_v372';
+ const V='3.7.74', VOL_KEY='htm_music_volume_v373';
  const sources=['/audio/tinh-ve-background.mp3?v='+V,'/audio/tinh-ve-background.m4a?v='+V,'/audio/tinh-ve-background.ogg?v='+V,'/audio/tinh-ve-background.webm?v='+V];
- let sourceIndex=0, switching=false;
+ let sourceIndex=0, playToken=0, started=false, switching=false;
  const fmt=t=>{t=Number(t)||0;const m=Math.floor(t/60),s=Math.floor(t%60);return `${m}:${String(s).padStart(2,'0')}`};
  const setStatus=playing=>{status.textContent=playing?'🟢 ĐANG PHÁT':'🔴 ĐANG NGƯNG';status.style.color=playing?'var(--jade)':'var(--red)';disc.classList.toggle('is-playing',playing);liveDot.classList.toggle('is-playing',playing);playBtn.disabled=playing;stopBtn.disabled=!playing;playBtn.textContent=playing?'🔊 Đang Phát':'🔊 Khởi Nhạc';};
  const setMsg=t=>{if(msg)msg.textContent=t};
- const setSource=idx=>{sourceIndex=Math.max(0,Math.min(sources.length-1,idx));audio.src=sources[sourceIndex];audio.load();};
- async function playNow(){
-   try{const p=audio.play();if(p&&typeof p.then==='function')await p;setStatus(true);setMsg('Đang phát nhạc nền Hàn Thiên Môn · bạn có thể chuyển khu vực mà nhạc vẫn tiếp tục.');}
-   catch(err){
-     if(sourceIndex<sources.length-1&&!switching){switching=true;setSource(sourceIndex+1);switching=false;setMsg('Đang chuyển sang định dạng âm thanh tương thích…');try{const p=audio.play();if(p&&typeof p.then==='function')await p;setStatus(true);setMsg('Đang phát nhạc nền Hàn Thiên Môn.');}catch(e){setStatus(false);setMsg('Không thể phát nguồn nhạc này. Hãy bấm Khởi Nhạc lại.');}}
-     else{setStatus(false);setMsg('Trình duyệt chưa cho phép phát âm thanh. Hãy bấm Khởi Nhạc một lần nữa.');}
-   }
+ const setSource=idx=>{sourceIndex=Math.max(0,Math.min(sources.length-1,idx));audio.src=sources[sourceIndex];};
+ function tryPlayFromGesture(){
+   const token=++playToken;
+   started=true;
+   setStatus(false);
+   setMsg('Đang mở nhạc…');
+   // Không load/await/fetch trước play(): giữ nguyên user gesture trên iPhone.
+   if(!audio.src || !audio.src.includes('/audio/')) setSource(0);
+   audio.loop=true;
+   let p;
+   try{p=audio.play();}catch(err){handlePlayError(err,token);return;}
+   if(p&&typeof p.catch==='function') p.then(()=>{
+     if(token!==playToken)return;
+     setStatus(true);
+     setMsg('Đang phát nhạc nền Hàn Thiên Môn.');
+   }).catch(err=>handlePlayError(err,token));
  }
- playBtn.addEventListener('click',()=>{if(audio.paused)playNow();});
- stopBtn.addEventListener('click',()=>{audio.pause();audio.currentTime=0;seek.value='0';current.textContent='0:00';setStatus(false);setMsg('Nhạc đã ngưng. Bấm Khởi Nhạc để phát lại từ đầu.');});
- audio.addEventListener('play',()=>setStatus(true));audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false);});audio.addEventListener('ended',()=>{audio.currentTime=0;setStatus(false);});
- audio.addEventListener('timeupdate',()=>{current.textContent=fmt(audio.currentTime);if(audio.duration)seek.value=String((audio.currentTime/audio.duration)*100);});audio.addEventListener('loadedmetadata',()=>{duration.textContent=fmt(audio.duration);});
- audio.addEventListener('error',()=>{if(sourceIndex<sources.length-1&&!switching){switching=true;setSource(sourceIndex+1);switching=false;setMsg('Đang chuyển sang định dạng âm thanh tương thích…');}});
- seek.addEventListener('input',()=>{if(audio.duration)audio.currentTime=(Number(seek.value)/100)*audio.duration;});
+ function handlePlayError(err,token){
+   if(token!==playToken)return;
+   const name=String(err&&err.name||'');
+   const message=String(err&&err.message||'');
+   // NotAllowed/Abort là chính sách/trạng thái của trình duyệt, đổi codec không giúp.
+   if(name==='NotAllowedError'||/not allowed|user gesture|autoplay/i.test(message)){
+     setStatus(false);setMsg('Hãy bấm Khởi Nhạc trực tiếp một lần nữa để cho phép phát âm thanh.');return;
+   }
+   if(sourceIndex<sources.length-1 && !switching){
+     switching=true;const next=sourceIndex+1;setSource(next);switching=false;
+     setMsg('Nguồn nhạc này không mở được, đang thử định dạng tương thích…');
+     // Sau khi chuyển nguồn, yêu cầu một lần chạm mới để tránh mất user activation.
+     setStatus(false);return;
+   }
+   setStatus(false);setMsg('Không mở được file nhạc trên máy chủ. Hãy tải lại trang rồi bấm Khởi Nhạc.');
+ }
+ playBtn.addEventListener('click',()=>{if(audio.paused)tryPlayFromGesture();});
+ stopBtn.addEventListener('click',()=>{++playToken;audio.pause();audio.removeAttribute('src');audio.load();started=false;sourceIndex=0;seek.value='0';current.textContent='0:00';duration.textContent='0:00';setStatus(false);setMsg('Nhạc đã ngưng. Bấm Khởi Nhạc để phát lại từ đầu.');});
+ audio.addEventListener('play',()=>setStatus(true));
+ audio.addEventListener('playing',()=>{setStatus(true);setMsg('Đang phát nhạc nền Hàn Thiên Môn.');});
+ audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false);});
+ audio.addEventListener('ended',()=>{audio.currentTime=0;setStatus(false);setMsg('Bản nhạc đã kết thúc và sẽ lặp lại.');});
+ audio.addEventListener('timeupdate',()=>{current.textContent=fmt(audio.currentTime);if(Number.isFinite(audio.duration)&&audio.duration>0)seek.value=String((audio.currentTime/audio.duration)*100);});
+ audio.addEventListener('loadedmetadata',()=>{if(Number.isFinite(audio.duration)&&audio.duration>0)duration.textContent=fmt(audio.duration);});
+ audio.addEventListener('error',()=>{
+   if(!started)return;
+   if(sourceIndex<sources.length-1 && !switching){switching=true;setSource(sourceIndex+1);switching=false;setStatus(false);setMsg('Nguồn nhạc không tải được, hãy bấm Khởi Nhạc để thử định dạng tiếp theo.');}
+   else{setStatus(false);setMsg('Không tải được file nhạc. Kiểm tra kết nối hoặc Deploy lại phiên bản mới.');}
+ });
+ seek.addEventListener('input',()=>{if(Number.isFinite(audio.duration)&&audio.duration>0)audio.currentTime=(Number(seek.value)/100)*audio.duration;});
  const saved=Number(localStorage.getItem(VOL_KEY));const initial=Number.isFinite(saved)?Math.max(0,Math.min(1,saved)):0.8;audio.volume=initial;volume.value=String(initial);volumeValue.textContent=Math.round(initial*100)+'%';
  volume.addEventListener('input',()=>{const v=Math.max(0,Math.min(1,Number(volume.value)||0));audio.volume=v;volumeValue.textContent=Math.round(v*100)+'%';localStorage.setItem(VOL_KEY,String(v));});
- setSource(0);setStatus(false);
+ setStatus(false);setMsg('Bấm Khởi Nhạc để phát. File nhạc chỉ được nạp khi bạn bấm nút.');
 })();
 
 /* v3.7.71 · Khóa kích cỡ màn hình tùy chọn.
