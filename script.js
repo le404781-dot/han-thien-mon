@@ -1778,7 +1778,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','tien-khi-enhance':'⚜️ Cường Hóa','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','wealth':'💎 Tài Phú','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','audio':'🔊 Âm Thanh','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','tien-khi-enhance':'⚜️ Cường Hóa','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','wealth':'💎 Tài Phú','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
@@ -1836,85 +1836,38 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.69 · Trình phát nhạc HTML5 ổn định đa nền tảng.
-   Mục tiêu: giống các web nghe nhạc phổ biến ở chỗ trình phát là một
-   HTMLAudioElement duy nhất, nguồn MP3 trực tiếp, không fetch/await trước
-   play(), không tạo/xóa audio liên tục và chỉ chuyển sang AAC/M4A khi MP3
-   thực sự báo lỗi. Điều này giảm tối đa tình trạng "Đang phát" nhưng load mãi.
-*/
-(function setupBackgroundMusic(){
- const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn');
- const status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
+/* v3.7.72 · Trình phát nhạc mới: 1 HTMLAudioElement, không fetch trước play(). */
+(function setupBackgroundMusicV372(){
+ const audio=$('#backgroundMusic'), playBtn=$('#audioPlayBtn'), stopBtn=$('#audioStopBtn');
+ const disc=$('#audioDisc'), seek=$('#audioSeek'), current=$('#audioCurrentTime'), duration=$('#audioDuration');
+ const volume=$('#audioVolume'), volumeValue=$('#audioVolumeValue'), status=$('#audioStatus'), msg=$('#audioMsg'), liveDot=$('#audioLiveDot');
  if(!audio||!playBtn||!stopBtn)return;
- const VERSION='3.7.69';
- const musicKey='htm_background_music',volumeKey='htm_background_volume';
- const SOURCES=[
-  {src:'/audio/tinh-ve-background.mp3?v='+VERSION,type:'audio/mpeg'},
-  {src:'/audio/tinh-ve-background.m4a?v='+VERSION,type:'audio/mp4'},
-  {src:'/audio/tinh-ve-background.ogg?v='+VERSION,type:'audio/ogg; codecs="opus"'},
-  {src:'/audio/tinh-ve-background.webm?v='+VERSION,type:'audio/webm; codecs="opus"'}
- ];
- let sourceIndex=0, failedSources=new Set();
- let savedVolume=parseFloat(localStorage.getItem(volumeKey));
- if(!Number.isFinite(savedVolume))savedVolume=.35;
- savedVolume=Math.max(0,Math.min(1,savedVolume));
- audio.controls=true; audio.preload='metadata'; audio.autoplay=false; audio.loop=true; audio.muted=false;
- audio.volume=savedVolume; audio.playsInline=true; audio.setAttribute('playsinline',''); audio.setAttribute('webkit-playsinline',''); audio.setAttribute('x-webkit-airplay','allow');
- // MP3 là nguồn chính: browser có thể bắt đầu tải ngay từ URL chuẩn, không cần JS dựng lại source.
- audio.src=SOURCES[0].src;
- if(volume){volume.value=String(savedVolume);}
- if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
- function setStatus(playing,text){
-  if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
-  if(msg)msg.textContent=text;
-  playBtn.disabled=playing; stopBtn.disabled=!playing;
- }
- function mediaMeta(){
-  if(!('mediaSession' in navigator)||typeof MediaMetadata==='undefined')return;
-  try{navigator.mediaSession.metadata=new MediaMetadata({title:'Tinh Vệ · Hàn Thiên Môn',artist:'Hàn Thiên Môn',album:'Nhạc nền tiên hiệp'});}catch{}
- }
- function chooseFallback(){
-  for(let i=1;i<SOURCES.length;i++){
-   if(!failedSources.has(i)){
-    sourceIndex=i; failedSources.add(i); audio.src=SOURCES[i].src; audio.load();
-    setStatus(false,'Đang thử định dạng âm thanh dự phòng…');
-    return true;
+ const V='3.7.72', VOL_KEY='htm_music_volume_v372';
+ const sources=['/audio/tinh-ve-background.mp3?v='+V,'/audio/tinh-ve-background.m4a?v='+V,'/audio/tinh-ve-background.ogg?v='+V,'/audio/tinh-ve-background.webm?v='+V];
+ let sourceIndex=0, switching=false;
+ const fmt=t=>{t=Number(t)||0;const m=Math.floor(t/60),s=Math.floor(t%60);return `${m}:${String(s).padStart(2,'0')}`};
+ const setStatus=playing=>{status.textContent=playing?'🟢 ĐANG PHÁT':'🔴 ĐANG NGƯNG';status.style.color=playing?'var(--jade)':'var(--red)';disc.classList.toggle('is-playing',playing);liveDot.classList.toggle('is-playing',playing);playBtn.disabled=playing;stopBtn.disabled=!playing;playBtn.textContent=playing?'🔊 Đang Phát':'🔊 Khởi Nhạc';};
+ const setMsg=t=>{if(msg)msg.textContent=t};
+ const setSource=idx=>{sourceIndex=Math.max(0,Math.min(sources.length-1,idx));audio.src=sources[sourceIndex];audio.load();};
+ async function playNow(){
+   try{const p=audio.play();if(p&&typeof p.then==='function')await p;setStatus(true);setMsg('Đang phát nhạc nền Hàn Thiên Môn · bạn có thể chuyển khu vực mà nhạc vẫn tiếp tục.');}
+   catch(err){
+     if(sourceIndex<sources.length-1&&!switching){switching=true;setSource(sourceIndex+1);switching=false;setMsg('Đang chuyển sang định dạng âm thanh tương thích…');try{const p=audio.play();if(p&&typeof p.then==='function')await p;setStatus(true);setMsg('Đang phát nhạc nền Hàn Thiên Môn.');}catch(e){setStatus(false);setMsg('Không thể phát nguồn nhạc này. Hãy bấm Khởi Nhạc lại.');}}
+     else{setStatus(false);setMsg('Trình duyệt chưa cho phép phát âm thanh. Hãy bấm Khởi Nhạc một lần nữa.');}
    }
-  }
-  return false;
  }
- audio.addEventListener('loadstart',()=>{if(!audio.paused&&msg)msg.textContent='Đang mở bản nhạc…';});
- audio.addEventListener('loadedmetadata',()=>{if(!audio.paused&&msg)msg.textContent='Đã nhận bản nhạc · chuẩn bị phát…';});
- audio.addEventListener('canplay',()=>{if(!audio.paused&&msg)msg.textContent='Đã sẵn sàng · nhạc nền đang phát.';});
- audio.addEventListener('playing',()=>{mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');});
- audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false,'Đã tạm dừng · chạm Khởi Nhạc để tiếp tục.');});
- audio.addEventListener('ended',()=>{if(!audio.loop){try{audio.currentTime=0;}catch{}}});
- audio.addEventListener('error',()=>{
-  if(chooseFallback())return;
-  setStatus(false,'Không tải được bản nhạc. Có thể mở file nhạc trực tiếp để kiểm tra.');
- });
- function playFromGesture(){
-  audio.volume=savedVolume; audio.muted=false; localStorage.setItem(musicKey,'on');
-  // Không await/fetch/timeout trước play(): giữ nguyên user gesture trên iPhone.
-  setStatus(false,'Đang mở nhạc…');
-  let promise;
-  try{promise=audio.play();}catch(error){setStatus(false,'Trình duyệt chưa cho phép phát · hãy chạm ▶ trên trình phát.');return;}
-  if(promise&&typeof promise.catch==='function')promise.catch(error=>{
-   const name=String(error&&error.name||'');
-   if(name==='NotSupportedError'&&!chooseFallback()){setStatus(false,'Định dạng nhạc không được trình duyệt hỗ trợ.');return;}
-   if(name==='NotAllowedError')setStatus(false,'Hãy chạm ▶ trên trình phát để mở âm thanh.');
-   else setStatus(false,'Không phát được nhạc · hãy chạm ▶ để thử lại.');
-  });
- }
- function stop(){localStorage.setItem(musicKey,'off');try{audio.pause();audio.currentTime=0;}catch{}setStatus(false,'Đã ngưng nhạc nền.');}
- playBtn.addEventListener('click',playFromGesture); stopBtn.addEventListener('click',stop);
- if(volume)volume.addEventListener('input',()=>{savedVolume=Math.max(0,Math.min(1,Number(volume.value)));localStorage.setItem(volumeKey,String(savedVolume));if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';audio.volume=savedVolume;});
- if('mediaSession' in navigator){try{navigator.mediaSession.setActionHandler('play',playFromGesture);navigator.mediaSession.setActionHandler('pause',()=>audio.pause());navigator.mediaSession.setActionHandler('stop',stop);}catch{}}
- const wasPlaying=localStorage.getItem(musicKey)==='on';
- setStatus(false,wasPlaying?'Chạm Khởi Nhạc hoặc ▶ để tiếp tục nhạc nền.':'Sẵn sàng · chạm Khởi Nhạc hoặc ▶ để phát.');
+ playBtn.addEventListener('click',()=>{if(audio.paused)playNow();});
+ stopBtn.addEventListener('click',()=>{audio.pause();audio.currentTime=0;seek.value='0';current.textContent='0:00';setStatus(false);setMsg('Nhạc đã ngưng. Bấm Khởi Nhạc để phát lại từ đầu.');});
+ audio.addEventListener('play',()=>setStatus(true));audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false);});audio.addEventListener('ended',()=>{audio.currentTime=0;setStatus(false);});
+ audio.addEventListener('timeupdate',()=>{current.textContent=fmt(audio.currentTime);if(audio.duration)seek.value=String((audio.currentTime/audio.duration)*100);});audio.addEventListener('loadedmetadata',()=>{duration.textContent=fmt(audio.duration);});
+ audio.addEventListener('error',()=>{if(sourceIndex<sources.length-1&&!switching){switching=true;setSource(sourceIndex+1);switching=false;setMsg('Đang chuyển sang định dạng âm thanh tương thích…');}});
+ seek.addEventListener('input',()=>{if(audio.duration)audio.currentTime=(Number(seek.value)/100)*audio.duration;});
+ const saved=Number(localStorage.getItem(VOL_KEY));const initial=Number.isFinite(saved)?Math.max(0,Math.min(1,saved)):0.8;audio.volume=initial;volume.value=String(initial);volumeValue.textContent=Math.round(initial*100)+'%';
+ volume.addEventListener('input',()=>{const v=Math.max(0,Math.min(1,Number(volume.value)||0));audio.volume=v;volumeValue.textContent=Math.round(v*100)+'%';localStorage.setItem(VOL_KEY,String(v));});
+ setSource(0);setStatus(false);
 })();
 
-/* v3.7.70 · Khóa kích cỡ màn hình tùy chọn.
+/* v3.7.71 · Khóa kích cỡ màn hình tùy chọn.
  * Khi bật: giữ scale 1, chặn pinch/double-tap zoom trên giao diện game.
  * Khi tắt: trả lại viewport mặc định để người dùng có thể zoom bình thường.
  */
@@ -1957,25 +1910,4 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    apply(next);
  });
  apply(locked());
-})();
-
-/* v3.7.69 · Cài Hàn Thiên Môn lên màn hình chính / PWA. */
-(function setupAppInstall(){
- const btn=$('#installAppBtn'); if(!btn)return;
- let deferredPrompt=null;
- const standalone=()=>window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;
- const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
- function show(){if(!standalone())btn.hidden=false;}
- function hide(){btn.hidden=true;}
- function iosGuide(){
-  alert('📲 THÊM HÀN THIÊN MÔN VÀO MÀN HÌNH CHÍNH\n\n1. Mở Hàn Thiên Môn bằng Safari.\n2. Nhấn nút Chia sẻ ⬆️.\n3. Chọn “Thêm vào Màn hình chính”.\n4. Nếu iPhone hiện “Mở dưới dạng ứng dụng web”, hãy bật tùy chọn này.\n5. Nhấn “Thêm”.\n\nSau đó Hàn Thiên Môn sẽ có biểu tượng riêng trên màn hình chính.');
- }
- window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;show();});
- btn.addEventListener('click',async()=>{
-  if(deferredPrompt){deferredPrompt.prompt();try{await deferredPrompt.userChoice;}catch{}deferredPrompt=null;hide();return;}
-  if(isIOS){iosGuide();return;}
-  alert('📲 Hãy mở menu của trình duyệt và chọn “Thêm vào màn hình chính” hoặc “Cài đặt ứng dụng”.');
- });
- window.addEventListener('appinstalled',hide);
- if(!standalone())show(); else hide();
 })();

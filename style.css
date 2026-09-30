@@ -755,13 +755,6 @@ body.dark .online-cultivation-card.online-ready{background:linear-gradient(110de
 .online-numbers b{font-size:.95rem;line-height:1.45}
 body.dark .online-numbers b{color:var(--gold)}
 @media(max-width:700px){.online-numbers{min-width:0;text-align:left;width:100%}.online-cultivation-card:after{right:-15px}}
-/* v3.6.53 · Âm thanh tiên hiệp */
-.audio-panel{display:grid;grid-template-columns:150px minmax(0,1fr);gap:24px;align-items:center;padding:24px;border:1px solid var(--gold);background:linear-gradient(135deg,color-mix(in srgb,var(--surface) 92%,transparent),color-mix(in srgb,var(--jade) 8%,var(--surface)));box-shadow:var(--shadow)}
-.audio-art{width:150px;height:150px;border:1px solid var(--gold);display:grid;place-items:center;align-content:center;gap:7px;background:radial-gradient(circle at 50% 42%,rgba(169,130,58,.12),transparent 58%),var(--paper);position:relative}
-.audio-art:before,.audio-art:after{content:'';position:absolute;border:1px solid color-mix(in srgb,var(--gold) 55%,transparent);inset:9px}.audio-art:after{inset:15px;border-style:dashed;opacity:.7}
-.audio-art span{font:900 4.6rem/1 'Noto Serif SC';color:var(--red);z-index:1}.audio-art small{font-size:.52rem;letter-spacing:.2em;font-weight:900;color:var(--jade);z-index:1}
-.audio-copy h3{font:700 1.35rem 'Noto Serif SC';color:var(--jade);margin-bottom:5px}.audio-copy>p{color:var(--muted);font-size:.8rem;line-height:1.55}.audio-controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.audio-controls .btn{min-width:135px}.audio-volume{display:flex;align-items:center;gap:12px;margin-top:16px;max-width:480px}.audio-volume label,.audio-volume span{font-size:.72rem;font-weight:800;color:var(--muted);white-space:nowrap}.audio-volume input{flex:1;accent-color:var(--jade)}.audio-note{margin-top:10px!important;min-height:22px;color:var(--red)!important;font-size:.72rem!important}.audio-section audio{display:block;width:100%;max-width:560px;height:42px;margin-top:14px;border-radius:12px}.audio-native-btn{margin-top:8px}.audio-native-btn[hidden]{display:none}.audio-direct-btn{display:inline-flex;margin-top:8px;text-decoration:none}.install-app-btn{font-size:1rem}.install-app-btn[hidden]{display:none}.screen-lock-btn{font-size:1rem}.screen-lock-btn[aria-pressed="true"]{box-shadow:0 0 0 1px var(--gold),0 0 16px rgba(169,130,58,.28)}html.screen-size-locked,html.screen-size-locked body{touch-action:manipulation}body.screen-size-locked{overscroll-behavior-x:none}
-@media(max-width:650px){.audio-panel{grid-template-columns:1fr}.audio-art{margin:auto}.audio-controls{display:grid;grid-template-columns:1fr 1fr}.audio-controls .btn{width:100%;min-width:0}.audio-volume{max-width:none}}
 
 
 /* v3.6.54 · TỐI ƯU HIỆU NĂNG + MENU ĐỐI LẬP + ÂM THANH RIÊNG */
@@ -796,22 +789,9 @@ body,.section,.topbar,.member-card,.profile-card,.power-card,.online-cultivation
 .member-card:hover{transform:translateY(-3px)}
 .btn:hover{transform:translateY(-1px)}
 .hero-card,.member-card,.profile-card,.power-card,.online-cultivation-card,.daily-stone-card,.challenge-block,.mailbox-area,.codex-card,.mansion-card{box-shadow:0 10px 28px rgba(35,55,48,.09)}
-/* Âm thanh là một chức năng độc lập, có mục riêng trên thanh menu */
-#audio{scroll-margin-top:90px}
-.audio-section{min-height:420px}
-.audio-section .section-head{align-items:center}
-.audio-section .live-pill.audio-playing{background:var(--menu-bg);color:var(--menu-text);border-color:var(--menu-accent)}
-.audio-panel{border-radius:12px;box-shadow:0 10px 28px rgba(35,55,48,.09)}
-.audio-controls .btn{transition:background-color .18s ease,color .18s ease,border-color .18s ease,transform .18s ease}
-@media(max-width:900px){
-  .topbar{height:70px;padding:0 4%;gap:10px}
-  .topbar nav{gap:4px}
-  .topbar nav a{font-size:.78rem;padding:6px 7px}
-}
 @media(max-width:700px){
   .topbar{padding:0 4%;}
   .brand small{display:none}
-  .audio-section{min-height:0}
 }
 
 
@@ -819,11 +799,9 @@ body,.section,.topbar,.member-card,.profile-card,.power-card,.online-cultivation
 body.color-flow{--jade:#6b315f;--jade2:#7b5877;--gold:#b48a42;--red:#b12f3f;background:linear-gradient(120deg,#f3eee2,#e9e1ef,#e6eee8,#f4e7df);background-size:360% 360%;animation:htmGradient 18s ease infinite;}
 body.dark.color-flow{--jade:#bda4d0;--jade2:#8fa8a0;--gold:#d3b46a;--red:#e77b82;background:linear-gradient(120deg,#10191b,#21182a,#152621,#28191d);background-size:360% 360%;}
 body.color-flow .topbar{background:color-mix(in srgb,var(--surface) 76%,transparent);}
-body.color-flow .hero-card,body.color-flow .member-card,body.color-flow .audio-panel,body.color-flow .tan-nhan-panel{backdrop-filter:blur(10px);}
+body.color-flow .hero-card,body.color-flow .member-card,body.color-flow .tan-nhan-panel{backdrop-filter:blur(10px);}
 @keyframes htmGradient{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
 .color-flow #colorModeBtn{box-shadow:0 0 0 2px rgba(177,47,63,.12),0 0 18px rgba(177,47,63,.18);}
-.audio-compat{font-size:.68rem;color:var(--muted);margin-top:7px;}
-.audio-panel{contain:content;}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}body.color-flow{animation:none}.btn,.member-card{transition:none}}
 @media (max-width:1000px){.topbar nav{gap:10px}.topbar nav a{color:var(--red)}}
 /* v3.6.55 · Menu mặc định chữ đỏ theo yêu cầu */
@@ -1917,3 +1895,28 @@ body.function-only-focus .tien-khi-enhance-section.focus-active{
 .spit-warning{color:#f1c879!important;font-weight:800}
 .pending-spit-toggle{white-space:nowrap}
 @media(max-width:760px){.challenge-replay-row{grid-template-columns:1fr}.challenge-replay-row .btn{width:100%}.pending-spit-toggle{grid-column:2}}
+
+/* v3.7.72 · Trình phát nhạc mới kiểu streaming */
+.audio-player-section{padding-top:70px;padding-bottom:70px}
+.audio-player-card{display:grid;grid-template-columns:230px 1fr;gap:34px;align-items:center;border:1px solid var(--gold);background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--paper) 86%,var(--jade) 14%));padding:30px;box-shadow:var(--shadow);border-radius:18px}
+.audio-disc-wrap{display:grid;place-items:center}
+.audio-disc{width:210px;height:210px;border-radius:50%;position:relative;display:grid;place-items:center;background:radial-gradient(circle at 50% 50%,#222 0 4%,#151515 5% 8%,#2d2d2d 9% 11%,#0d0d0d 12% 100%);box-shadow:0 18px 40px rgba(0,0,0,.25),inset 0 0 0 2px rgba(255,255,255,.08);animation:htmDiscSpin 6s linear infinite;animation-play-state:paused}
+.audio-disc.is-playing{animation-play-state:running}
+.audio-disc:before{content:'';position:absolute;inset:8px;border-radius:50%;background:repeating-radial-gradient(circle,#111 0 2px,#181818 2px 4px);opacity:.55}
+.audio-disc-groove{position:absolute;inset:17px;border-radius:50%;border:1px solid rgba(255,255,255,.11);box-shadow:inset 0 0 0 12px rgba(255,255,255,.025),inset 0 0 0 28px rgba(255,255,255,.02)}
+.audio-disc-cover{position:relative;z-index:2;width:108px;height:108px;border-radius:50%;overflow:hidden;border:3px solid #c8a55e;box-shadow:0 4px 16px rgba(0,0,0,.4);background:#f4efe0}
+.audio-disc-cover img{width:100%;height:100%;object-fit:cover;display:block}
+.audio-disc-hole{position:absolute;z-index:3;width:13px;height:13px;border-radius:50%;background:#151515;border:2px solid #c8a55e}
+.audio-track-meta{display:flex;justify-content:space-between;align-items:start;gap:18px}
+.audio-kicker{font-size:.68rem;letter-spacing:.18em;color:var(--red);font-weight:900}
+.audio-track-meta h3{font:800 2rem 'Noto Serif SC';color:var(--jade);margin:5px 0 2px}
+.audio-track-meta p{color:var(--muted);font-size:.82rem}
+.audio-live-dot{font-size:1.15rem;color:var(--red);opacity:.55}.audio-live-dot.is-playing{opacity:1;animation:audioPulse 1.1s ease-in-out infinite}
+.audio-player-main audio{position:absolute;width:1px;height:1px;opacity:.01;pointer-events:none;left:-10000px}
+.audio-time-row{display:grid;grid-template-columns:44px 1fr 44px;align-items:center;gap:10px;margin:22px 0 13px;color:var(--muted);font-size:.7rem;font-variant-numeric:tabular-nums}
+.audio-time-row input{width:100%;accent-color:var(--jade);cursor:pointer}
+.audio-controls-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.audio-controls-row .btn{min-height:44px}.audio-main-btn{min-width:150px}.audio-stop-btn{min-width:145px}.audio-stop-btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.audio-volume{display:flex;align-items:center;gap:7px;margin-left:auto;color:var(--muted);font-size:.75rem}.audio-volume input{width:105px;accent-color:var(--jade)}.audio-volume b{min-width:38px;color:var(--jade);font-size:.7rem}
+.audio-note{margin-top:15px;padding:11px 13px;border:1px solid var(--line);background:color-mix(in srgb,var(--surface) 80%,var(--bg));color:var(--muted);font-size:.74rem;border-radius:10px}.audio-note b{color:var(--red)}
+@keyframes htmDiscSpin{to{transform:rotate(360deg)}}@keyframes audioPulse{50%{transform:scale(1.25);opacity:.65}}
+@media(max-width:700px){.audio-player-card{grid-template-columns:1fr;padding:22px;gap:20px}.audio-disc{width:178px;height:178px}.audio-disc-cover{width:92px;height:92px}.audio-controls-row{display:grid;grid-template-columns:1fr 1fr}.audio-main-btn,.audio-stop-btn{width:100%;min-width:0}.audio-volume{grid-column:1/-1;margin:3px 0 0;width:100%}.audio-volume input{flex:1;width:auto}.audio-time-row{grid-template-columns:38px 1fr 38px}}

@@ -9,17 +9,7 @@ const app = express();
 // HTTP performance: nén Brotli/Gzip có chọn lọc cho payload đủ lớn.
 // Ngưỡng 1 KB tránh tốn CPU cho response nhỏ; compression tự đàm phán
 // Brotli/Gzip theo Accept-Encoding của trình duyệt.
-app.use(compression({
-  threshold: 1024,
-  level: 6,
-  filter(req, res) {
-    // Never gzip/brotli already-compressed audio. Some iOS/WebKit builds have
-    // had media-pipeline problems when an audio response is transformed by an
-    // intermediary. MP3/M4A must travel as the original byte stream.
-    if (/\.(?:mp3|m4a|aac|wav|ogg|oga)$/i.test(req.path || '')) return false;
-    return compression.filter(req, res);
-  }
-}));
+app.use(compression({ threshold: 1024, level: 6 }));
 // Render Web Service: always bind to the injected PORT on all interfaces.
 const PORT = Number(process.env.PORT) || 10000;
 const HOST = '0.0.0.0';
@@ -2510,23 +2500,25 @@ async function addDailyActivity(userId, field, amount=1) {
 
 app.use(express.json({ limit: '2mb' }));
 
-// Audio delivery diagnostic: no database is touched. This lets the frontend
-// distinguish a missing/corrupt deployment asset from an iOS/WebKit playback
-// problem without downloading the full 5 MB track.
-app.get('/api/audio-health', (req, res) => {
-  try {
-    const files = ['assets/audio/tinh-ve-background.mp3', 'assets/audio/tinh-ve-background.m4a'];
-    const result = files.map(rel => {
-      const abs = path.join(__dirname, rel);
-      const st = fs.statSync(abs);
-      return { path: '/' + rel, bytes: st.size, modified: st.mtime.toISOString(), exists: true };
-    });
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ ok: true, audio: result });
-  } catch (error) {
-    res.status(503).setHeader('Cache-Control', 'no-store').json({ ok: false, error: 'AUDIO_ASSET_UNAVAILABLE', message: String(error && error.message || error) });
-  }
+// v3.7.72 · Audio streaming route with HTTP Range support.
+const AUDIO_FILES={
+ 'tinh-ve-background.mp3':{file:'assets/audio/tinh-ve-background.mp3',type:'audio/mpeg'},
+ 'tinh-ve-background.m4a':{file:'assets/audio/tinh-ve-background.m4a',type:'audio/mp4'},
+ 'tinh-ve-background.ogg':{file:'assets/audio/tinh-ve-background.ogg',type:'audio/ogg'},
+ 'tinh-ve-background.webm':{file:'assets/audio/tinh-ve-background.webm',type:'audio/webm'}
+};
+app.get('/audio/:name',(req,res)=>{
+ const item=AUDIO_FILES[String(req.params.name||'')]; if(!item)return res.status(404).send('Audio not found');
+ const filePath=path.join(__dirname,item.file); if(!fs.existsSync(filePath))return res.status(404).send('Audio not found');
+ const stat=fs.statSync(filePath), total=stat.size, range=req.headers.range;
+ res.setHeader('Content-Type',item.type);res.setHeader('Accept-Ranges','bytes');res.setHeader('Cache-Control','no-store, no-cache, must-revalidate');res.setHeader('Pragma','no-cache');res.setHeader('Content-Disposition','inline');res.setHeader('X-Content-Type-Options','nosniff');
+ if(!range){res.setHeader('Content-Length',total);return fs.createReadStream(filePath).pipe(res);}
+ const m=/bytes=(\d*)-(\d*)/.exec(range); if(!m)return res.status(416).set('Content-Range',`bytes */${total}`).end();
+ let start=m[1]?Number(m[1]):Math.max(total-(Number(m[2])||0),0), end=m[2]?Number(m[2]):total-1;
+ if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<start||start>=total)return res.status(416).set('Content-Range',`bytes */${total}`).end();
+ end=Math.min(end,total-1);const len=end-start+1;res.status(206);res.setHeader('Content-Length',len);res.setHeader('Content-Range',`bytes ${start}-${end}/${total}`);fs.createReadStream(filePath,{start,end}).pipe(res);
 });
+
 app.use(express.static(__dirname, {
   maxAge: process.env.NODE_ENV === 'production' ? '30d' : 0,
   etag: true,
@@ -2535,21 +2527,14 @@ app.use(express.static(__dirname, {
     if (/manifest\.webmanifest$|sw\.js$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('Pragma', 'no-cache');
-    }
-    if (/\.(?:mp3|m4a|aac|wav|ogg|oga)$/i.test(filePath)) {
-      // Audio must be a clean, range-capable byte stream. Do not cache a stale
-      // failed media response on iPhone and explicitly advertise byte ranges.
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Accept-Ranges', 'bytes');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
     } else if (/\.html$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache');
     } else if (/\.(?:js|css)$/i.test(filePath)) {
-      // JS/CSS must always revalidate. Older deployments reused the same asset
-      // query string while Render/browser caches were told `immutable`, causing
-      // newly deployed functions to silently keep running old code on iPhone.
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else if (/\.(?:mp3|m4a|ogg|webm)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Accept-Ranges', 'bytes');
     } else if (/\.(?:png|jpe?g|webp|svg|ico)$/i.test(filePath)) {
       res.setHeader('Cache-Control', process.env.NODE_ENV === 'production' ? 'public, max-age=2592000, stale-while-revalidate=604800' : 'no-cache');
     } else {
