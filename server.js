@@ -6910,13 +6910,13 @@ app.post('/api/challenges/online/respond',auth,async(req,res)=>{
     const announcement=await publishChallengeAnnouncement(client,`⚔️ ${challenger.display_name} và ${opponent.display_name} đã đồng thuận Lôi Đài · khai chiến sau 28 giây`,10000);
     await client.query('COMMIT');
     res.set('Cache-Control','no-store');
-    return res.json({ok:true,status:'accepted',message:'Đã đồng thuận. Chờ 28 giây, sau đó hệ thống sẽ tính kết quả trong 5 giây.',battle:{id:requestId,status:'accepted',challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:maxA,opponentHp:maxB,challengerMaxHp:maxA,opponentMaxHp:maxB,turnUserId:null,round:0,lastActorId:null,lastDamage:0,lastAction:'⏳ Lôi đài đã khai mở · chuẩn bị giao chiến',challengerName:challenger.display_name,opponentName:opponent.display_name,challengerAvatar:challenger.avatar,opponentAvatar:opponent.avatar,challengerRank:challenger.rank,opponentRank:opponent.rank,challengerSpirit:Number(challenger.spirit_power)||0,opponentSpirit:Number(opponent.spirit_power)||0,realmGap:Math.abs(stageFor(Number(challenger.spirit_power)||0).realmIndex-stageFor(Number(opponent.spirit_power)||0).realmIndex),spitEnabled,spit:false,spitAllowed:false,countdownUntil:new Date(Date.now()+countdownMs).toISOString(),countdownRemainingMs:countdownMs,log:[],reward:{gain:0,item:null},penalty:{text:''},announcement},reward:{gain:0,item:null},penalty:{text:''}});
+    return res.json({ok:true,status:'accepted',message:'Đã đồng thuận. Chờ đúng 28 giây, sau đó hệ thống lập tức chốt kết quả; thanh thông báo hiển thị kết quả trong 5 giây.',battle:{id:requestId,status:'accepted',challengerId:Number(challenger.id),opponentId:Number(opponent.id),challengerHp:maxA,opponentHp:maxB,challengerMaxHp:maxA,opponentMaxHp:maxB,turnUserId:null,round:0,lastActorId:null,lastDamage:0,lastAction:'⏳ Lôi đài đã khai mở · chuẩn bị giao chiến',challengerName:challenger.display_name,opponentName:opponent.display_name,challengerAvatar:challenger.avatar,opponentAvatar:opponent.avatar,challengerRank:challenger.rank,opponentRank:opponent.rank,challengerSpirit:Number(challenger.spirit_power)||0,opponentSpirit:Number(opponent.spirit_power)||0,realmGap:Math.abs(stageFor(Number(challenger.spirit_power)||0).realmIndex-stageFor(Number(opponent.spirit_power)||0).realmIndex),spitEnabled,spit:false,spitAllowed:false,countdownUntil:new Date(Date.now()+countdownMs).toISOString(),countdownRemainingMs:countdownMs,log:[],reward:{gain:0,item:null},penalty:{text:''},announcement}});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('online challenge respond:',e);res.status(500).json({error:'Lôi đài online thất bại. Giao dịch đã được hoàn tác.'});}
   finally{client.release();}
 });
 
 app.post('/api/challenges/online/spit',auth,async(req,res)=>{
-  return res.status(410).json({error:'Khiêu Chiến Online đã chuyển sang cơ chế tự động: 28 giây chờ + 5 giây hệ thống tính kết quả.'});
+  return res.status(410).json({error:'Khiêu Chiến Online đã chuyển sang cơ chế tự động: 28 giây chờ, sau đó chốt kết quả ngay; thanh thông báo hiển thị 5 giây.'});
   await ensureChallengeSchema();
   const client=await dbConnect();
   try{
@@ -8212,7 +8212,7 @@ function startBackgroundJobs(){
   const tavernTimer=setInterval(()=>{if(!shuttingDown)processTavernNpcSales().catch(e=>console.error('tavern npc sales:',e));},30000);
   const alchemyTimer=setInterval(()=>{if(!shuttingDown)processAlchemyNpcOrders().catch(e=>console.error('alchemy npc orders:',e));},30000);
   // v3.7.59: quét định kỳ để không lôi đài accepted nào bị treo sau restart/network.
-  const onlineChallengeTimer=setInterval(()=>{if(!shuttingDown&&dbReady)autoResolveActiveOnlineChallenges('background').catch(e=>console.error('online challenge auto-resolve:',e));},2000);
+  const onlineChallengeTimer=setInterval(()=>{if(!shuttingDown&&dbReady)autoResolveActiveOnlineChallenges('background').catch(e=>console.error('online challenge auto-resolve:',e));},1000);
   const tienMenhCleanupTimer=setInterval(()=>{if(!shuttingDown&&dbReady)cleanupTienMenhExpiredLobbies(25);},60000);
   const tienMenhTurnTimer=setInterval(()=>{if(!shuttingDown&&dbReady)processTienMenhTurnTimeouts(20);},1000);
   backgroundTimers.push(onlineChallengeTimer,tienMenhCleanupTimer,tienMenhTurnTimer);
@@ -8518,14 +8518,15 @@ async function resolveOnlineChallengeAfterDelayTx(client,battle){
   const powerA=onlineCombatPower(challenger),powerB=onlineCombatPower(opponent);
   const hpRatioA=Math.max(0,Math.min(1,hpA/maxA)),hpRatioB=Math.max(0,Math.min(1,hpB/maxB));
   // Kết quả dựa trên cả HP hiện tại và chiến lực; không dùng random.
-  const scoreA=hpRatioA*0.55 + (powerA/(powerA+powerB))*0.45;
-  const scoreB=hpRatioB*0.55 + (powerB/(powerA+powerB))*0.45;
+  const powerTotal=Math.max(1,powerA+powerB);
+  const scoreA=hpRatioA*0.55 + (powerA/powerTotal)*0.45;
+  const scoreB=hpRatioB*0.55 + (powerB/powerTotal)*0.45;
   const winnerIsA=scoreA>scoreB || (scoreA===scoreB && powerA>=powerB);
   const winner=winnerIsA?challenger:opponent, loser=winnerIsA?opponent:challenger;
   const winnerId=Number(winner.id),loserId=Number(loser.id);
   const realmGap=Math.abs(stageFor(Number(challenger.spirit_power)||0).realmIndex-stageFor(Number(opponent.spirit_power)||0).realmIndex);
-  const setting=(await client.query(`SELECT auto_spit_enabled FROM challenge_settings WHERE singleton_id=1`)).rows[0]||{auto_spit_enabled:true};
-  const autoSpit=setting.auto_spit_enabled!==false && realmGap>=2;
+  // Giữ nguyên cài đặt đã chốt khi hai bên đồng thuận; thay đổi global chỉ áp dụng cho trận mới.
+  const autoSpit=battle.spit_enabled!==false && realmGap>=2;
   const winnerHp=winnerIsA?hpA:hpB, loserHp=winnerIsA?hpB:hpA;
   const action=autoSpit?'💦 Nhổ 1 Ngụm Nước Bọt':'⚔️ Hệ thống phán định thắng bại';
   const resultText=autoSpit?`${winner.display_name} hơn ${loser.display_name} về kết quả tổng hợp và 💦 Nhổ 1 Ngụm Nước Bọt.`:`${winner.display_name} chiến thắng sau khi hệ thống đối chiếu HP và chiến lực.`;
@@ -8533,17 +8534,15 @@ async function resolveOnlineChallengeAfterDelayTx(client,battle){
   const reward=await applyChallengeWin(client,winnerId,'online',challengeOdds(winner,loser),Number(loser.spirit_power)||0,Number(winner.spirit_power)||0);
   const loss=await applyChallengeLoss(client,loserId,'online',challengeOdds(loser,winner).dStage);
   const meta={scoreA,scoreB,hpRatioA,hpRatioB,combatPowerA:powerA,combatPowerB:powerB,winnerHp,loserHp,realmGap,autoSpit};
-  const announcement=await publishChallengeAnnouncement(client,`⚔️ Lôi Đài: ${winner.display_name} chiến thắng ${loser.display_name} · HP ${Math.round(winnerHp).toLocaleString('vi-VN')} · Chiến lực ${powerA===powerB?'cân bằng':(winnerId===Number(challenger.id)?powerA:powerB).toLocaleString('vi-VN')}${autoSpit?' · 💦 Nhổ 1 Ngụm Nước Bọt':''}`,12000);
+  const announcement=await publishChallengeAnnouncement(client,`⚔️ Lôi Đài: ${winner.display_name} chiến thắng ${loser.display_name} · HP ${Math.round(winnerHp).toLocaleString('vi-VN')} · Chiến lực ${powerA===powerB?'cân bằng':(winnerId===Number(challenger.id)?powerA:powerB).toLocaleString('vi-VN')}${autoSpit?' · 💦 Nhổ 1 Ngụm Nước Bọt':''}`,5000);
   const challengerDamage=winnerIsA?loserHp:0, opponentDamage=winnerIsA?0:loserHp;
   await client.query(`UPDATE challenge_requests SET status='completed',winner_id=$2,loser_id=$3,challenger_hp=$4,opponent_hp=$5,turn_user_id=NULL,countdown_until=NULL,battle_phase='completed',round_number=1,last_actor_id=$2,last_damage=$6,last_action=$7,success_chance=$8,challenger_damage=$9,opponent_damage=$10,reward_spirit=$11,reward_item_id=$12,reward_quantity=$13,penalty_text=$14,battle_log=(COALESCE(battle_log,'[]'::jsonb) || $15::jsonb),result_meta=$16::jsonb,replay_until=NOW()+INTERVAL '3 minutes',responded_at=NOW() WHERE id=$1 AND status='accepted'`,[requestId,winnerId,loserId,winnerIsA?winnerHp:0,winnerIsA?0:winnerHp,loserHp,action,winnerIsA?scoreA:scoreB,challengerDamage,opponentDamage,reward.gain,reward.item?.id||null,reward.item?.quantity||0,loss.text,JSON.stringify([event]),JSON.stringify(meta)]);
   const betResult=await settleChallengeBets(client,requestId,winnerId);
   return {status:'completed',winnerId,loserId,winner:winner.display_name,loser:loser.display_name,realmGap,autoSpit,action,reward,penalty:loss,betSettlement:betResult,announcement,meta,event,message:`${winner.display_name} chiến thắng ${loser.display_name}. ${autoSpit?'💦 Tự động Nhổ 1 Ngụm Nước Bọt.':'Hệ thống đã đối chiếu HP và chiến lực.'}`};
 }
 
-// v3.7.88 · Đồng bộ Khiêu Chiến Online theo lượt.
-// 28 giây đầu là thời gian chuẩn bị; sau đó từng bên có tối đa 30 giây/lượt.
-// Worker chỉ xử lý lượt hết hạn, dùng cùng engine giao dịch với thao tác thủ công;
-// không còn tự kết thúc toàn bộ trận ngay khi countdown khai chiến kết thúc.
+// v3.7.91 · Khiêu Chiến Online: đồng thuận → đúng 28 giây → chốt kết quả ngay.
+// 5 giây chỉ là thời gian hiển thị thanh thông báo kết quả, không phải thời gian tính toán.
 async function autoResolveActiveOnlineChallenges(reason='background'){
   if(shuttingDown||poolClosed||!dbReady) return 0;
   const client=await dbConnect(); let processed=0;
@@ -8552,22 +8551,14 @@ async function autoResolveActiveOnlineChallenges(reason='background'){
       await client.query('BEGIN');
       const row=(await client.query(`SELECT * FROM challenge_requests WHERE mode='online' AND status='accepted' AND countdown_until IS NOT NULL AND countdown_until<=NOW() ORDER BY countdown_until,id FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
       if(!row){await client.query('ROLLBACK');break;}
-      const phase=row.battle_phase||'preparing';
-      if(phase==='preparing'){
-        await client.query(`UPDATE challenge_requests SET battle_phase='resolving',countdown_until=NOW()+INTERVAL '5 seconds',last_action='⏳ 28 giây đã kết thúc · hệ thống đang tính toán HP + chiến lực trong 5 giây',round_number=0 WHERE id=$1 AND status='accepted' AND battle_phase='preparing'`,[row.id]);
-        await client.query('COMMIT'); processed++; continue;
-      }
-      if(phase==='resolving'){
-        const result=await resolveOnlineChallengeAfterDelayTx(client,row);
-        const otherId=Number(row.challenger_id)===Number(result.winnerId)?Number(row.opponent_id):Number(row.challenger_id);
-        await client.query('COMMIT');
-        // Gửi Hòm Thư sau COMMIT để không giữ lock profile trong khi chờ connection khác.
-        await createMailboxNotification(result.winnerId,'challenge_result','🏆 Lôi Đài Online · Kết quả',result.message,'#challenge',{action:'challenge_result',requestId:Number(row.id)});
-        await createMailboxNotification(otherId,'challenge_result','⚔️ Lôi Đài Online · Kết quả',result.message,'#challenge',{action:'challenge_result',requestId:Number(row.id)});
-        processed++; continue;
-      }
-      await client.query(`UPDATE challenge_requests SET battle_phase='resolving',countdown_until=NOW()+INTERVAL '5 seconds',last_action='⏳ Hệ thống đang chuẩn bị tính kết quả' WHERE id=$1 AND status='accepted'`,[row.id]);
-      await client.query('COMMIT'); processed++;
+      // v3.7.91: hết đúng 28 giây là chốt trận ngay. 5 giây chỉ dành cho thanh thông báo.
+      const result=await resolveOnlineChallengeAfterDelayTx(client,row);
+      const otherId=Number(row.challenger_id)===Number(result.winnerId)?Number(row.opponent_id):Number(row.challenger_id);
+      await client.query('COMMIT');
+      // Gửi Hòm Thư sau COMMIT để không giữ lock profile trong khi chờ connection khác.
+      await createMailboxNotification(result.winnerId,'challenge_result','🏆 Lôi Đài Online · Kết quả',result.message,'#challenge',{action:'challenge_result',requestId:Number(row.id)});
+      await createMailboxNotification(otherId,'challenge_result','⚔️ Lôi Đài Online · Kết quả',result.message,'#challenge',{action:'challenge_result',requestId:Number(row.id)});
+      processed++; continue;
     }
     return processed;
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error(`[CHALLENGE] ${reason}: worker lỗi`,e);return processed;}
