@@ -1836,7 +1836,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.68 · Trình phát nhạc HTML5 ổn định đa nền tảng.
+/* v3.7.69 · Trình phát nhạc HTML5 ổn định đa nền tảng.
    Mục tiêu: giống các web nghe nhạc phổ biến ở chỗ trình phát là một
    HTMLAudioElement duy nhất, nguồn MP3 trực tiếp, không fetch/await trước
    play(), không tạo/xóa audio liên tục và chỉ chuyển sang AAC/M4A khi MP3
@@ -1846,13 +1846,13 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn');
  const status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
  if(!audio||!playBtn||!stopBtn)return;
- const VERSION='3.7.68';
+ const VERSION='3.7.69';
  const musicKey='htm_background_music',volumeKey='htm_background_volume';
  const SOURCES=[
-  {src:'/assets/audio/tinh-ve-background.mp3?v='+VERSION,type:'audio/mpeg'},
-  {src:'/assets/audio/tinh-ve-background.m4a?v='+VERSION,type:'audio/mp4'},
-  {src:'/assets/audio/tinh-ve-background.ogg?v='+VERSION,type:'audio/ogg; codecs="opus"'},
-  {src:'/assets/audio/tinh-ve-background.webm?v='+VERSION,type:'audio/webm; codecs="opus"'}
+  {src:'/audio/tinh-ve-background.mp3?v='+VERSION,type:'audio/mpeg'},
+  {src:'/audio/tinh-ve-background.m4a?v='+VERSION,type:'audio/mp4'},
+  {src:'/audio/tinh-ve-background.ogg?v='+VERSION,type:'audio/ogg; codecs="opus"'},
+  {src:'/audio/tinh-ve-background.webm?v='+VERSION,type:'audio/webm; codecs="opus"'}
  ];
  let sourceIndex=0, failedSources=new Set();
  let savedVolume=parseFloat(localStorage.getItem(volumeKey));
@@ -1914,7 +1914,52 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  setStatus(false,wasPlaying?'Chạm Khởi Nhạc hoặc ▶ để tiếp tục nhạc nền.':'Sẵn sàng · chạm Khởi Nhạc hoặc ▶ để phát.');
 })();
 
-/* v3.7.68 · Cài Hàn Thiên Môn lên màn hình chính / PWA. */
+/* v3.7.70 · Khóa kích cỡ màn hình tùy chọn.
+ * Khi bật: giữ scale 1, chặn pinch/double-tap zoom trên giao diện game.
+ * Khi tắt: trả lại viewport mặc định để người dùng có thể zoom bình thường.
+ */
+(function setupScreenSizeLock(){
+ const btn=$('#screenLockBtn');
+ const meta=$('#viewportMeta')||document.querySelector('meta[name="viewport"]');
+ if(!btn||!meta)return;
+ const KEY='htm_screen_size_lock';
+ const locked=()=>localStorage.getItem(KEY)==='on';
+ function apply(on){
+   meta.setAttribute('content', on
+     ? 'width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover'
+     : 'width=device-width, initial-scale=1.0, viewport-fit=cover');
+   document.documentElement.classList.toggle('screen-size-locked',on);
+   document.body.classList.toggle('screen-size-locked',on);
+   btn.textContent=on?'🔒':'🔓';
+   btn.title=on?'Khóa kích cỡ màn hình: ĐANG BẬT · Chạm để mở khóa':'Khóa kích cỡ màn hình: ĐANG TẮT · Chạm để khóa';
+   btn.setAttribute('aria-label',btn.title);
+   btn.setAttribute('aria-pressed',String(on));
+ }
+ function preventGesture(e){
+   if(!locked())return;
+   if(e.touches && e.touches.length>1)e.preventDefault();
+ }
+ function preventGestureStart(e){if(locked())e.preventDefault();}
+ function preventDoubleTap(e){
+   if(!locked())return;
+   const now=Date.now();
+   if(window.__htmLastTouch && now-window.__htmLastTouch<280)e.preventDefault();
+   window.__htmLastTouch=now;
+ }
+ document.addEventListener('touchmove',preventGesture,{passive:false});
+ document.addEventListener('gesturestart',preventGestureStart,{passive:false});
+ document.addEventListener('gesturechange',preventGestureStart,{passive:false});
+ document.addEventListener('gestureend',preventGestureStart,{passive:false});
+ document.addEventListener('touchend',preventDoubleTap,{passive:false});
+ btn.addEventListener('click',()=>{
+   const next=!locked();
+   localStorage.setItem(KEY,next?'on':'off');
+   apply(next);
+ });
+ apply(locked());
+})();
+
+/* v3.7.69 · Cài Hàn Thiên Môn lên màn hình chính / PWA. */
 (function setupAppInstall(){
  const btn=$('#installAppBtn'); if(!btn)return;
  let deferredPrompt=null;

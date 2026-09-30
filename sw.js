@@ -1,5 +1,5 @@
-const CACHE_NAME = 'han-thien-mon-v3.7.68';
-const APP_SHELL = ['/', '/index.html', '/style.css?v=3.7.68', '/script.js?v=3.7.68', '/manifest.webmanifest?v=3.7.68', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
+const CACHE_NAME = 'han-thien-mon-v3.7.70';
+const APP_SHELL = ['/', '/index.html', '/style.css?v=3.7.69', '/script.js?v=3.7.69', '/manifest.webmanifest?v=3.7.69', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png', '/icons/icon-1024.png'];
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(APP_SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', event => {
