@@ -1836,176 +1836,101 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
  render();
 })();
 
-/* v3.7.65 · Audio iPhone/Safari/Render final fix.
-   v3.7.64 proved that the media element can reach the play() path but iOS
-   may keep a stale system audio-session category. This version force-cycles
-   ambient -> playback on every explicit Khởi Nhạc gesture, then calls play()
-   without awaiting network/API work.
-
-   Quan trọng: KHÔNG await fetch/Promise nào trước audio.play() khi nút được
-   kích bằng thao tác chạm. iOS Safari có thể làm mất transient user activation
-   sau một await, khiến play() bị từ chối hoặc media pipeline không được mở.
-   Đồng thời không dùng watchdog 1.8s: file ~5MB có thể cần lâu hơn để bắt đầu
-   trên mạng di động/Render cold-start. Chỉ fallback sau khi chờ đủ lâu. */
+/* v3.7.68 · Trình phát nhạc HTML5 ổn định đa nền tảng.
+   Mục tiêu: giống các web nghe nhạc phổ biến ở chỗ trình phát là một
+   HTMLAudioElement duy nhất, nguồn MP3 trực tiếp, không fetch/await trước
+   play(), không tạo/xóa audio liên tục và chỉ chuyển sang AAC/M4A khi MP3
+   thực sự báo lỗi. Điều này giảm tối đa tình trạng "Đang phát" nhưng load mãi.
+*/
 (function setupBackgroundMusic(){
  const audio=$('#backgroundMusic'),playBtn=$('#audioPlayBtn'),stopBtn=$('#audioStopBtn');
- const status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue'),nativeBtn=$('#audioNativeBtn');
+ const status=$('#audioStatus'),msg=$('#audioMsg'),volume=$('#audioVolume'),volumeValue=$('#audioVolumeValue');
  if(!audio||!playBtn||!stopBtn)return;
-
- const VERSION='3.7.67';
+ const VERSION='3.7.68';
  const musicKey='htm_background_music',volumeKey='htm_background_volume';
  const SOURCES=[
-   {path:'/assets/audio/tinh-ve-background.mp3?v='+VERSION,type:'audio/mpeg'},
-   {path:'/assets/audio/tinh-ve-background.m4a?v='+VERSION,type:'audio/mp4'},
-   {path:'/assets/audio/tinh-ve-background.ogg?v='+VERSION,type:'audio/ogg; codecs="opus"'},
-   {path:'/assets/audio/tinh-ve-background.webm?v='+VERSION,type:'audio/webm; codecs="opus"'}
+  {src:'/assets/audio/tinh-ve-background.mp3?v='+VERSION,type:'audio/mpeg'},
+  {src:'/assets/audio/tinh-ve-background.m4a?v='+VERSION,type:'audio/mp4'},
+  {src:'/assets/audio/tinh-ve-background.ogg?v='+VERSION,type:'audio/ogg; codecs="opus"'},
+  {src:'/assets/audio/tinh-ve-background.webm?v='+VERSION,type:'audio/webm; codecs="opus"'}
  ];
-
+ let sourceIndex=0, failedSources=new Set();
  let savedVolume=parseFloat(localStorage.getItem(volumeKey));
  if(!Number.isFinite(savedVolume))savedVolume=.35;
  savedVolume=Math.max(0,Math.min(1,savedVolume));
-
- // IMPORTANT: keep ONE persistent HTMLAudioElement.
- // Do not replace it, do not fetch a health endpoint before play(), and do not
- // call load() repeatedly. This is the same basic browser media pipeline used
- // by web music players: native <audio> + multiple <source> fallbacks.
- audio.controls=true;
- audio.preload='auto';
- audio.autoplay=false;
- audio.loop=true;
- audio.muted=false;
- audio.volume=savedVolume;
- audio.setAttribute('playsinline','');
- audio.setAttribute('webkit-playsinline','');
- audio.setAttribute('x-webkit-airplay','allow');
- audio.removeAttribute('src');
- audio.innerHTML='';
- SOURCES.forEach(source=>{
-   const el=document.createElement('source');
-   el.src=source.path;
-   el.type=source.type;
-   audio.appendChild(el);
- });
-
- if(volume)volume.value=String(savedVolume);
+ audio.controls=true; audio.preload='metadata'; audio.autoplay=false; audio.loop=true; audio.muted=false;
+ audio.volume=savedVolume; audio.playsInline=true; audio.setAttribute('playsinline',''); audio.setAttribute('webkit-playsinline',''); audio.setAttribute('x-webkit-airplay','allow');
+ // MP3 là nguồn chính: browser có thể bắt đầu tải ngay từ URL chuẩn, không cần JS dựng lại source.
+ audio.src=SOURCES[0].src;
+ if(volume){volume.value=String(savedVolume);}
  if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
-
  function setStatus(playing,text){
-   if(status){
-     status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';
-     status.classList.toggle('audio-playing',playing);
-   }
-   if(msg)msg.textContent=text;
-   playBtn.disabled=playing;
-   stopBtn.disabled=!playing;
+  if(status){status.textContent=playing?'🔊 ĐANG PHÁT':'🔇 ĐANG NGƯNG';status.classList.toggle('audio-playing',playing);}
+  if(msg)msg.textContent=text;
+  playBtn.disabled=playing; stopBtn.disabled=!playing;
  }
-
  function mediaMeta(){
-   if(!('mediaSession' in navigator)||typeof MediaMetadata==='undefined')return;
-   try{
-     navigator.mediaSession.metadata=new MediaMetadata({
-       title:'Tinh Vệ · Hàn Thiên Môn',
-       artist:'Hàn Thiên Môn',
-       album:'Nhạc nền tiên hiệp'
-     });
-   }catch{}
+  if(!('mediaSession' in navigator)||typeof MediaMetadata==='undefined')return;
+  try{navigator.mediaSession.metadata=new MediaMetadata({title:'Tinh Vệ · Hàn Thiên Môn',artist:'Hàn Thiên Môn',album:'Nhạc nền tiên hiệp'});}catch{}
  }
-
- audio.addEventListener('loadstart',()=>{
-   if(!audio.paused&&msg)msg.textContent='Đang kết nối nhạc nền…';
- });
- audio.addEventListener('loadedmetadata',()=>{
-   if(msg&&!audio.paused)msg.textContent='Đã nhận bản nhạc · đang phát…';
- });
- audio.addEventListener('canplay',()=>{
-   if(msg&&!audio.paused)msg.textContent='Đã sẵn sàng phát nhạc nền.';
- });
- audio.addEventListener('playing',()=>{
-   mediaMeta();
-   setStatus(true,'Nhạc nền đang phát liên tục.');
- });
- audio.addEventListener('play',()=>mediaMeta());
- audio.addEventListener('pause',()=>{
-   if(!audio.ended)setStatus(false,'Đã tạm dừng · chạm Khởi Nhạc để tiếp tục.');
- });
- audio.addEventListener('ended',()=>{
-   if(audio.loop)return;
-   try{audio.currentTime=0;}catch{}
- });
+ function chooseFallback(){
+  for(let i=1;i<SOURCES.length;i++){
+   if(!failedSources.has(i)){
+    sourceIndex=i; failedSources.add(i); audio.src=SOURCES[i].src; audio.load();
+    setStatus(false,'Đang thử định dạng âm thanh dự phòng…');
+    return true;
+   }
+  }
+  return false;
+ }
+ audio.addEventListener('loadstart',()=>{if(!audio.paused&&msg)msg.textContent='Đang mở bản nhạc…';});
+ audio.addEventListener('loadedmetadata',()=>{if(!audio.paused&&msg)msg.textContent='Đã nhận bản nhạc · chuẩn bị phát…';});
+ audio.addEventListener('canplay',()=>{if(!audio.paused&&msg)msg.textContent='Đã sẵn sàng · nhạc nền đang phát.';});
+ audio.addEventListener('playing',()=>{mediaMeta();setStatus(true,'Nhạc nền đang phát liên tục.');});
+ audio.addEventListener('pause',()=>{if(!audio.ended)setStatus(false,'Đã tạm dừng · chạm Khởi Nhạc để tiếp tục.');});
+ audio.addEventListener('ended',()=>{if(!audio.loop){try{audio.currentTime=0;}catch{}}});
  audio.addEventListener('error',()=>{
-   setStatus(false,'Không tải được bản nhạc. Hãy chạm ▶ trên trình phát hoặc thử lại.');
-   if(nativeBtn)nativeBtn.hidden=false;
+  if(chooseFallback())return;
+  setStatus(false,'Không tải được bản nhạc. Có thể mở file nhạc trực tiếp để kiểm tra.');
  });
-
  function playFromGesture(){
-   // No async operation, fetch, timeout or source replacement before play().
-   // This preserves the user's tap/click activation on Safari/iOS and other browsers.
-   audio.volume=savedVolume;
-   audio.muted=false;
-   localStorage.setItem(musicKey,'on');
-   setStatus(false,'Đang mở nhạc…');
-
-   let promise;
-   try{
-     promise=audio.play();
-   }catch(error){
-     setStatus(false,'Trình duyệt chưa cho phép phát. Hãy chạm ▶ trên trình phát.');
-     if(nativeBtn)nativeBtn.hidden=false;
-     return;
-   }
-
-   if(promise&&typeof promise.catch==='function'){
-     promise.catch(error=>{
-       const name=String(error&&error.name||'');
-       if(name==='NotAllowedError'){
-         setStatus(false,'Hãy chạm ▶ trên trình phát để mở âm thanh.');
-       }else{
-         setStatus(false,'Không phát được nhạc nền. Hãy chạm ▶ để thử lại.');
-       }
-       if(nativeBtn)nativeBtn.hidden=false;
-     });
-   }
+  audio.volume=savedVolume; audio.muted=false; localStorage.setItem(musicKey,'on');
+  // Không await/fetch/timeout trước play(): giữ nguyên user gesture trên iPhone.
+  setStatus(false,'Đang mở nhạc…');
+  let promise;
+  try{promise=audio.play();}catch(error){setStatus(false,'Trình duyệt chưa cho phép phát · hãy chạm ▶ trên trình phát.');return;}
+  if(promise&&typeof promise.catch==='function')promise.catch(error=>{
+   const name=String(error&&error.name||'');
+   if(name==='NotSupportedError'&&!chooseFallback()){setStatus(false,'Định dạng nhạc không được trình duyệt hỗ trợ.');return;}
+   if(name==='NotAllowedError')setStatus(false,'Hãy chạm ▶ trên trình phát để mở âm thanh.');
+   else setStatus(false,'Không phát được nhạc · hãy chạm ▶ để thử lại.');
+  });
  }
-
- function stop(){
-   localStorage.setItem(musicKey,'off');
-   try{
-     audio.pause();
-     audio.currentTime=0;
-   }catch{}
-   setStatus(false,'Đã ngưng nhạc nền.');
-   if(nativeBtn)nativeBtn.hidden=true;
- }
-
- function nativePlay(){
-   // Native browser controls use the same persistent media element.
-   // No JS reconstruction is performed here.
-   if(nativeBtn)nativeBtn.hidden=true;
-   playFromGesture();
- }
-
- playBtn.addEventListener('click',playFromGesture);
- stopBtn.addEventListener('click',stop);
- if(nativeBtn)nativeBtn.addEventListener('click',nativePlay);
-
- if(volume)volume.addEventListener('input',()=>{
-   savedVolume=Math.max(0,Math.min(1,Number(volume.value)));
-   localStorage.setItem(volumeKey,String(savedVolume));
-   if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';
-   audio.volume=savedVolume;
- });
-
- if('mediaSession' in navigator){
-   try{
-     navigator.mediaSession.setActionHandler('play',playFromGesture);
-     navigator.mediaSession.setActionHandler('pause',()=>audio.pause());
-     navigator.mediaSession.setActionHandler('stop',stop);
-   }catch{}
- }
-
- // A previous version tried to resume automatically from localStorage.
- // Do not do that: audible autoplay is intentionally user-initiated.
+ function stop(){localStorage.setItem(musicKey,'off');try{audio.pause();audio.currentTime=0;}catch{}setStatus(false,'Đã ngưng nhạc nền.');}
+ playBtn.addEventListener('click',playFromGesture); stopBtn.addEventListener('click',stop);
+ if(volume)volume.addEventListener('input',()=>{savedVolume=Math.max(0,Math.min(1,Number(volume.value)));localStorage.setItem(volumeKey,String(savedVolume));if(volumeValue)volumeValue.textContent=Math.round(savedVolume*100)+'%';audio.volume=savedVolume;});
+ if('mediaSession' in navigator){try{navigator.mediaSession.setActionHandler('play',playFromGesture);navigator.mediaSession.setActionHandler('pause',()=>audio.pause());navigator.mediaSession.setActionHandler('stop',stop);}catch{}}
  const wasPlaying=localStorage.getItem(musicKey)==='on';
- setStatus(false,wasPlaying?'Chạm Khởi Nhạc hoặc ▶ để tiếp tục nhạc nền.':'Đang ngưng nhạc nền.');
- if(nativeBtn)nativeBtn.hidden=true;
+ setStatus(false,wasPlaying?'Chạm Khởi Nhạc hoặc ▶ để tiếp tục nhạc nền.':'Sẵn sàng · chạm Khởi Nhạc hoặc ▶ để phát.');
+})();
+
+/* v3.7.68 · Cài Hàn Thiên Môn lên màn hình chính / PWA. */
+(function setupAppInstall(){
+ const btn=$('#installAppBtn'); if(!btn)return;
+ let deferredPrompt=null;
+ const standalone=()=>window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone===true;
+ const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+ function show(){if(!standalone())btn.hidden=false;}
+ function hide(){btn.hidden=true;}
+ function iosGuide(){
+  alert('📲 THÊM HÀN THIÊN MÔN VÀO MÀN HÌNH CHÍNH\n\n1. Mở Hàn Thiên Môn bằng Safari.\n2. Nhấn nút Chia sẻ ⬆️.\n3. Chọn “Thêm vào Màn hình chính”.\n4. Nếu iPhone hiện “Mở dưới dạng ứng dụng web”, hãy bật tùy chọn này.\n5. Nhấn “Thêm”.\n\nSau đó Hàn Thiên Môn sẽ có biểu tượng riêng trên màn hình chính.');
+ }
+ window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;show();});
+ btn.addEventListener('click',async()=>{
+  if(deferredPrompt){deferredPrompt.prompt();try{await deferredPrompt.userChoice;}catch{}deferredPrompt=null;hide();return;}
+  if(isIOS){iosGuide();return;}
+  alert('📲 Hãy mở menu của trình duyệt và chọn “Thêm vào màn hình chính” hoặc “Cài đặt ứng dụng”.');
+ });
+ window.addEventListener('appinstalled',hide);
+ if(!standalone())show(); else hide();
 })();

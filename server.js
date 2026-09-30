@@ -2532,6 +2532,10 @@ app.use(express.static(__dirname, {
   etag: true,
   lastModified: true,
   setHeaders(res, filePath) {
+    if (/manifest\.webmanifest$|sw\.js$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+    }
     if (/\.(?:mp3|m4a|aac|wav|ogg|oga)$/i.test(filePath)) {
       // Audio must be a clean, range-capable byte stream. Do not cache a stale
       // failed media response on iPhone and explicitly advertise byte ranges.
