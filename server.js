@@ -5958,7 +5958,8 @@ async function tienDaoRegionAccessFor(db,userId){
   if(!u)return false;
   const setting=(await db.query(`SELECT region_open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0];
   if(setting?.region_open!==false)return true;
-  if(String(u.username||'').toLowerCase()==='thienha_666')return true;
+  // Tiên Dao có khóa vùng độc lập. Khi bị khóa, chỉ Đan Chủ được phép vào
+  // để quản trị/mở vùng; không dùng quyền bypass của các khu vực khác.
   const owner=(await db.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;
   return Number(owner)===Number(userId);
 }
