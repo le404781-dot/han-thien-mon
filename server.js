@@ -6,6 +6,25 @@ const { AUDIO_MIME, AUDIO_BUFFER } = require('./audio-embedded');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 
+// Nạp .env cục bộ nếu có (không ghi đè biến môi trường của Render).
+// File .env tuyệt đối không được commit lên GitHub.
+(function loadLocalEnv(){
+  try {
+    const envPath=path.join(__dirname,'.env');
+    if(!fs.existsSync(envPath)) return;
+    const raw=fs.readFileSync(envPath,'utf8');
+    for(const line of raw.split(/\r?\n/)){
+      const m=line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+      if(!m || process.env[m[1]]) continue;
+      let value=m[2];
+      if((value.startsWith('\"')&&value.endsWith('\"'))||(value.startsWith("'")&&value.endsWith("'"))) value=value.slice(1,-1);
+      process.env[m[1]]=value;
+    }
+  } catch(err) {
+    console.warn('Không thể đọc .env cục bộ:',err.message);
+  }
+})();
+
 const app = express();
 // HTTP performance: nén Brotli/Gzip có chọn lọc cho payload đủ lớn.
 // Ngưỡng 1 KB tránh tốn CPU cho response nhỏ; compression tự đàm phán
@@ -27,6 +46,7 @@ let poolClosed = false;
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
 const OPENAI_TIEN_DAO_MODEL = String(process.env.OPENAI_TIEN_DAO_MODEL || 'gpt-5.6-luna').trim();
 const OPENAI_TIEN_DAO_TIMEOUT_MS = Math.max(8000, Math.min(45000, Number(process.env.OPENAI_TIEN_DAO_TIMEOUT_MS || 25000)));
+console.log(`[Tiên Dao AI] OpenAI API: ${OPENAI_API_KEY ? 'đã cấu hình' : 'CHƯA CẤU HÌNH'} | model=${OPENAI_TIEN_DAO_MODEL}`);
 
 if (DATABASE_URL) {
   pool = new Pool({
