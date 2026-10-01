@@ -2154,3 +2154,39 @@ body.focus-mode .tien-dao-section.focus-active .tien-dao-messenger{min-height:ca
 body.focus-mode .tien-dao-section.focus-active .tien-dao-conversation{min-height:0;overflow:hidden;}
 body.focus-mode .tien-dao-section.focus-active .tien-dao-log-main{min-height:0;height:auto;overflow-y:auto;overscroll-behavior:contain;}
 @media(max-width:760px){body.focus-mode .tien-dao-section.focus-active .tien-dao-messenger{height:calc(100vh - 185px);min-height:0}.tien-dao-log-main{-webkit-overflow-scrolling:touch;}}
+
+
+/* v3.7.99 · @thienha_666 · Hộ Thể Kim Long trong Đệ Tử Bảng.
+   Thuần CSS/SVG, không tải asset ngoài; tối ưu cho iPhone Safari. */
+.thienha-dragon-avatar-cell{position:relative;overflow:hidden;isolation:isolate;background:radial-gradient(circle at 50% 48%,rgba(255,224,116,.16),rgba(7,24,25,.08) 58%,transparent 78%);}
+.thienha-dragon-frame{position:absolute;inset:8px;display:grid;place-items:center;overflow:visible;isolation:isolate;z-index:1;}
+.thienha-dragon-frame::before{content:"";position:absolute;inset:8%;border:1px solid rgba(255,216,91,.34);border-radius:46% 54% 50% 50%;box-shadow:0 0 24px rgba(255,188,35,.18),inset 0 0 18px rgba(255,225,120,.08);animation:thDragonFramePulse 2.8s ease-in-out infinite;pointer-events:none;}
+.thienha-dragon-svg{position:absolute;inset:-9%;width:118%;height:118%;overflow:visible;filter:url(#thDragonGlow);transform-origin:50% 50%;animation:thDragonOrbit 15s linear infinite;pointer-events:none;z-index:3;}
+.th-dragon-body{fill:none;stroke:url(#thDragonGold);stroke-linecap:round;stroke-linejoin:round;filter:url(#thDragonGlow);}
+.th-dragon-body-a{stroke-width:3.2;stroke-dasharray:10 3 2 4;animation:thDragonFlowA 5.5s ease-in-out infinite;}
+.th-dragon-body-b{stroke-width:1.15;opacity:.78;stroke-dasharray:3 5;animation:thDragonFlowB 4s linear infinite;}
+.th-dragon-head{fill:url(#thDragonGold);stroke:#fff0a6;stroke-width:.35;filter:url(#thDragonGlow);transform-origin:90% 56%;animation:thDragonHead 2.7s ease-in-out infinite;}
+.th-dragon-scales{fill:#fff2a8;opacity:.8;animation:thDragonScales 2.4s ease-in-out infinite;}
+.th-dragon-aura{position:absolute;border-radius:50%;pointer-events:none;z-index:1;}
+.th-dragon-aura-1{inset:10%;border:1px solid rgba(255,221,117,.52);box-shadow:0 0 14px rgba(255,190,36,.34);animation:thDragonAura 2.4s ease-in-out infinite;}
+.th-dragon-aura-2{inset:2%;border:1px dashed rgba(255,234,157,.34);animation:thDragonAuraSpin 9s linear infinite;}
+.th-dragon-avatar{position:absolute;inset:20%;display:grid;place-items:center;z-index:2;border-radius:50%;overflow:visible;filter:drop-shadow(0 0 12px rgba(255,196,52,.34));}
+.th-dragon-avatar>*{max-width:100%;max-height:100%;}
+.th-dragon-avatar .avatar-aura,.th-dragon-avatar .immortal-emperor-aura,.th-dragon-avatar .chi-cao-aura,.th-dragon-avatar .sect-top-aura{width:100%;height:100%;}
+.th-dragon-avatar .avatar-img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+.th-dragon-spark{position:absolute;z-index:5;color:#fff5b9;text-shadow:0 0 7px #ffcc48,0 0 16px rgba(255,177,31,.95);font-size:.9rem;pointer-events:none;animation:thDragonSpark 2.5s ease-in-out infinite;}
+.th-dragon-spark-1{top:9%;right:10%;animation-delay:-.7s}.th-dragon-spark-2{bottom:13%;left:8%;font-size:.65rem;animation-delay:-1.5s}.th-dragon-spark-3{top:50%;left:0%;font-size:.55rem;animation-delay:-2s}
+.thienha-dragon-modal{position:relative;min-height:250px;display:grid;place-items:center;overflow:visible;background:radial-gradient(circle,rgba(255,218,105,.12),transparent 65%);}
+.thienha-dragon-modal .thienha-dragon-frame{position:relative;inset:auto;width:245px;height:245px;max-width:72vw;}
+.thienha-dragon-modal .th-dragon-avatar{inset:21%;}
+@keyframes thDragonOrbit{0%{transform:rotate(-2deg) scale(1)}50%{transform:rotate(2deg) scale(1.025)}100%{transform:rotate(358deg) scale(1)}}
+@keyframes thDragonFlowA{0%,100%{stroke-dashoffset:0;opacity:.82}50%{stroke-dashoffset:-25;opacity:1}}
+@keyframes thDragonFlowB{to{stroke-dashoffset:-42}}
+@keyframes thDragonHead{0%,100%{transform:rotate(-3deg) translateY(0)}50%{transform:rotate(4deg) translateY(-1.2px)}}
+@keyframes thDragonScales{0%,100%{opacity:.48}50%{opacity:1}}
+@keyframes thDragonAura{0%,100%{transform:scale(.96);opacity:.48}50%{transform:scale(1.04);opacity:.9}}
+@keyframes thDragonAuraSpin{from{transform:rotate(0deg) scale(.98)}to{transform:rotate(360deg) scale(.98)}}
+@keyframes thDragonFramePulse{0%,100%{box-shadow:0 0 18px rgba(255,188,35,.14),inset 0 0 12px rgba(255,225,120,.06)}50%{box-shadow:0 0 32px rgba(255,188,35,.32),inset 0 0 22px rgba(255,225,120,.13)}}
+@keyframes thDragonSpark{0%,100%{transform:translate3d(0,3px,0) scale(.8);opacity:.25}50%{transform:translate3d(0,-7px,0) scale(1.25);opacity:1}}
+@media(max-width:620px){.thienha-dragon-frame{inset:5px}.th-dragon-avatar{inset:22%}.thienha-dragon-modal .thienha-dragon-frame{width:220px;height:220px}}
+@media(prefers-reduced-motion:reduce){.thienha-dragon-svg,.th-dragon-body-a,.th-dragon-body-b,.th-dragon-head,.th-dragon-scales,.th-dragon-aura-1,.th-dragon-aura-2,.th-dragon-spark,.thienha-dragon-frame::before{animation:none!important}}
