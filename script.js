@@ -7,8 +7,64 @@ const authHeaders=()=>getToken()?{'Authorization':'Bearer '+getToken(),'Content-
 const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const avatarHtml=(v,cls='',realmIndex=null,auraRank=0)=>{const x=String(v??'').trim();let inner=/^data:image\//i.test(x)?`<img class="avatar-img ${cls}" src="${esc(x)}" alt="Ảnh đại diện" loading="lazy">`:esc(x||'🧑🏻‍🎓');const rank=Math.max(0,Math.min(3,Number(auraRank)||0));const hasRealm=realmIndex!==null&&realmIndex!==undefined&&!Number.isNaN(Number(realmIndex));const ri=hasRealm?Math.max(0,Math.min(18,Number(realmIndex)||0)):0;if(hasRealm&&ri===14)return `<span class="five-sword-aura" aria-label="Ngũ Kiếm Kim Tiên">${inner}<span class="five-sword sword-1"><i></i></span><span class="five-sword sword-2"><i></i></span><span class="five-sword sword-3"><i></i></span><span class="five-sword sword-4"><i></i></span><span class="five-sword sword-5"><i></i></span></span>`;if(hasRealm&&ri===17)return `<span class="immortal-emperor-aura ${rank>0?`sect-top-aura sect-top-aura-${rank}`:''}">${inner}<span class="immortal-emperor-crown" aria-label="Tiên Đế Nhất Tinh">♛</span><span class="immortal-emperor-orbit immortal-orbit-one"></span><span class="immortal-emperor-orbit immortal-orbit-two"></span></span>`;if(hasRealm&&ri===18)return `<span class="chi-cao-aura ${rank>0?`sect-top-aura sect-top-aura-${rank}`:''}">${inner}<span class="chi-cao-mark" aria-label="Chí Cao">✦</span></span>`;if(rank>0)return `<span class="sect-top-aura sect-top-aura-${rank}">${inner}</span>`;if(!hasRealm)return inner;return `<span class="avatar-aura realm-aura-${ri}">${inner}</span>`;};
 const isThienHa666=username=>String(username||'').trim().toLowerCase()==='thienha_666';
+let thienhaDragonUid=0;
+const thienhaDragonAvatarHtml=(v,realmIndex=null,auraRank=0)=>{
+ const uid=`thDragon_${++thienhaDragonUid}`;
+ return `<span class="thienha-dragon-frame" aria-label="Hộ thể Kim Long của @thienha_666">
+ <svg class="thienha-dragon-svg" viewBox="0 0 200 200" preserveAspectRatio="none" aria-hidden="true">
+  <defs>
+   <linearGradient id="${uid}Gold" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#fffbe0"/><stop offset=".18" stop-color="#ffe78a"/><stop offset=".42" stop-color="#ffc52e"/><stop offset=".68" stop-color="#ff9e16"/><stop offset=".86" stop-color="#ffe47a"/><stop offset="1" stop-color="#fff6c7"/>
+   </linearGradient>
+   <linearGradient id="${uid}DarkGold" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#fff4a9"/><stop offset=".45" stop-color="#d98913"/><stop offset="1" stop-color="#fff0a0"/>
+   </linearGradient>
+   <radialGradient id="${uid}Head" cx="35%" cy="35%"><stop offset="0" stop-color="#fffbe7"/><stop offset=".48" stop-color="#ffd75a"/><stop offset="1" stop-color="#d88910"/></radialGradient>
+   <filter id="${uid}Glow" x="-35%" y="-35%" width="170%" height="170%"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+   <filter id="${uid}Soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <g class="th-dragon-breathe">
+   <path class="th-dragon-shadow" d="M35 163 C15 137 18 108 39 89 C59 71 92 75 112 55 C132 35 155 25 177 35 C192 42 192 60 180 72 C165 87 143 85 128 99 C111 115 119 140 143 151 C163 160 180 151 188 136"/>
+   <path class="th-dragon-body th-dragon-body-main" stroke="url(#${uid}Gold)" d="M35 163 C15 137 18 108 39 89 C59 71 92 75 112 55 C132 35 155 25 177 35 C192 42 192 60 180 72 C165 87 143 85 128 99 C111 115 119 140 143 151 C163 160 180 151 188 136"/>
+   <path class="th-dragon-body th-dragon-body-hi" stroke="#fff7c9" d="M35 163 C15 137 18 108 39 89 C59 71 92 75 112 55 C132 35 155 25 177 35 C192 42 192 60 180 72 C165 87 143 85 128 99 C111 115 119 140 143 151 C163 160 180 151 188 136"/>
+   <path class="th-dragon-ridge" stroke="url(#${uid}DarkGold)" d="M39 89 C58 82 77 84 94 75 C113 65 125 45 145 38 C160 32 173 34 181 41"/>
+   <g class="th-dragon-scales">
+    <path d="M42 91 l-5 7 9-2 4 7 3-9"/><path d="M54 84 l-4 7 9-1 4 7 3-9"/><path d="M68 80 l-3 8 9-2 4 7 2-10"/>
+    <path d="M83 76 l-2 8 9-3 5 6 1-10"/><path d="M99 68 l-1 9 8-4 5 5 0-10"/><path d="M114 56 l1 9 7-5 6 4-1-10"/>
+    <path d="M130 45 l2 9 7-6 6 3-3-10"/><path d="M146 37 l3 8 7-5 6 2-4-8"/><path d="M161 34 l3 8 7-3 5 3-3-9"/>
+    <path d="M176 39 l2 8 7 0 3 5-1-9"/><path d="M178 58 l-5 6 8 1 3 6 2-9"/><path d="M162 72 l-5 7 9-1 4 6 3-9"/>
+    <path d="M145 82 l-4 8 9-2 5 6 2-10"/><path d="M130 94 l-3 8 9-2 4 7 3-9"/><path d="M120 111 l-2 9 8-4 5 6 1-10"/>
+    <path d="M124 129 l2 9 7-5 6 4-2-10"/><path d="M139 146 l4 8 7-5 6 3-3-9"/><path d="M156 153 l4 7 7-4 6 2-4-8"/>
+   </g>
+   <g class="th-dragon-head" filter="url(#${uid}Glow)">
+    <path class="th-head-neck" fill="url(#${uid}Gold)" d="M38 89 C29 77 23 64 25 52 C27 39 39 30 52 32 C64 34 70 44 67 55 C64 67 54 74 45 78"/>
+    <path class="th-head-face" fill="url(#${uid}Head)" d="M24 53 C18 47 20 37 28 32 C36 27 49 28 56 34 C62 39 61 48 55 53 C49 59 39 61 31 58 Z"/>
+    <path class="th-head-snout" fill="url(#${uid}Gold)" d="M22 47 C15 45 9 49 6 55 C12 56 17 59 25 57 L31 52 Z"/>
+    <path class="th-head-brow" d="M29 39 C34 34 41 34 46 38 C41 40 36 42 31 45"/>
+    <path class="th-head-eye" d="M31 43 C34 41 38 41 40 43 C37 46 34 46 31 43 Z"/>
+    <circle cx="35.5" cy="43.5" r="1.25" fill="#fffde1"/><circle cx="35.7" cy="43.6" r=".55" fill="#6c3100"/>
+    <path class="th-horn" stroke="url(#${uid}Gold)" d="M31 34 C23 27 22 18 27 11 C31 20 37 24 39 32"/>
+    <path class="th-horn" stroke="url(#${uid}Gold)" d="M46 32 C49 23 56 18 64 17 C58 25 57 31 54 36"/>
+    <path class="th-whisker" d="M22 53 C12 54 8 60 4 67 C14 63 20 63 27 58"/>
+    <path class="th-whisker" d="M28 56 C18 63 14 70 15 78 C22 69 27 66 34 62"/>
+    <path class="th-mane" d="M45 33 C38 24 40 14 47 7 C48 18 53 23 58 28 C66 19 75 17 83 20 C72 27 66 34 61 43"/>
+    <path class="th-jaw" d="M26 54 C34 62 46 62 54 54 C48 66 36 69 27 60 Z"/>
+    <path class="th-fang" d="M29 57 l2 6 2-6 M39 59 l1 6 3-7"/>
+   </g>
+   <g class="th-dragon-claw" filter="url(#${uid}Glow)">
+    <path d="M61 77 C55 72 50 68 45 68 C48 74 53 80 58 83"/><path d="M61 78 C61 71 64 66 68 63 C68 71 66 77 63 82"/>
+    <path d="M147 151 C151 143 157 138 163 136 C160 145 156 151 151 155"/><path d="M148 151 C157 151 163 154 168 158 C160 160 154 158 149 155"/>
+   </g>
+   <path class="th-dragon-tail" stroke="url(#${uid}Gold)" d="M188 136 C194 124 194 112 187 104 C181 97 175 95 169 98 C178 102 181 109 178 116 C175 124 168 130 161 133"/>
+  </g>
+ </svg>
+ <span class="th-dragon-aura th-dragon-aura-1"></span><span class="th-dragon-aura th-dragon-aura-2"></span>
+ <span class="th-dragon-cloud th-dragon-cloud-1"></span><span class="th-dragon-cloud th-dragon-cloud-2"></span>
+ <span class="th-dragon-spark th-dragon-spark-1">✦</span><span class="th-dragon-spark th-dragon-spark-2">✧</span><span class="th-dragon-spark th-dragon-spark-3">✦</span><span class="th-dragon-spark th-dragon-spark-4">·</span>
+ <span class="th-dragon-avatar">${avatarHtml(v,'',realmIndex,auraRank)}</span>
+ </span>`;
+};
 const thienhaDragonHtml=(v,realmIndex=null,auraRank=0,where='member')=>isThienHa666(where)?'':avatarHtml(v,'',realmIndex,auraRank);
-const thienhaDragonAvatarHtml=(v,realmIndex=null,auraRank=0)=>`<span class="thienha-dragon-frame" aria-label="Hộ thể Kim Long của @thienha_666"><svg class="thienha-dragon-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="thDragonGold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff7bf"/><stop offset=".32" stop-color="#ffd65a"/><stop offset=".62" stop-color="#ffb51f"/><stop offset="1" stop-color="#fff0a1"/></linearGradient><filter id="thDragonGlow"><feGaussianBlur stdDeviation="1.7" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><path class="th-dragon-body th-dragon-body-a" d="M7 79 C4 61 14 46 31 45 C48 44 60 34 58 22 C56 12 44 9 36 16 C29 22 31 32 39 35 C51 39 67 32 78 20 C88 9 97 17 92 30 C87 43 73 51 60 48 C43 44 30 54 31 67 C32 80 46 88 61 84 C76 80 84 69 91 57"/><path class="th-dragon-body th-dragon-body-b" d="M9 84 C23 94 39 94 52 88 C68 81 76 66 70 54 C64 43 51 41 43 47"/><g class="th-dragon-head"><path d="M87 54 C91 50 96 52 97 56 C95 58 92 59 89 58 L85 61 L84 57 Z"/><path d="M89 53 C90 48 93 46 96 45 C94 49 95 51 98 52"/><path d="M91 53 C95 48 99 48 100 50 C97 52 97 54 98 56"/><path d="M88 57 C84 54 82 53 80 54 C82 57 84 59 87 60"/><circle cx="94" cy="54" r=".8"/></g><g class="th-dragon-scales"><circle cx="25" cy="48" r=".8"/><circle cx="32" cy="47" r=".7"/><circle cx="39" cy="44" r=".8"/><circle cx="48" cy="40" r=".7"/><circle cx="57" cy="34" r=".8"/><circle cx="65" cy="30" r=".7"/><circle cx="73" cy="24" r=".8"/></g></svg><span class="th-dragon-aura th-dragon-aura-1"></span><span class="th-dragon-aura th-dragon-aura-2"></span><span class="th-dragon-spark th-dragon-spark-1">✦</span><span class="th-dragon-spark th-dragon-spark-2">✧</span><span class="th-dragon-spark th-dragon-spark-3">✦</span><span class="th-dragon-avatar">${avatarHtml(v,'',realmIndex,auraRank)}</span></span>`;
 const memberAvatarHtml=(m,where='member')=>isThienHa666(m?.username)?thienhaDragonAvatarHtml(m?.emoji,m?.realmIndex,m?.auraRank):avatarHtml(m?.emoji,'',m?.realmIndex,m?.auraRank);
 const itemAvatarHtml=(v)=>avatarHtml(v);
 const immortalArtifactAvatarHtml=(v,cls='')=>{const x=String(v??'').trim();const inner=/^data:image\//i.test(x)?`<img class="avatar-img ${cls}" src="${esc(x)}" alt="Ảnh Tiên Khí" loading="lazy">`:`<span class="immortal-artifact-glyph ${cls}">${esc(x||'⚜️')}</span>`;return `<span class="immortal-artifact-avatar-winged">${inner}<span class="immortal-wing immortal-wing-left" aria-hidden="true"></span><span class="immortal-wing immortal-wing-right" aria-hidden="true"></span></span>`;};
