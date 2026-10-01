@@ -1945,6 +1945,7 @@ async function initDb() {
   await seedDanDuong();
   await seedTienKhi();
   await ensureAlchemySchema();
+  await ensureTienDaoSchema();
   await ensureTienPhapSchema();
   await seedTienBan();
   await seedTienPhap();
@@ -5791,6 +5792,164 @@ app.post('/api/chat',auth,async(req,res)=>{
       res.status(201).json({ok:true,...r.rows[0],isElder:Boolean(myRank),elderRank:myRank});
     }catch(e){try{await client.query('ROLLBACK')}catch{};throw e}finally{client.release();}
   } catch(e){console.error('chat send:',e);res.status(500).json({error:'Không thể gửi tin nhắn.'});}
+});
+
+
+let __ensureTienDaoSchemaPromise=null;
+async function ensureTienDaoSchema(){
+  if(!__ensureTienDaoSchemaPromise) __ensureTienDaoSchemaPromise=ensureTienDaoSchemaImpl().catch(err=>{__ensureTienDaoSchemaPromise=null;throw err;});
+  return __ensureTienDaoSchemaPromise;
+}
+async function ensureTienDaoSchemaImpl(){
+  await query(`
+    CREATE TABLE IF NOT EXISTS tien_dao_settings (
+      singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),
+      open BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    INSERT INTO tien_dao_settings(singleton_id,open) VALUES(1,TRUE) ON CONFLICT(singleton_id) DO NOTHING;
+    CREATE TABLE IF NOT EXISTS tien_dao_npcs (
+      npc_code TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      personality TEXT NOT NULL,
+      speaking_style TEXT NOT NULL,
+      avatar_url TEXT NOT NULL DEFAULT '',
+      emotion TEXT NOT NULL DEFAULT 'bình thản',
+      updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    INSERT INTO tien_dao_npcs(npc_code,name,role,personality,speaking_style)
+    VALUES
+      ('da_nguyet','Dạ Nguyệt','Chưởng quầy Đan Đường','đáng yêu, tinh nghịch, thân thiện','tự nhiên, hoạt bát, đôi lúc làm nũng'),
+      ('bach_nguyet','Bạch Nguyệt','Chưởng quầy Đan Pháp','nghiêm khắc, điềm tĩnh, uyên bác','ngắn gọn, có khí chất tiên hiệp')
+    ON CONFLICT(npc_code) DO NOTHING;
+    CREATE TABLE IF NOT EXISTS tien_dao_conversations (
+      id BIGSERIAL PRIMARY KEY,
+      npc_code TEXT NOT NULL REFERENCES tien_dao_npcs(npc_code) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK(role IN ('user','npc')),
+      content TEXT NOT NULL,
+      emotion TEXT NOT NULL DEFAULT 'bình thản',
+      intimacy INTEGER NOT NULL DEFAULT 0 CHECK(intimacy BETWEEN 0 AND 100),
+      trust INTEGER NOT NULL DEFAULT 0 CHECK(trust BETWEEN 0 AND 100),
+      event_key TEXT NOT NULL DEFAULT '',
+      choice_key TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_tien_dao_conv_user_npc_created ON tien_dao_conversations(user_id,npc_code,created_at DESC,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_tien_dao_conv_npc_user ON tien_dao_conversations(npc_code,user_id,id DESC);
+    CREATE TABLE IF NOT EXISTS tien_dao_memory (
+      npc_code TEXT NOT NULL REFERENCES tien_dao_npcs(npc_code) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      memory_key TEXT NOT NULL,
+      memory_value TEXT NOT NULL,
+      importance INTEGER NOT NULL DEFAULT 1 CHECK(importance BETWEEN 1 AND 10),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(npc_code,user_id,memory_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tien_dao_memory_user ON tien_dao_memory(user_id,npc_code,updated_at DESC);
+    CREATE TABLE IF NOT EXISTS tien_dao_relationships (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      npc_code TEXT NOT NULL REFERENCES tien_dao_npcs(npc_code) ON DELETE CASCADE,
+      intimacy INTEGER NOT NULL DEFAULT 0 CHECK(intimacy BETWEEN 0 AND 100),
+      trust INTEGER NOT NULL DEFAULT 0 CHECK(trust BETWEEN 0 AND 100),
+      emotion TEXT NOT NULL DEFAULT 'bình thản',
+      interaction_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id,npc_code)
+    );
+    CREATE TABLE IF NOT EXISTS tien_dao_npc_relationships (
+      npc_a TEXT NOT NULL REFERENCES tien_dao_npcs(npc_code) ON DELETE CASCADE,
+      npc_b TEXT NOT NULL REFERENCES tien_dao_npcs(npc_code) ON DELETE CASCADE,
+      affinity INTEGER NOT NULL DEFAULT 50 CHECK(affinity BETWEEN 0 AND 100),
+      emotion TEXT NOT NULL DEFAULT 'đồng hành',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(npc_a,npc_b), CHECK(npc_a<>npc_b)
+    );
+    INSERT INTO tien_dao_npc_relationships(npc_a,npc_b,affinity,emotion)
+    VALUES('da_nguyet','bach_nguyet',58,'phối hợp nhưng thường khắc khẩu'),('bach_nguyet','da_nguyet',58,'phối hợp nhưng thường khắc khẩu')
+    ON CONFLICT(npc_a,npc_b) DO NOTHING;
+    CREATE TABLE IF NOT EXISTS tien_dao_events (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      npc_code TEXT NOT NULL REFERENCES tien_dao_npcs(npc_code) ON DELETE CASCADE,
+      event_key TEXT NOT NULL,
+      event_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_tien_dao_events_user_npc ON tien_dao_events(user_id,npc_code,created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_tien_dao_recent_message ON tien_dao_conversations(user_id,npc_code,role,md5(content),created_at);
+  `);
+}
+function tienDaoNpc(code){
+  return code==='bach_nguyet'
+    ? {code:'bach_nguyet',name:'Bạch Nguyệt',role:'Chưởng quầy Đan Pháp',style:'nghiêm khắc, điềm tĩnh, uyên bác'}
+    : {code:'da_nguyet',name:'Dạ Nguyệt',role:'Chưởng quầy Đan Đường',style:'đáng yêu, tinh nghịch, thân thiện'};
+}
+function tienDaoReply(npc, message, rel, memories, other){
+  const text=String(message||'').trim();
+  const low=text.toLowerCase();
+  const familiar=Number(rel?.intimacy||0)>=60;
+  const trusted=Number(rel?.trust||0)>=60;
+  const recalled=memories?.[0]?.memory_value;
+  if(npc.code==='da_nguyet'){
+    if(/xin chào|chào|hello|ngươi là ai/.test(low)) return familiar?`A, ${text.includes('chào')?'lại gặp đạo hữu rồi':'đạo hữu'}! Dạ Nguyệt còn nhớ chúng ta từng trò chuyện${recalled?' về '+recalled:''} đó nha~`:'Hoan nghênh đạo hữu đến Đan Đường! Dạ Nguyệt là chưởng quầy đây, cứ tự nhiên hỏi ta nhé~';
+    if(/đan|linh dược|lò luyện|đan đường/.test(low)) return trusted?'Hì hì, chuyện đan dược cứ giao cho ta. Đạo hữu muốn hỏi phẩm cấp hay dược tính nào?':'Ừm! Đan Đường có lò luyện và linh dược theo phẩm cấp. Muốn ta chỉ một món không?';
+    if(/bạch nguyệt/.test(low)) return `Bạch Nguyệt tỷ ấy á? ${other?.affinity>=60?'Ngoài miệng nghiêm khắc thôi, thật ra vẫn rất để ý Đan Đường.':'Lúc nào cũng nghiêm khắc! Nhưng thôi, tỷ ấy cũng giỏi Đan Pháp lắm.'}`;
+    return familiar?`Ừm... Dạ Nguyệt nghe đây~ Ta nhớ đạo hữu rồi. ${trusted?'Có chuyện gì cứ nói thẳng với ta nhé.':'Cứ trò chuyện thêm, rồi ta sẽ hiểu đạo hữu hơn.'}`:`Dạ Nguyệt nghe đây~ Đạo hữu muốn nói chuyện gì nào?`;
+  }
+  if(/xin chào|chào|hello/.test(low)) return familiar?'Đạo hữu. Ta vẫn nhớ cuộc trò chuyện trước của chúng ta. Nói đi.':'Đạo hữu. Bạch Nguyệt, chưởng quầy Đan Pháp. Có việc gì?';
+  if(/đan pháp|công thức|luyện đan|đan dược/.test(low)) return trusted?'Đan pháp trọng ở hỏa hầu, dược tính và trình tự. Ngươi hỏi đúng chỗ rồi.':'Đan pháp không phải trò may rủi. Hỏa hầu sai một nhịp, công sức đều hóa tro.';
+  if(/dạ nguyệt/.test(low)) return `Dạ Nguyệt? ${other?.affinity>=60?'Nàng ấy hoạt bát, nhưng đối với Đan Đường rất có trách nhiệm.':'Nàng ấy quá tùy hứng. Tuy vậy, không thể phủ nhận năng lực.'}`;
+  return familiar?'Ta đang nghe. Nói rõ điều ngươi muốn biết.':'Ta đang nghe. Hãy nói ngắn gọn, đừng vòng vo.';
+}
+
+
+app.get('/api/tien-dao',auth,async(req,res)=>{
+  try{
+    await ensureTienDaoSchema();
+    if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
+    const uid=req.session.user_id;
+    const setting=(await query(`SELECT open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]||{open:true};
+    const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||null;
+    const npcs=(await query(`SELECT npc_code,name,role,personality,speaking_style,avatar_url,emotion FROM tien_dao_npcs ORDER BY CASE npc_code WHEN 'da_nguyet' THEN 1 ELSE 2 END`)).rows;
+    const rel=(await query(`SELECT npc_code,intimacy,trust,emotion,interaction_count FROM tien_dao_relationships WHERE user_id=$1`,[uid])).rows;
+    const memories=(await query(`SELECT npc_code,memory_key,memory_value,importance,updated_at FROM tien_dao_memory WHERE user_id=$1 ORDER BY importance DESC,updated_at DESC LIMIT 50`,[uid])).rows;
+    const pendingRows=Number(owner)===Number(uid)?(await query(`SELECT e.user_id AS requester_id,u.display_name,u.username,e.created_at FROM tien_dao_events e JOIN users u ON u.id=e.user_id WHERE e.npc_code='da_nguyet' AND e.event_key LIKE 'invite_pending:%' ORDER BY e.id DESC LIMIT 50`)).rows:[];
+    res.json({open:Boolean(setting.open),ownerId:owner?Number(owner):null,isMaster:Number(owner)===Number(uid),npcs,relationships:rel,memories,pendingInvites:pendingRows.length,pendingRequests:pendingRows});
+  }catch(e){console.error('tien-dao state:',e);res.status(500).json({error:'Không thể mở Đối thoại Tiên Dao.'});}
+});
+app.post('/api/tien-dao/settings',auth,async(req,res)=>{
+  try{await ensureTienDaoSchema();const uid=req.session.user_id;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid))return res.status(403).json({error:'Chỉ Đan Chủ mới được mở hoặc đóng quầy Tiên Dao.'});const open=Boolean(req.body?.open);await query(`UPDATE tien_dao_settings SET open=$1,updated_by=$2,updated_at=NOW() WHERE singleton_id=1`,[open,uid]);res.json({ok:true,open,message:open?'Đã mở quầy Tiên Dao. Hai vị chưởng quầy có thể tiếp nhận đối thoại.':'Đã đóng quầy Tiên Dao. Môn nhân cần được Đan Chủ đồng thuận mới có thể đối thoại.'});}catch(e){res.status(500).json({error:'Không thể đổi trạng thái quầy Tiên Dao.'});}
+});
+app.post('/api/tien-dao/npc',auth,async(req,res)=>{
+  try{await ensureTienDaoSchema();const uid=req.session.user_id;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid))return res.status(403).json({error:'Chỉ Đan Chủ mới được thiết trí giao diện NPC.'});const code=req.body?.npcCode==='bach_nguyet'?'bach_nguyet':'da_nguyet';const avatar=String(req.body?.avatarUrl||'').trim().slice(0,1500000); if(avatar.length>1500000)return res.status(413).json({error:'Ảnh đại diện quá lớn.'});await query(`UPDATE tien_dao_npcs SET avatar_url=$2,updated_by=$3,updated_at=NOW() WHERE npc_code=$1`,[code,avatar,uid]);res.json({ok:true,message:`Đã cập nhật ảnh đại diện ${tienDaoNpc(code).name}.`});}catch(e){res.status(500).json({error:'Không thể cập nhật ảnh NPC.'});}
+});
+app.post('/api/tien-dao/invite',auth,async(req,res)=>{
+  const client=await dbConnect();try{await ensureTienDaoSchema();const uid=req.session.user_id;const open=(await client.query(`SELECT open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false;if(open){return res.status(409).json({error:'Quầy Tiên Dao đang mở. Môn nhân có thể đối thoại trực tiếp.'});}const existing=(await client.query(`SELECT id FROM tien_dao_events WHERE user_id=$1 AND npc_code='da_nguyet' AND event_key LIKE 'invite_pending:%' AND created_at>NOW()-INTERVAL '10 minutes' LIMIT 1`,[uid])).rows[0];if(existing)return res.status(429).json({error:'Bạn đã có một lời mời đang chờ Đan Chủ đồng thuận.'});const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1 FOR SHARE`)).rows[0]?.user_id||0;if(!owner)return res.status(503).json({error:'Chưa có Đan Chủ.'});if(Number(owner)===Number(uid))return res.status(400).json({error:'Đan Chủ không cần gửi lời mời.'});await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,'da_nguyet',$2,$3)`,[uid,`invite_pending:${uid}`,JSON.stringify({requesterId:uid})]);await client.query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data) VALUES($1,'tien_dao_invite','🌙 Lời mời Tiên Dao', $2,'#dan-duong',$3)`,[owner,`Môn nhân muốn đối thoại với Dạ Nguyệt và Bạch Nguyệt khi quầy đang đóng. Hãy mở Hòm Thư để đồng thuận hoặc từ chối.`,JSON.stringify({action:'tien_dao_invite',requesterId:uid})]);res.json({ok:true,message:'Đã gửi lời mời đến Đan Chủ.'});}catch(e){console.error('tien-dao invite:',e);res.status(500).json({error:'Không thể gửi lời mời.'});}finally{client.release();}
+});
+app.post('/api/tien-dao/invite/respond',auth,async(req,res)=>{
+  const client=await dbConnect();try{await ensureTienDaoSchema();await client.query('BEGIN');const uid=req.session.user_id,requesterId=Number(req.body?.requesterId)||0,action=req.body?.action==='accept'?'accept':'reject';const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1 FOR UPDATE`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid)){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ Đan Chủ mới xử lý được lời mời.'});}const ev=(await client.query(`SELECT id FROM tien_dao_events WHERE user_id=$1 AND event_key=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE`,[requesterId,`invite_pending:${requesterId}`])).rows[0];if(!ev){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời không còn hiệu lực.'});}await client.query(`DELETE FROM tien_dao_events WHERE id=$1`,[ev.id]);if(action==='accept'){await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,'da_nguyet',$2,$3),($1,'bach_nguyet',$4,$3)`,[requesterId,`access_granted:${Date.now()}`,JSON.stringify({untilMinutes:30,grantedBy:uid}),`access_granted:${Date.now()}_b`]);}await client.query('COMMIT');await createMailboxNotification(requesterId,'tien_dao_invite',action==='accept'?'🌙 Đan Chủ đã đồng thuận':'🌙 Đan Chủ đã từ chối',action==='accept'?'Đan Chủ đã mở quyền đối thoại Tiên Dao cho bạn trong 30 phút.':'Đan Chủ chưa đồng thuận lời mời Tiên Dao.','#dan-duong');res.json({ok:true,accepted:action==='accept',message:action==='accept'?'Đã đồng thuận. Môn nhân có thể bắt đầu đối thoại trong 30 phút.':'Đã từ chối lời mời.'});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tien-dao invite respond:',e);res.status(500).json({error:'Không thể xử lý lời mời.'});}finally{client.release();}
+});
+app.get('/api/tien-dao/conversation/:npc',auth,async(req,res)=>{try{await ensureTienDaoSchema();const code=req.params.npc==='bach_nguyet'?'bach_nguyet':'da_nguyet',uid=req.session.user_id;const open=(await query(`SELECT open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;let allowed=open||Number(owner)===Number(uid);if(!allowed){const granted=(await query(`SELECT 1 FROM tien_dao_events WHERE user_id=$1 AND npc_code=$2 AND event_key LIKE 'access_granted:%' AND created_at>NOW()-INTERVAL '30 minutes' LIMIT 1`,[uid,code])).rows[0];allowed=Boolean(granted);}if(!allowed)return res.status(403).json({error:'Quầy đang đóng. Hãy gửi lời mời cho Đan Chủ.',needsInvite:true});const messages=(await query(`SELECT role,content,emotion,intimacy,trust,created_at FROM tien_dao_conversations WHERE user_id=$1 AND npc_code=$2 ORDER BY id DESC LIMIT 40`,[uid,code])).rows.reverse();const rel=(await query(`SELECT intimacy,trust,emotion,interaction_count FROM tien_dao_relationships WHERE user_id=$1 AND npc_code=$2`,[uid,code])).rows[0]||{intimacy:0,trust:0,emotion:'bình thản',interaction_count:0};res.json({npc:tienDaoNpc(code),messages,relationship:rel,open,allowed});}catch(e){res.status(500).json({error:'Không thể tải khung đối thoại.'});}});
+app.post('/api/tien-dao/conversation/:npc',auth,async(req,res)=>{
+  const client=await dbConnect();try{await ensureTienDaoSchema();await client.query('BEGIN');const code=req.params.npc==='bach_nguyet'?'bach_nguyet':'da_nguyet',uid=req.session.user_id,message=String(req.body?.message||'').trim().slice(0,600);if(!message){await client.query('ROLLBACK');return res.status(400).json({error:'Nội dung đối thoại không được trống.'});}const open=((await client.query(`SELECT open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false);const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;let allowed=open||Number(owner)===Number(uid);if(!allowed){const granted=(await client.query(`SELECT 1 FROM tien_dao_events WHERE user_id=$1 AND npc_code=$2 AND event_key LIKE 'access_granted:%' AND created_at>NOW()-INTERVAL '30 minutes' LIMIT 1`,[uid,code])).rows[0];allowed=Boolean(granted);}if(!allowed){await client.query('ROLLBACK');return res.status(403).json({error:'Quầy đang đóng. Hãy gửi lời mời Đan Chủ trước.',needsInvite:true});}
+    const recent=(await client.query(`SELECT id,role,content FROM tien_dao_conversations WHERE user_id=$1 AND npc_code=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE`,[uid,code])).rows[0];
+    if(recent&&recent.role==='user'&&recent.content===message&&Date.now()-new Date((await client.query(`SELECT created_at FROM tien_dao_conversations WHERE id=$1`,[recent.id])).rows[0].created_at).getTime()<15000){await client.query('ROLLBACK');return res.status(429).json({error:'Đối thoại quá nhanh. Hãy chờ phản hồi của NPC.'});}
+    const rel=(await client.query(`INSERT INTO tien_dao_relationships(user_id,npc_code) VALUES($1,$2) ON CONFLICT(user_id,npc_code) DO UPDATE SET updated_at=NOW() RETURNING *`,[uid,code])).rows[0];
+    const memories=(await client.query(`SELECT memory_key,memory_value,importance FROM tien_dao_memory WHERE user_id=$1 AND npc_code=$2 ORDER BY importance DESC,updated_at DESC LIMIT 8`,[uid,code])).rows;
+    const otherCode=code==='da_nguyet'?'bach_nguyet':'da_nguyet';const other=(await client.query(`SELECT affinity FROM tien_dao_npc_relationships WHERE npc_a=$1 AND npc_b=$2`,[code,otherCode])).rows[0]||{affinity:50};
+    const npc=tienDaoNpc(code);let intimacy=Math.min(100,Number(rel.intimacy||0)+(message.length>12?2:1));let trust=Math.min(100,Number(rel.trust||0)+(/cảm ơn|tin|giúp|giúp đỡ|xin lỗi/.test(message.toLowerCase())?2:1));let emotion=/cảm ơn|vui|hạnh phúc/.test(message.toLowerCase())?'vui':/buồn|xin lỗi|thất vọng/.test(message.toLowerCase())?'trầm':'bình thản';
+    await client.query(`INSERT INTO tien_dao_conversations(user_id,npc_code,role,content,emotion,intimacy,trust) VALUES($1,$2,'user',$3,$4,$5,$6)`,[uid,code,message,emotion,intimacy,trust]);
+    const reply=tienDaoReply(npc,message,{...rel,intimacy,trust},memories,other);await client.query(`INSERT INTO tien_dao_conversations(user_id,npc_code,role,content,emotion,intimacy,trust) VALUES($1,$2,'npc',$3,$4,$5,$6)`,[uid,code,reply,emotion,intimacy,trust]);
+    await client.query(`UPDATE tien_dao_relationships SET intimacy=$3,trust=$4,emotion=$5,interaction_count=interaction_count+1,updated_at=NOW() WHERE user_id=$1 AND npc_code=$2`,[uid,code,intimacy,trust,emotion]);
+    const key=`topic_${Date.now()}`;await client.query(`INSERT INTO tien_dao_memory(npc_code,user_id,memory_key,memory_value,importance) VALUES($1,$2,$3,$4,$5) ON CONFLICT(npc_code,user_id,memory_key) DO UPDATE SET memory_value=EXCLUDED.memory_value,updated_at=NOW()`,[code,uid,key,message.slice(0,180),Math.min(10,1+(message.length>60?2:0))]);
+    await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,$2,$3,$4)`,[uid,code,`dialogue:${Date.now()}`,JSON.stringify({messageLength:message.length,emotion})]);
+    await client.query('COMMIT');res.json({ok:true,reply,relationship:{intimacy,trust,emotion},npc});
+  }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tien-dao dialogue:',e);res.status(500).json({error:'Đối thoại Tiên Dao thất bại.'});}finally{client.release();}
 });
 
 let __ensureRedPacketSchemaPromise=null;
