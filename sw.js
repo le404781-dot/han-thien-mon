@@ -1,4 +1,4 @@
-const CACHE_NAME = 'han-thien-mon-3.7.82-audio-embedded';
+const CACHE_NAME = 'han-thien-mon-3.7.101-thienha-profile';
 const APP_SHELL = [
   '/',
   '/index.html',
