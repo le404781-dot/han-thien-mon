@@ -102,7 +102,7 @@ function setChallengeAuto(enabled){
 
 const GET_CACHE_TTL={
  '/api/data':10000,'/api/profile':5000,'/api/chat':4000,'/api/mailbox':5000,
- '/api/challenges':1500,'/api/challenges/online/state':0,'/api/challenges/announcement':5000,'/api/arena/live':2500,'/api/tien-dao':0,'/api/tien-dao/conversation/da_nguyet':0,'/api/tien-dao/conversation/bach_nguyet':0,
+ '/api/challenges':1500,'/api/challenges/online/state':0,'/api/challenges/announcement':5000,'/api/arena/live':2500,'/api/tien-dao':3000,'/api/tien-dao/conversation/da_nguyet':0,'/api/tien-dao/conversation/bach_nguyet':0,
 
 };
 function getCacheTTL(url){const base=String(url).split('?')[0];return GET_CACHE_TTL[base]??3000;}
@@ -1356,6 +1356,24 @@ async function loadDanDuong(){
  }catch(e){area.innerHTML=`<div class="empty-state compact"><h3>🧪 Không thể mở Đan Đường</h3><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadDanDuong()">↻ Mở lại</button></div>`;}
 }
 
+let __tienDaoCooldownUntil=0;
+let __tienDaoCooldownTimer=null;
+function startTienDaoCooldown(seconds=15){
+  __tienDaoCooldownUntil=Date.now()+Math.max(0,Number(seconds)||15)*1000;
+  clearInterval(__tienDaoCooldownTimer);
+  const tick=()=>{
+    const left=Math.max(0,__tienDaoCooldownUntil-Date.now());
+    const button=document.querySelector('#tienDaoMainForm button[type=submit]');
+    const input=$('#tienDaoInput');
+    if(button){button.disabled=left>0;button.textContent=left>0?`Chờ ${Math.ceil(left/1000)}s`:'Gửi ✦';}
+    if(input)input.placeholder=left>0?`Đợi ${Math.ceil(left/1000)}s rồi tiếp lời...`:'Nhập lời muốn nói...';
+    if(!left){clearInterval(__tienDaoCooldownTimer);__tienDaoCooldownTimer=null;}
+  };
+  tick(); __tienDaoCooldownTimer=setInterval(tick,250);
+}
+function clearTienDaoFocus(){
+  clearInterval(__tienDaoCooldownTimer);__tienDaoCooldownTimer=null;__tienDaoCooldownUntil=0;
+}
 async function loadTienDao(){
  const area=$('#tienDaoArea'); if(!area||!getToken())return;
  try{
@@ -1387,7 +1405,7 @@ async function loadTienDao(){
   $('#tienDaoInviteBtn')?.addEventListener('click',async()=>{const b=$('#tienDaoInviteBtn');b.disabled=true;try{const x=await api('/api/tien-dao/invite',{method:'POST',headers:authHeaders(),body:'{}'});$('#tienDaoInviteMsg').textContent='✓ '+x.message;}catch(e){$('#tienDaoInviteMsg').textContent='❌ '+e.message;}finally{b.disabled=false;}});
   document.querySelectorAll('.tien-dao-invite-accept,.tien-dao-invite-reject').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/api/tien-dao/invite/respond',{method:'POST',headers:authHeaders(),body:JSON.stringify({requesterId:Number(b.dataset.user),action:b.classList.contains('tien-dao-invite-accept')?'accept':'reject'})});await loadTienDao();await loadMailbox();}catch(e){$('#tienDaoMsg').textContent='❌ '+e.message;b.disabled=false;}});
   document.querySelectorAll('.tien-dao-avatar-save').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const input=document.querySelector(`.tien-dao-avatar-input[data-npc="${b.dataset.npc}"]`),file=document.querySelector(`.tien-dao-avatar-file[data-npc="${b.dataset.npc}"]`);let avatar=input?.value||'';if(file?.files?.[0]){const f=file.files[0];if(f.size>1000000)throw new Error('Ảnh quá lớn. Vui lòng chọn ảnh dưới 1 MB.');avatar=await new Promise((resolve,reject)=>{const rd=new FileReader();rd.onload=()=>resolve(String(rd.result||''));rd.onerror=()=>reject(new Error('Không đọc được ảnh.'));rd.readAsDataURL(f);});}await api('/api/tien-dao/npc',{method:'POST',headers:authHeaders(),body:JSON.stringify({npcCode:b.dataset.npc,avatarUrl:avatar})});await loadTienDao();}catch(e){$('#tienDaoMsg').textContent='❌ '+e.message;b.disabled=false;}});
-  $('#tienDaoMainForm')?.addEventListener('submit',async e=>{e.preventDefault();const input=$('#tienDaoInput'),button=e.target.querySelector('button'),message=input.value.trim(),code=localStorage.getItem('htm_tien_dao_npc')||'da_nguyet';if(!message)return;button.disabled=true;$('#tienDaoMsg').textContent='';try{const x=await api('/api/tien-dao/conversation/'+code,{method:'POST',headers:authHeaders(),body:JSON.stringify({message})});input.value='';const log=$('#tienDaoLog');if(log){log.innerHTML+=`<div class="tien-dao-msg user"><small>Ngươi</small><div>${esc(message)}</div></div><div class="tien-dao-msg npc"><small>${esc(x.npc.name)}</small><div>${esc(x.reply)}</div></div>`;log.scrollTop=log.scrollHeight;}$('#tienDaoThought').innerHTML=x.thought?`<span>✦ Tâm niệm ${esc(x.npc.name)}</span><em>${esc(x.thought)}</em>`:'';renderTienDaoSuggestions(x.suggestions||[]);}catch(err){$('#tienDaoMsg').textContent='❌ '+err.message;}finally{button.disabled=false;}});
+  $('#tienDaoMainForm')?.addEventListener('submit',async e=>{e.preventDefault();const input=$('#tienDaoInput'),button=e.target.querySelector('button'),message=input.value.trim(),code=localStorage.getItem('htm_tien_dao_npc')||'da_nguyet';if(!message||Date.now()<__tienDaoCooldownUntil)return;button.disabled=true;$('#tienDaoMsg').textContent='';try{const x=await api('/api/tien-dao/conversation/'+code,{method:'POST',headers:authHeaders(),body:JSON.stringify({message})});input.value='';const log=$('#tienDaoLog');if(log){log.insertAdjacentHTML('beforeend',`<div class="tien-dao-msg user"><small>Ngươi</small><div>${esc(message)}</div></div><div class="tien-dao-msg npc"><small>${esc(x.npc.name)}</small><div>${esc(x.reply)}</div></div>`);log.scrollTop=log.scrollHeight;}$('#tienDaoThought').innerHTML=x.thought?`<span>✦ Tâm niệm ${esc(x.npc.name)}</span><em>${esc(x.thought)}</em>`:'';renderTienDaoSuggestions(x.suggestions||[]);startTienDaoCooldown(15);}catch(err){if(err?.status===429||/hồi|chờ.*s/.test(String(err?.message||''))){startTienDaoCooldown(Number(err.cooldown)||15);}$('#tienDaoMsg').textContent='❌ '+err.message;}finally{if(Date.now()>=__tienDaoCooldownUntil)button.disabled=false;}});
  }catch(e){const locked=/khóa vùng|phong ấn|regionLocked/i.test(String(e?.message||''));area.innerHTML=locked?`<div class="tien-dao-region-lock-panel"><div class="tien-dao-region-seal">🧿</div><span class="eyebrow">TIÊN DAO · KHU VỰC PHONG ẤN</span><h3>Đối thoại Tiên Dao đang khóa vùng</h3><p>${esc(e.message||'Khu vực Tiên Dao hiện chưa mở quyền.')}</p><small>Chỉ Đan Chủ có quyền mở vùng Tiên Dao.</small></div>`:`<div class="empty-state compact"><h3>🌙 Không thể mở Đối thoại Tiên Dao</h3><p>${esc(e.message)}</p><button class="btn small primary" onclick="loadTienDao()">↻ Mở lại</button></div>`;}
 }
 
@@ -1993,11 +2011,12 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','audio-player':'🔊 Âm Thanh','tavern':'🥂 Tửu Lâu','tien-menh':'🏮 Tiên Mệnh','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','tien-khi-enhance':'⚜️ Cường Hóa','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','wealth':'💎 Tài Phú','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','audio-player':'🔊 Âm Thanh','tavern':'🥂 Tửu Lâu','tien-menh':'🏮 Tiên Mệnh','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','tien-dao':'🌙 Đối thoại Tiên Dao','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','tien-khi-enhance':'⚜️ Cường Hóa','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','wealth':'💎 Tài Phú','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
-   document.body.classList.remove('focus-mode','focus-lock','function-only-focus');document.documentElement.classList.remove('focus-lock');
+   if(location.hash==='#tien-dao'||document.getElementById('tien-dao')?.classList.contains('focus-active'))clearTienDaoFocus();
+   document.body.classList.remove('focus-mode','focus-lock','function-only-focus','tien-dao-focus');document.documentElement.classList.remove('focus-lock');
    sections().forEach(s=>s.classList.remove('focus-active'));
    if(push && location.hash && location.hash!=='#home') history.pushState('',document.title,location.pathname+location.search);
    window.scrollTo({top:0,behavior:'smooth'});
@@ -2007,6 +2026,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    const compactOnly=['black-market','dan-phap','tavern','tien-thai','tien-khi-enhance'].includes(id);
    document.body.classList.toggle('function-only-focus',compactOnly);
    document.body.classList.add('focus-mode','focus-lock');document.documentElement.classList.add('focus-lock');
+   if(id==='tien-dao'){document.body.classList.add('tien-dao-focus');}else{document.body.classList.remove('tien-dao-focus');}
    sections().forEach(s=>s.classList.toggle('focus-active',s===target));
    if(focusLabel)focusLabel.textContent=labels[id]||target.querySelector('h2')?.textContent||'Chế độ tập trung';
    if(push)history.pushState(null,'','#'+id);
