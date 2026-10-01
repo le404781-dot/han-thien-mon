@@ -4781,7 +4781,6 @@ app.post('/api/tien-ban/spin10',auth,async(req,res)=>{
 
 app.get('/api/dan-duong',auth,async(req,res)=>{
   try{
-    if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
     const p=(await query('SELECT spirit_power,spirit_stones FROM profiles WHERE user_id=$1',[req.session.user_id])).rows[0];
     const items=(await query(`SELECT ti.id,ti.name,ti.category,ti.description,ti.price,ti.min_realm,COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
@@ -4853,7 +4852,6 @@ app.post('/api/dan-duong/invite/respond',auth,async(req,res)=>{
 app.post('/api/dan-duong/exchange',auth,async(req,res)=>{
   const client=await dbConnect();
   try{
-    if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
     const id=Number(req.body?.itemId),qty=clampInt(req.body?.quantity,1,99);
     await client.query('BEGIN');
     const item=(await client.query(`SELECT * FROM treasure_items WHERE id=$1 AND category LIKE 'Đan Đường%' FOR UPDATE`,[id])).rows[0];
@@ -5805,10 +5803,12 @@ async function ensureTienDaoSchemaImpl(){
     CREATE TABLE IF NOT EXISTS tien_dao_settings (
       singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),
       open BOOLEAN NOT NULL DEFAULT TRUE,
+      region_open BOOLEAN NOT NULL DEFAULT TRUE,
       updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-    INSERT INTO tien_dao_settings(singleton_id,open) VALUES(1,TRUE) ON CONFLICT(singleton_id) DO NOTHING;
+    INSERT INTO tien_dao_settings(singleton_id,open,region_open) VALUES(1,TRUE,TRUE) ON CONFLICT(singleton_id) DO NOTHING;
+    ALTER TABLE tien_dao_settings ADD COLUMN IF NOT EXISTS region_open BOOLEAN NOT NULL DEFAULT TRUE;
     CREATE TABLE IF NOT EXISTS tien_dao_npcs (
       npc_code TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -5881,7 +5881,9 @@ async function ensureTienDaoSchemaImpl(){
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_tien_dao_events_user_npc ON tien_dao_events(user_id,npc_code,created_at DESC);
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_tien_dao_recent_message ON tien_dao_conversations(user_id,npc_code,role,md5(content),created_at);
+    DROP INDEX IF EXISTS uq_tien_dao_recent_message;
+    CREATE INDEX IF NOT EXISTS idx_tien_dao_conv_fingerprint ON tien_dao_conversations(user_id,npc_code,role,md5(content),created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tien_dao_events_pending ON tien_dao_events(user_id,npc_code,event_key,created_at DESC);
   `);
 }
 function tienDaoNpc(code){
@@ -5889,66 +5891,131 @@ function tienDaoNpc(code){
     ? {code:'bach_nguyet',name:'Bạch Nguyệt',role:'Chưởng quầy Đan Pháp',style:'nghiêm khắc, điềm tĩnh, uyên bác'}
     : {code:'da_nguyet',name:'Dạ Nguyệt',role:'Chưởng quầy Đan Đường',style:'đáng yêu, tinh nghịch, thân thiện'};
 }
-function tienDaoReply(npc, message, rel, memories, other){
-  const text=String(message||'').trim();
-  const low=text.toLowerCase();
-  const familiar=Number(rel?.intimacy||0)>=60;
-  const trusted=Number(rel?.trust||0)>=60;
-  const recalled=memories?.[0]?.memory_value;
+function tienDaoReply(npc, message, rel, memories, other, recentMessages=[]){
+  const text=String(message||'').trim(), low=text.toLowerCase();
+  const intimacy=Number(rel?.intimacy||0), trust=Number(rel?.trust||0);
+  const familiar=intimacy>=45, trusted=trust>=55, close=intimacy>=75&&trust>=70;
+  const remembered=(memories||[]).slice(0,4).map(x=>String(x.memory_value||'').trim()).filter(Boolean);
+  const recent=(recentMessages||[]).slice(-8).map(x=>String(x.content||'')).filter(Boolean);
+  const topic=/đan|linh dược|lò luyện|luyện đan|đan pháp|dược tính|hỏa hầu|phẩm cấp/.test(low)?'đan dược'
+    :/bạch nguyệt|đan pháp/.test(low)?'bạch nguyệt'
+    :/dạ nguyệt/.test(low)?'dạ nguyệt'
+    :/cảm ơn|xin lỗi|tin tưởng|giúp|nhớ ta|nhớ ngươi|tâm sự|buồn|vui|lo lắng/.test(low)?'tâm tình'
+    :/nhiệm vụ|bí cảnh|tu luyện|cảnh giới|đột phá|linh lực|công pháp/.test(low)?'tu hành'
+    :/ai|ngươi là ai|tên gì|lai lịch/.test(low)?'lai lịch':'tâm sự';
+  const memoryHint=remembered[0]&&(/nhớ|hôm trước|lần trước|đã nói/.test(low)||close)
+    ?` Ta vẫn nhớ chuyện “${remembered[0].slice(0,72)}”.`:'';
+  const continuity=recent.length>=2?' Ta còn nhớ mạch chuyện vừa rồi, không cần kể lại từ đầu.':'';
   if(npc.code==='da_nguyet'){
-    if(/xin chào|chào|hello|ngươi là ai/.test(low)) return familiar?`A, ${text.includes('chào')?'lại gặp đạo hữu rồi':'đạo hữu'}! Dạ Nguyệt còn nhớ chúng ta từng trò chuyện${recalled?' về '+recalled:''} đó nha~`:'Hoan nghênh đạo hữu đến Đan Đường! Dạ Nguyệt là chưởng quầy đây, cứ tự nhiên hỏi ta nhé~';
-    if(/đan|linh dược|lò luyện|đan đường/.test(low)) return trusted?'Hì hì, chuyện đan dược cứ giao cho ta. Đạo hữu muốn hỏi phẩm cấp hay dược tính nào?':'Ừm! Đan Đường có lò luyện và linh dược theo phẩm cấp. Muốn ta chỉ một món không?';
-    if(/bạch nguyệt/.test(low)) return `Bạch Nguyệt tỷ ấy á? ${other?.affinity>=60?'Ngoài miệng nghiêm khắc thôi, thật ra vẫn rất để ý Đan Đường.':'Lúc nào cũng nghiêm khắc! Nhưng thôi, tỷ ấy cũng giỏi Đan Pháp lắm.'}`;
-    return familiar?`Ừm... Dạ Nguyệt nghe đây~ Ta nhớ đạo hữu rồi. ${trusted?'Có chuyện gì cứ nói thẳng với ta nhé.':'Cứ trò chuyện thêm, rồi ta sẽ hiểu đạo hữu hơn.'}`:`Dạ Nguyệt nghe đây~ Đạo hữu muốn nói chuyện gì nào?`;
+    if(topic==='lai lịch') return close?`Ta là Dạ Nguyệt, chưởng quầy Đan Đường. Còn với ngươi… có lẽ ta đã quen với những câu chuyện của ngươi hơn ta tưởng.${memoryHint}`:'Ta là Dạ Nguyệt, chưởng quầy Đan Đường~ Đan dược, chuyện tu hành hay tâm sự đều có thể nói với ta.';
+    if(/xin chào|chào|hello/.test(low)) return close?`Lại gặp ngươi rồi~ Ta còn đang nghĩ bao giờ ngươi mới chịu ghé. ${memoryHint}`:familiar?`Hoan nghênh trở lại~ Dạ Nguyệt vẫn nhớ ngươi. Hôm nay muốn nói chuyện đan dược hay chuyện trong lòng?`: 'Hoan nghênh đạo hữu đến Đan Đường~ Ta là Dạ Nguyệt. Cứ tự nhiên nhé.';
+    if(topic==='đan dược') return trusted
+      ?`Hì hì, nói đến đan dược là đúng sở trường của ta rồi~ Nếu ngươi nói rõ mục đích, phẩm cấp mong muốn và cảnh giới hiện tại, ta có thể cùng ngươi tính cách dùng lò luyện, linh dược và dược tính.${continuity}`
+      :`Đan Đường có linh dược và lò luyện theo phẩm cấp. Ngươi đang cần tăng linh lực, dưỡng thương hay chuẩn bị đột phá?`;
+    if(topic==='bạch nguyệt') return Number(other?.affinity||0)>=60
+      ?`Bạch Nguyệt tỷ ấy à? Ngoài miệng lạnh một chút thôi~ Tỷ ấy thật sự để tâm đến Đan Pháp. Nếu ngươi muốn học sâu, ta không ngại để tỷ ấy luận cùng ngươi.`
+      :`Tỷ ấy nghiêm lắm. Nhưng nếu ngươi hỏi về Đan Pháp, cứ nghe kỹ lời tỷ ấy — nàng ấy hiếm khi nói thừa.`;
+    if(topic==='tâm tình') return close?`Ừm… nói đi. Với ta, ngươi không cần phải cố tỏ ra ổn. Ta sẽ nghe hết, rồi cùng ngươi tìm một cách nhẹ lòng hơn.`
+      :familiar?`Ta nghe đây~ Ngươi đã chịu nói với ta thì ta sẽ không xem nhẹ. Cứ kể từng chút một, không cần vội.`
+      :`Được rồi, ta nghe. Nếu chuyện khó nói, cứ bắt đầu từ điều khiến ngươi nặng lòng nhất.`;
+    if(topic==='tu hành') return trusted?`Tu hành không chỉ là cảnh giới. Có lúc điều giữ một người đi tiếp lại là một người chịu ngồi nghe họ nói. Ngươi đang vướng ở đâu?`
+      :`Tu hành đường dài lắm~ Ngươi nói cảnh giới, mục tiêu và điều đang vướng, ta sẽ cùng ngươi gỡ từng nút.`;
+    if(/đùa|haha|ha ha|buồn cười|trêu/.test(low)) return close?`Hừm~ dám trêu cả chưởng quầy sao? Được, lần này ta bỏ qua. Nhưng lần sau nhớ mang theo một viên linh đan ngon nhé~`:`Ngươi đang trêu ta đấy à? Được thôi~ Nhưng đừng tưởng ta không biết đáp lại nha.`;
+    return close?`Dạ Nguyệt đang nghe đây~ ${memoryHint||'Ngươi cứ nói thẳng điều muốn nói.'} Ta sẽ không để câu chuyện rơi mất giữa chừng.`
+      :familiar?`Ừm, ta nghe đây. ${continuity} Ngươi muốn kể tiếp hay muốn ta góp ý?`
+      :`Dạ Nguyệt đang nghe đây~ Ngươi muốn kể chuyện gì nào?`;
   }
-  if(/xin chào|chào|hello/.test(low)) return familiar?'Đạo hữu. Ta vẫn nhớ cuộc trò chuyện trước của chúng ta. Nói đi.':'Đạo hữu. Bạch Nguyệt, chưởng quầy Đan Pháp. Có việc gì?';
-  if(/đan pháp|công thức|luyện đan|đan dược/.test(low)) return trusted?'Đan pháp trọng ở hỏa hầu, dược tính và trình tự. Ngươi hỏi đúng chỗ rồi.':'Đan pháp không phải trò may rủi. Hỏa hầu sai một nhịp, công sức đều hóa tro.';
-  if(/dạ nguyệt/.test(low)) return `Dạ Nguyệt? ${other?.affinity>=60?'Nàng ấy hoạt bát, nhưng đối với Đan Đường rất có trách nhiệm.':'Nàng ấy quá tùy hứng. Tuy vậy, không thể phủ nhận năng lực.'}`;
-  return familiar?'Ta đang nghe. Nói rõ điều ngươi muốn biết.':'Ta đang nghe. Hãy nói ngắn gọn, đừng vòng vo.';
+  if(/xin chào|chào|hello/.test(low)) return close?'Đạo hữu. Lại đến rồi. Ta vẫn nhớ những gì ngươi từng nói.':familiar?'Đạo hữu. Ta nhớ ngươi. Có việc gì cần luận?':'Đạo hữu. Bạch Nguyệt, chưởng quầy Đan Pháp. Có việc gì?';
+  if(topic==='lai lịch') return `Bạch Nguyệt, chưởng quầy Đan Pháp. Ta coi trọng quy củ, dược tính và sự chính xác. Nếu ngươi muốn biết thêm, hãy hỏi điều cụ thể.`;
+  if(topic==='đan dược') return trusted
+    ?`Đan pháp trọng ở hỏa hầu, dược tính, trình tự và mục đích sử dụng. Với người đã có chút tin tưởng, ta có thể luận sâu hơn. Nói rõ ngươi muốn luyện loại đan nào.`
+    :`Đan pháp không phải trò may rủi. Hỏa hầu sai một nhịp, dược tính lệch một phần, công sức có thể hóa tro. Hãy nói rõ mục tiêu.`;
+  if(topic==='dạ nguyệt') return Number(other?.affinity||0)>=60
+    ?`Dạ Nguyệt hoạt bát, đôi khi quá tùy hứng, nhưng nàng có trách nhiệm với Đan Đường. Nếu nàng đã tin ngươi, hãy trân trọng điều đó.`
+    :`Dạ Nguyệt nói nhiều hơn cần thiết. Tuy vậy, năng lực và lòng nhiệt tình của nàng không thể phủ nhận.`;
+  if(topic==='tâm tình') return close?`Ta đang nghe. Không cần che giấu phần khó nói. Nếu đã chọn nói với ta, ta sẽ nghiêm túc giữ lấy lời ấy.`
+    :familiar?`Ta đang nghe. Nếu đã nói với ta, hãy nói rõ điều ngươi thực sự lo lắng.`
+    :`Ta nghe. Đừng che giấu điều quan trọng bằng lời vòng vo.`;
+  if(topic==='tu hành') return trusted
+    ?`Tu hành cần định tâm, nhưng cũng cần biết mình đang đi về đâu. Nói cảnh giới và mục tiêu của ngươi; ta sẽ luận từng điểm.`
+    :`Tu hành cần định tâm. Muốn ta luận đạo, hãy nói cảnh giới, mục tiêu và trở ngại hiện tại.`;
+  if(/đùa|haha|ha ha|trêu/.test(low)) return familiar?'Nếu muốn trêu, hãy nói có lý. Ta không dễ bị lay động đâu.':'Nếu đây là một câu đùa, ta hiểu. Nhưng hãy trở lại vấn đề chính.';
+  return close?`Ta đang nghe. ${continuity} Hãy nói điều ngươi thực sự muốn hỏi.`
+    :familiar?`Ta đang nghe. ${memoryHint} Nói rõ điều ngươi muốn biết.`
+    :'Ta đang nghe. Hãy nói ngắn gọn, đừng vòng vo.';
 }
+function tienDaoSuggestions(npc, message, rel){
+  const low=String(message||'').toLowerCase(), trusted=Number(rel?.trust||0)>=55;
+  if(/đan|linh dược|lò luyện|luyện đan|đan pháp|dược tính|hỏa hầu/.test(low)) return npc.code==='bach_nguyet'
+    ?['Ta nên chọn lò luyện thế nào?','Hỏa hầu ảnh hưởng phẩm cấp ra sao?','Giúp ta chuẩn bị một lần luyện đan.']
+    :['Đan dược nào hợp cảnh giới của ta?','Lò luyện phẩm cấp nào nên dùng?','Ta muốn chuẩn bị đột phá.'];
+  if(/buồn|lo|mệt|áp lực|tâm sự|vui|hạnh phúc/.test(low)) return ['Hôm nay ta muốn nói thêm.','Ngươi nghĩ ta nên làm gì?','Hãy nghe ta kể tiếp.'];
+  if(npc.code==='bach_nguyet') return trusted?['Ta muốn luận sâu hơn về Đan Pháp.','Hãy chỉ ra sai sót của ta.','Ta muốn chuẩn bị cho đột phá.']:['Đan Pháp là gì?','Ta muốn hỏi về tu hành.','Ta cần lời khuyên.'];
+  return trusted?['Kể ta nghe chuyện của ngươi.','Ta muốn hỏi về Đan Đường.','Ta muốn nghe một lời khuyên.']:['Xin chào Dạ Nguyệt.','Đan Đường có gì mới?','Ta muốn nói chuyện.'];
+}
+async function tienDaoRegionAccessFor(db,userId){
+  const u=(await db.query(`SELECT id,username FROM users WHERE id=$1`,[userId])).rows[0];
+  if(!u)return false;
+  const setting=(await db.query(`SELECT region_open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0];
+  if(setting?.region_open!==false)return true;
+  if(String(u.username||'').toLowerCase()==='thienha_666')return true;
+  const owner=(await db.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;
+  return Number(owner)===Number(userId);
+}
+function tienDaoRegionLockMessage(){return 'Đối thoại Tiên Dao hiện đang bị khóa vùng. Chỉ môn nhân được mở quyền khu vực mới có thể tiến vào.';}
 
 
 app.get('/api/tien-dao',auth,async(req,res)=>{
   try{
     await ensureTienDaoSchema();
-    if(!(await regionAccessFor(req.session.user_id,'dan-duong'))) return res.status(403).json({error:regionLockMessage('dan-duong'),regionLocked:true});
+    if(!(await tienDaoRegionAccessFor({query},req.session.user_id))) return res.status(403).json({error:tienDaoRegionLockMessage(),regionLocked:true});
     const uid=req.session.user_id;
-    const setting=(await query(`SELECT open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]||{open:true};
+    const setting=(await query(`SELECT open,region_open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]||{open:true};
     const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||null;
     const npcs=(await query(`SELECT npc_code,name,role,personality,speaking_style,avatar_url,emotion FROM tien_dao_npcs ORDER BY CASE npc_code WHEN 'da_nguyet' THEN 1 ELSE 2 END`)).rows;
     const rel=(await query(`SELECT npc_code,intimacy,trust,emotion,interaction_count FROM tien_dao_relationships WHERE user_id=$1`,[uid])).rows;
     const memories=(await query(`SELECT npc_code,memory_key,memory_value,importance,updated_at FROM tien_dao_memory WHERE user_id=$1 ORDER BY importance DESC,updated_at DESC LIMIT 50`,[uid])).rows;
     const pendingRows=Number(owner)===Number(uid)?(await query(`SELECT e.user_id AS requester_id,u.display_name,u.username,e.created_at FROM tien_dao_events e JOIN users u ON u.id=e.user_id WHERE e.npc_code='da_nguyet' AND e.event_key LIKE 'invite_pending:%' ORDER BY e.id DESC LIMIT 50`)).rows:[];
-    res.json({open:Boolean(setting.open),ownerId:owner?Number(owner):null,isMaster:Number(owner)===Number(uid),npcs,relationships:rel,memories,pendingInvites:pendingRows.length,pendingRequests:pendingRows});
+    res.json({open:Boolean(setting.open),regionOpen:setting.region_open!==false,ownerId:owner?Number(owner):null,isMaster:Number(owner)===Number(uid),npcs,relationships:rel,memories,pendingInvites:pendingRows.length,pendingRequests:pendingRows});
   }catch(e){console.error('tien-dao state:',e);res.status(500).json({error:'Không thể mở Đối thoại Tiên Dao.'});}
 });
 app.post('/api/tien-dao/settings',auth,async(req,res)=>{
-  try{await ensureTienDaoSchema();const uid=req.session.user_id;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid))return res.status(403).json({error:'Chỉ Đan Chủ mới được mở hoặc đóng quầy Tiên Dao.'});const open=Boolean(req.body?.open);await query(`UPDATE tien_dao_settings SET open=$1,updated_by=$2,updated_at=NOW() WHERE singleton_id=1`,[open,uid]);res.json({ok:true,open,message:open?'Đã mở quầy Tiên Dao. Hai vị chưởng quầy có thể tiếp nhận đối thoại.':'Đã đóng quầy Tiên Dao. Môn nhân cần được Đan Chủ đồng thuận mới có thể đối thoại.'});}catch(e){res.status(500).json({error:'Không thể đổi trạng thái quầy Tiên Dao.'});}
+  try{await ensureTienDaoSchema();
+    if(!(await tienDaoRegionAccessFor({query},req.session.user_id))) return res.status(403).json({error:tienDaoRegionLockMessage(),regionLocked:true});const uid=req.session.user_id;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid))return res.status(403).json({error:'Chỉ Đan Chủ mới được mở hoặc đóng quầy Tiên Dao.'});const open=Boolean(req.body?.open);const current=(await query(`SELECT region_open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0];const regionOpen=req.body?.regionOpen===undefined?Boolean(current?.region_open!==false):Boolean(req.body.regionOpen);await query(`UPDATE tien_dao_settings SET open=$1,region_open=$2,updated_by=$3,updated_at=NOW() WHERE singleton_id=1`,[open,regionOpen,uid]);res.json({ok:true,open,regionOpen,message:open?'Đã mở quầy Tiên Dao. Hai vị chưởng quầy có thể tiếp nhận đối thoại.':'Đã đóng quầy Tiên Dao. Môn nhân cần được Đan Chủ đồng thuận mới có thể đối thoại.'});}catch(e){res.status(500).json({error:'Không thể đổi trạng thái quầy Tiên Dao.'});}
 });
 app.post('/api/tien-dao/npc',auth,async(req,res)=>{
-  try{await ensureTienDaoSchema();const uid=req.session.user_id;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid))return res.status(403).json({error:'Chỉ Đan Chủ mới được thiết trí giao diện NPC.'});const code=req.body?.npcCode==='bach_nguyet'?'bach_nguyet':'da_nguyet';const avatar=String(req.body?.avatarUrl||'').trim().slice(0,1500000); if(avatar.length>1500000)return res.status(413).json({error:'Ảnh đại diện quá lớn.'});await query(`UPDATE tien_dao_npcs SET avatar_url=$2,updated_by=$3,updated_at=NOW() WHERE npc_code=$1`,[code,avatar,uid]);res.json({ok:true,message:`Đã cập nhật ảnh đại diện ${tienDaoNpc(code).name}.`});}catch(e){res.status(500).json({error:'Không thể cập nhật ảnh NPC.'});}
+  try{await ensureTienDaoSchema();
+    if(!(await tienDaoRegionAccessFor({query},req.session.user_id))) return res.status(403).json({error:tienDaoRegionLockMessage(),regionLocked:true});const uid=req.session.user_id;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid))return res.status(403).json({error:'Chỉ Đan Chủ mới được thiết trí giao diện NPC.'});const code=req.body?.npcCode==='bach_nguyet'?'bach_nguyet':'da_nguyet';const avatar=String(req.body?.avatarUrl||'').trim().slice(0,1500000); if(avatar.length>1500000)return res.status(413).json({error:'Ảnh đại diện quá lớn.'});await query(`UPDATE tien_dao_npcs SET avatar_url=$2,updated_by=$3,updated_at=NOW() WHERE npc_code=$1`,[code,avatar,uid]);res.json({ok:true,message:`Đã cập nhật ảnh đại diện ${tienDaoNpc(code).name}.`});}catch(e){res.status(500).json({error:'Không thể cập nhật ảnh NPC.'});}
 });
 app.post('/api/tien-dao/invite',auth,async(req,res)=>{
-  const client=await dbConnect();try{await ensureTienDaoSchema();const uid=req.session.user_id;const open=(await client.query(`SELECT open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false;if(open){return res.status(409).json({error:'Quầy Tiên Dao đang mở. Môn nhân có thể đối thoại trực tiếp.'});}const existing=(await client.query(`SELECT id FROM tien_dao_events WHERE user_id=$1 AND npc_code='da_nguyet' AND event_key LIKE 'invite_pending:%' AND created_at>NOW()-INTERVAL '10 minutes' LIMIT 1`,[uid])).rows[0];if(existing)return res.status(429).json({error:'Bạn đã có một lời mời đang chờ Đan Chủ đồng thuận.'});const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1 FOR SHARE`)).rows[0]?.user_id||0;if(!owner)return res.status(503).json({error:'Chưa có Đan Chủ.'});if(Number(owner)===Number(uid))return res.status(400).json({error:'Đan Chủ không cần gửi lời mời.'});await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,'da_nguyet',$2,$3)`,[uid,`invite_pending:${uid}`,JSON.stringify({requesterId:uid})]);await client.query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data) VALUES($1,'tien_dao_invite','🌙 Lời mời Tiên Dao', $2,'#dan-duong',$3)`,[owner,`Môn nhân muốn đối thoại với Dạ Nguyệt và Bạch Nguyệt khi quầy đang đóng. Hãy mở Hòm Thư để đồng thuận hoặc từ chối.`,JSON.stringify({action:'tien_dao_invite',requesterId:uid})]);res.json({ok:true,message:'Đã gửi lời mời đến Đan Chủ.'});}catch(e){console.error('tien-dao invite:',e);res.status(500).json({error:'Không thể gửi lời mời.'});}finally{client.release();}
+  const client=await dbConnect();try{await ensureTienDaoSchema();
+    if(!(await tienDaoRegionAccessFor({query},req.session.user_id))) return res.status(403).json({error:tienDaoRegionLockMessage(),regionLocked:true});const uid=req.session.user_id;const open=(await client.query(`SELECT open,region_open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false;if(open){return res.status(409).json({error:'Quầy Tiên Dao đang mở. Môn nhân có thể đối thoại trực tiếp.'});}const existing=(await client.query(`SELECT id FROM tien_dao_events WHERE user_id=$1 AND npc_code='da_nguyet' AND event_key LIKE 'invite_pending:%' AND created_at>NOW()-INTERVAL '10 minutes' LIMIT 1`,[uid])).rows[0];if(existing)return res.status(429).json({error:'Bạn đã có một lời mời đang chờ Đan Chủ đồng thuận.'});const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1 FOR SHARE`)).rows[0]?.user_id||0;if(!owner)return res.status(503).json({error:'Chưa có Đan Chủ.'});if(Number(owner)===Number(uid))return res.status(400).json({error:'Đan Chủ không cần gửi lời mời.'});await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,'da_nguyet',$2,$3)`,[uid,`invite_pending:${uid}`,JSON.stringify({requesterId:uid})]);await client.query(`INSERT INTO mailbox_notifications(user_id,type,title,message,link_hash,action_data) VALUES($1,'tien_dao_invite','🌙 Lời mời Tiên Dao', $2,'#dan-duong',$3)`,[owner,`Môn nhân muốn đối thoại với Dạ Nguyệt và Bạch Nguyệt khi quầy đang đóng. Hãy mở Hòm Thư để đồng thuận hoặc từ chối.`,JSON.stringify({action:'tien_dao_invite',requesterId:uid})]);res.json({ok:true,message:'Đã gửi lời mời đến Đan Chủ.'});}catch(e){console.error('tien-dao invite:',e);res.status(500).json({error:'Không thể gửi lời mời.'});}finally{client.release();}
 });
 app.post('/api/tien-dao/invite/respond',auth,async(req,res)=>{
-  const client=await dbConnect();try{await ensureTienDaoSchema();await client.query('BEGIN');const uid=req.session.user_id,requesterId=Number(req.body?.requesterId)||0,action=req.body?.action==='accept'?'accept':'reject';const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1 FOR UPDATE`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid)){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ Đan Chủ mới xử lý được lời mời.'});}const ev=(await client.query(`SELECT id FROM tien_dao_events WHERE user_id=$1 AND event_key=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE`,[requesterId,`invite_pending:${requesterId}`])).rows[0];if(!ev){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời không còn hiệu lực.'});}await client.query(`DELETE FROM tien_dao_events WHERE id=$1`,[ev.id]);if(action==='accept'){await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,'da_nguyet',$2,$3),($1,'bach_nguyet',$4,$3)`,[requesterId,`access_granted:${Date.now()}`,JSON.stringify({untilMinutes:30,grantedBy:uid}),`access_granted:${Date.now()}_b`]);}await client.query('COMMIT');await createMailboxNotification(requesterId,'tien_dao_invite',action==='accept'?'🌙 Đan Chủ đã đồng thuận':'🌙 Đan Chủ đã từ chối',action==='accept'?'Đan Chủ đã mở quyền đối thoại Tiên Dao cho bạn trong 30 phút.':'Đan Chủ chưa đồng thuận lời mời Tiên Dao.','#dan-duong');res.json({ok:true,accepted:action==='accept',message:action==='accept'?'Đã đồng thuận. Môn nhân có thể bắt đầu đối thoại trong 30 phút.':'Đã từ chối lời mời.'});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tien-dao invite respond:',e);res.status(500).json({error:'Không thể xử lý lời mời.'});}finally{client.release();}
+  const client=await dbConnect();try{await ensureTienDaoSchema();
+  if(!(await tienDaoRegionAccessFor(client,req.session.user_id))) return res.status(403).json({error:tienDaoRegionLockMessage(),regionLocked:true});await client.query('BEGIN');const uid=req.session.user_id,requesterId=Number(req.body?.requesterId)||0,action=req.body?.action==='accept'?'accept':'reject';const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1 FOR UPDATE`)).rows[0]?.user_id||0;if(Number(owner)!==Number(uid)){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ Đan Chủ mới xử lý được lời mời.'});}const ev=(await client.query(`SELECT id FROM tien_dao_events WHERE user_id=$1 AND event_key=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE`,[requesterId,`invite_pending:${requesterId}`])).rows[0];if(!ev){await client.query('ROLLBACK');return res.status(404).json({error:'Lời mời không còn hiệu lực.'});}await client.query(`DELETE FROM tien_dao_events WHERE id=$1`,[ev.id]);if(action==='accept'){await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,'da_nguyet',$2,$3),($1,'bach_nguyet',$4,$3)`,[requesterId,`access_granted:${Date.now()}`,JSON.stringify({untilMinutes:30,grantedBy:uid}),`access_granted:${Date.now()}_b`]);}await client.query('COMMIT');await createMailboxNotification(requesterId,'tien_dao_invite',action==='accept'?'🌙 Đan Chủ đã đồng thuận':'🌙 Đan Chủ đã từ chối',action==='accept'?'Đan Chủ đã mở quyền đối thoại Tiên Dao cho bạn trong 30 phút.':'Đan Chủ chưa đồng thuận lời mời Tiên Dao.','#dan-duong');res.json({ok:true,accepted:action==='accept',message:action==='accept'?'Đã đồng thuận. Môn nhân có thể bắt đầu đối thoại trong 30 phút.':'Đã từ chối lời mời.'});}catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tien-dao invite respond:',e);res.status(500).json({error:'Không thể xử lý lời mời.'});}finally{client.release();}
 });
-app.get('/api/tien-dao/conversation/:npc',auth,async(req,res)=>{try{await ensureTienDaoSchema();const code=req.params.npc==='bach_nguyet'?'bach_nguyet':'da_nguyet',uid=req.session.user_id;const open=(await query(`SELECT open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;let allowed=open||Number(owner)===Number(uid);if(!allowed){const granted=(await query(`SELECT 1 FROM tien_dao_events WHERE user_id=$1 AND npc_code=$2 AND event_key LIKE 'access_granted:%' AND created_at>NOW()-INTERVAL '30 minutes' LIMIT 1`,[uid,code])).rows[0];allowed=Boolean(granted);}if(!allowed)return res.status(403).json({error:'Quầy đang đóng. Hãy gửi lời mời cho Đan Chủ.',needsInvite:true});const messages=(await query(`SELECT role,content,emotion,intimacy,trust,created_at FROM tien_dao_conversations WHERE user_id=$1 AND npc_code=$2 ORDER BY id DESC LIMIT 40`,[uid,code])).rows.reverse();const rel=(await query(`SELECT intimacy,trust,emotion,interaction_count FROM tien_dao_relationships WHERE user_id=$1 AND npc_code=$2`,[uid,code])).rows[0]||{intimacy:0,trust:0,emotion:'bình thản',interaction_count:0};res.json({npc:tienDaoNpc(code),messages,relationship:rel,open,allowed});}catch(e){res.status(500).json({error:'Không thể tải khung đối thoại.'});}});
+app.get('/api/tien-dao/conversation/:npc',auth,async(req,res)=>{try{await ensureTienDaoSchema();
+    if(!(await tienDaoRegionAccessFor({query},req.session.user_id))) return res.status(403).json({error:tienDaoRegionLockMessage(),regionLocked:true});const code=req.params.npc==='bach_nguyet'?'bach_nguyet':'da_nguyet',uid=req.session.user_id;const open=(await query(`SELECT open,region_open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false;const owner=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;let allowed=open||Number(owner)===Number(uid);if(!allowed){const granted=(await query(`SELECT 1 FROM tien_dao_events WHERE user_id=$1 AND npc_code=$2 AND event_key LIKE 'access_granted:%' AND created_at>NOW()-INTERVAL '30 minutes' LIMIT 1`,[uid,code])).rows[0];allowed=Boolean(granted);}if(!allowed)return res.status(403).json({error:'Quầy đang đóng. Hãy gửi lời mời cho Đan Chủ.',needsInvite:true});const messages=(await query(`SELECT role,content,emotion,intimacy,trust,created_at FROM tien_dao_conversations WHERE user_id=$1 AND npc_code=$2 ORDER BY id DESC LIMIT 40`,[uid,code])).rows.reverse();const rel=(await query(`SELECT intimacy,trust,emotion,interaction_count FROM tien_dao_relationships WHERE user_id=$1 AND npc_code=$2`,[uid,code])).rows[0]||{intimacy:0,trust:0,emotion:'bình thản',interaction_count:0};res.json({npc:tienDaoNpc(code),messages,relationship:rel,open,allowed,suggestions:tienDaoSuggestions(tienDaoNpc(code),messages[messages.length-1]?.content||'',rel)});}catch(e){res.status(500).json({error:'Không thể tải khung đối thoại.'});}});
 app.post('/api/tien-dao/conversation/:npc',auth,async(req,res)=>{
-  const client=await dbConnect();try{await ensureTienDaoSchema();await client.query('BEGIN');const code=req.params.npc==='bach_nguyet'?'bach_nguyet':'da_nguyet',uid=req.session.user_id,message=String(req.body?.message||'').trim().slice(0,600);if(!message){await client.query('ROLLBACK');return res.status(400).json({error:'Nội dung đối thoại không được trống.'});}const open=((await client.query(`SELECT open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false);const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;let allowed=open||Number(owner)===Number(uid);if(!allowed){const granted=(await client.query(`SELECT 1 FROM tien_dao_events WHERE user_id=$1 AND npc_code=$2 AND event_key LIKE 'access_granted:%' AND created_at>NOW()-INTERVAL '30 minutes' LIMIT 1`,[uid,code])).rows[0];allowed=Boolean(granted);}if(!allowed){await client.query('ROLLBACK');return res.status(403).json({error:'Quầy đang đóng. Hãy gửi lời mời Đan Chủ trước.',needsInvite:true});}
+  const client=await dbConnect();try{await ensureTienDaoSchema();
+  if(!(await tienDaoRegionAccessFor(client,req.session.user_id))) return res.status(403).json({error:tienDaoRegionLockMessage(),regionLocked:true});await client.query('BEGIN');const code=req.params.npc==='bach_nguyet'?'bach_nguyet':'da_nguyet',uid=req.session.user_id,message=String(req.body?.message||'').trim().slice(0,600);if(!message){await client.query('ROLLBACK');return res.status(400).json({error:'Nội dung đối thoại không được trống.'});}const open=((await client.query(`SELECT open,region_open FROM tien_dao_settings WHERE singleton_id=1`)).rows[0]?.open!==false);const owner=(await client.query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]?.user_id||0;let allowed=open||Number(owner)===Number(uid);if(!allowed){const granted=(await client.query(`SELECT 1 FROM tien_dao_events WHERE user_id=$1 AND npc_code=$2 AND event_key LIKE 'access_granted:%' AND created_at>NOW()-INTERVAL '30 minutes' LIMIT 1`,[uid,code])).rows[0];allowed=Boolean(granted);}if(!allowed){await client.query('ROLLBACK');return res.status(403).json({error:'Quầy đang đóng. Hãy gửi lời mời Đan Chủ trước.',needsInvite:true});}
     const recent=(await client.query(`SELECT id,role,content FROM tien_dao_conversations WHERE user_id=$1 AND npc_code=$2 ORDER BY id DESC LIMIT 1 FOR UPDATE`,[uid,code])).rows[0];
     if(recent&&recent.role==='user'&&recent.content===message&&Date.now()-new Date((await client.query(`SELECT created_at FROM tien_dao_conversations WHERE id=$1`,[recent.id])).rows[0].created_at).getTime()<15000){await client.query('ROLLBACK');return res.status(429).json({error:'Đối thoại quá nhanh. Hãy chờ phản hồi của NPC.'});}
     const rel=(await client.query(`INSERT INTO tien_dao_relationships(user_id,npc_code) VALUES($1,$2) ON CONFLICT(user_id,npc_code) DO UPDATE SET updated_at=NOW() RETURNING *`,[uid,code])).rows[0];
     const memories=(await client.query(`SELECT memory_key,memory_value,importance FROM tien_dao_memory WHERE user_id=$1 AND npc_code=$2 ORDER BY importance DESC,updated_at DESC LIMIT 8`,[uid,code])).rows;
     const otherCode=code==='da_nguyet'?'bach_nguyet':'da_nguyet';const other=(await client.query(`SELECT affinity FROM tien_dao_npc_relationships WHERE npc_a=$1 AND npc_b=$2`,[code,otherCode])).rows[0]||{affinity:50};
+    const recentMessages=(await client.query(`SELECT role,content FROM tien_dao_conversations WHERE user_id=$1 AND npc_code=$2 ORDER BY id DESC LIMIT 6`,[uid,code])).rows.reverse();
     const npc=tienDaoNpc(code);let intimacy=Math.min(100,Number(rel.intimacy||0)+(message.length>12?2:1));let trust=Math.min(100,Number(rel.trust||0)+(/cảm ơn|tin|giúp|giúp đỡ|xin lỗi/.test(message.toLowerCase())?2:1));let emotion=/cảm ơn|vui|hạnh phúc/.test(message.toLowerCase())?'vui':/buồn|xin lỗi|thất vọng/.test(message.toLowerCase())?'trầm':'bình thản';
     await client.query(`INSERT INTO tien_dao_conversations(user_id,npc_code,role,content,emotion,intimacy,trust) VALUES($1,$2,'user',$3,$4,$5,$6)`,[uid,code,message,emotion,intimacy,trust]);
-    const reply=tienDaoReply(npc,message,{...rel,intimacy,trust},memories,other);await client.query(`INSERT INTO tien_dao_conversations(user_id,npc_code,role,content,emotion,intimacy,trust) VALUES($1,$2,'npc',$3,$4,$5,$6)`,[uid,code,reply,emotion,intimacy,trust]);
+    const reply=tienDaoReply(npc,message,{...rel,intimacy,trust},memories,other,recentMessages);await client.query(`INSERT INTO tien_dao_conversations(user_id,npc_code,role,content,emotion,intimacy,trust) VALUES($1,$2,'npc',$3,$4,$5,$6)`,[uid,code,reply,emotion,intimacy,trust]);
     await client.query(`UPDATE tien_dao_relationships SET intimacy=$3,trust=$4,emotion=$5,interaction_count=interaction_count+1,updated_at=NOW() WHERE user_id=$1 AND npc_code=$2`,[uid,code,intimacy,trust,emotion]);
-    const key=`topic_${Date.now()}`;await client.query(`INSERT INTO tien_dao_memory(npc_code,user_id,memory_key,memory_value,importance) VALUES($1,$2,$3,$4,$5) ON CONFLICT(npc_code,user_id,memory_key) DO UPDATE SET memory_value=EXCLUDED.memory_value,updated_at=NOW()`,[code,uid,key,message.slice(0,180),Math.min(10,1+(message.length>60?2:0))]);
-    await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,$2,$3,$4)`,[uid,code,`dialogue:${Date.now()}`,JSON.stringify({messageLength:message.length,emotion})]);
-    await client.query('COMMIT');res.json({ok:true,reply,relationship:{intimacy,trust,emotion},npc});
+    const key=`topic_${Date.now()}_${Math.floor(Math.random()*1000)}`;await client.query(`INSERT INTO tien_dao_memory(npc_code,user_id,memory_key,memory_value,importance) VALUES($1,$2,$3,$4,$5) ON CONFLICT(npc_code,user_id,memory_key) DO UPDATE SET memory_value=EXCLUDED.memory_value,updated_at=NOW()`,[code,uid,key,message.slice(0,180),Math.min(10,1+(message.length>60?2:0))]);
+    await client.query(`INSERT INTO tien_dao_events(user_id,npc_code,event_key,event_data) VALUES($1,$2,$3,$4)`,[uid,code,`dialogue:${Date.now()}_${Math.floor(Math.random()*1000)}`,JSON.stringify({messageLength:message.length,emotion})]);
+    await client.query(`DELETE FROM tien_dao_memory WHERE user_id=$1 AND npc_code=$2 AND memory_key IN (SELECT memory_key FROM tien_dao_memory WHERE user_id=$1 AND npc_code=$2 ORDER BY importance DESC,updated_at DESC OFFSET 80)`,[uid,code]);
+    await client.query(`DELETE FROM tien_dao_events WHERE user_id=$1 AND npc_code=$2 AND id IN (SELECT id FROM tien_dao_events WHERE user_id=$1 AND npc_code=$2 ORDER BY id DESC OFFSET 200)`,[uid,code]);
+    await client.query('COMMIT');const thought=code==='da_nguyet'?(trusted?'“Vị khách này đã khá thân, nên nói chuyện mềm một chút.”':'“Mình nên lắng nghe thêm trước khi trêu chọc.”'):(trusted?'“Có thể nói sâu hơn về Đan Pháp với người này.”':'“Cần giữ lời ngắn gọn, trước hết phải hiểu điều họ muốn.”');
+    res.json({ok:true,reply,thought,relationship:{intimacy,trust,emotion},npc,suggestions:tienDaoSuggestions(npc,message,{intimacy,trust,emotion})});
   }catch(e){try{await client.query('ROLLBACK')}catch{}console.error('tien-dao dialogue:',e);res.status(500).json({error:'Đối thoại Tiên Dao thất bại.'});}finally{client.release();}
 });
 
