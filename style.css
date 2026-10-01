@@ -2154,3 +2154,12 @@ body.focus-mode .tien-dao-section.focus-active .tien-dao-messenger{min-height:ca
 body.focus-mode .tien-dao-section.focus-active .tien-dao-conversation{min-height:0;overflow:hidden;}
 body.focus-mode .tien-dao-section.focus-active .tien-dao-log-main{min-height:0;height:auto;overflow-y:auto;overscroll-behavior:contain;}
 @media(max-width:760px){body.focus-mode .tien-dao-section.focus-active .tien-dao-messenger{height:calc(100vh - 185px);min-height:0}.tien-dao-log-main{-webkit-overflow-scrolling:touch;}}
+
+/* Viền ngoài tùy chỉnh cho môn nhân được cấp quyền */
+.custom-avatar-frame{position:relative;display:inline-grid;place-items:center;isolation:isolate;overflow:visible}
+.custom-avatar-frame-img{position:absolute;z-index:20;inset:-9%;width:118%;height:118%;object-fit:fill;pointer-events:none;user-select:none}
+.member-card .custom-avatar-frame{width:min(225px,100%);height:225px}
+.mini-avatar .custom-avatar-frame{width:34px;height:34px}
+.avatar .custom-avatar-frame{width:100%;height:100%}
+.profile-avatar-upload-preview.border-frame-preview{position:relative;overflow:hidden}
+.border-frame-preview-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none}

@@ -72,6 +72,7 @@ async function ensureRuntimeSchemaImpl(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS birthday TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hobby TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS border_frame TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE profiles ALTER COLUMN spirit_stones TYPE BIGINT USING COALESCE(spirit_stones,0)::BIGINT;
@@ -3355,7 +3356,7 @@ app.get('/api/data',async(req,res)=>{
     const legends=(await query(`SELECT l.id,l.user_id,l.title,l.content,l.realm_index,l.realm_name,l.realm_tier,l.created_at,l.updated_at,u.display_name AS author_name,u.username,p.avatar,p.position
       FROM legends l JOIN users u ON u.id=l.user_id JOIN profiles p ON p.user_id=u.id ORDER BY l.updated_at DESC,l.id DESC LIMIT 200`)).rows.map(x=>({...x,charLimit:legendCharLimit(x.realm_index)}));
     const [accounts] = await Promise.all([
-      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier,p.presence_status,p.last_seen_at,
+      query(`SELECT u.id,u.display_name AS name,u.username,p.avatar AS emoji,p.border_frame AS border_frame,p.title,p.position,p.rank,p.spirit_power,p.bio,p.birthday,p.hobby,p.sect,p.realm_tier,p.presence_status,p.last_seen_at,
              b.name AS equipped_beast_name,b.beast_realm AS equipped_beast_realm,b.beast_realm_tier AS equipped_beast_realm_tier,COALESCE(ob.avatar,b.default_avatar) AS equipped_beast_avatar,
              r.name AS equipped_root_name,r.rarity AS equipped_root_rarity,r.ability AS equipped_root_ability,r.power_bonus AS equipped_root_power,
              ik.name AS equipped_immortal_artifact_name,ik.reward_grade AS equipped_immortal_artifact_grade,
@@ -3368,7 +3369,7 @@ app.get('/api/data',async(req,res)=>{
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
     const aura=await sectAuraRankMap();
-    const accountMembers=accounts.rows.map(x=>{const realmIndex=realmIndexFor(Number(x.spirit_power)||0); const online=!!x.last_seen_at && (Date.now()-new Date(x.last_seen_at).getTime())<90000 && x.presence_status==='online'; return {...x,realmIndex,auraRank:aura.get(Number(x.id))||0,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],_account:true,online,presenceLabel:online?'Đang xuất quan':'Đã bế quan'};});
+    const accountMembers=accounts.rows.map(x=>{const realmIndex=realmIndexFor(Number(x.spirit_power)||0); const online=!!x.last_seen_at && (Date.now()-new Date(x.last_seen_at).getTime())<90000 && x.presence_status==='online'; return {...x,realmIndex,auraRank:aura.get(Number(x.id))||0,nick:'@'+x.username,role:x.position||x.title,tags:[x.sect,x.rank,`${x.realm_tier||1}/9 tầng`],borderFrame:x.border_frame||'',_account:true,online,presenceLabel:online?'Đang xuất quan':'Đã bế quan'};});
     __dataCache={members:accountMembers,memories:legends,timeline:t.rows,userCount:u.rows[0].c,memberCount:accountMembers.length}; __dataCacheAt=Date.now();
     res.json(__dataCache);
   } catch(e) { res.status(500).json({error:'Không thể tải dữ liệu.'}); }
@@ -3569,10 +3570,17 @@ app.get('/api/profile',auth,async(req,res)=>{
 
 app.patch('/api/profile',auth,async(req,res)=>{
   try {
-    const {displayName,title,sect,position,birthday,hobby,bio,avatar}=req.body||{};
+    const {displayName,title,sect,position,birthday,hobby,bio,avatar,borderFrame}=req.body||{};
     if(displayName!==undefined){const dn=String(displayName).trim().slice(0,40);if(!dn)return res.status(400).json({error:'Danh xưng không được để trống.'});await query('UPDATE users SET display_name=$2 WHERE id=$1',[req.session.user_id,dn]);}
     await ensureProfile(req.session.user_id);
     let safeAvatar=avatar===undefined?undefined:String(avatar).trim();
+    let safeBorderFrame=borderFrame===undefined?undefined:String(borderFrame).trim();
+    if(safeBorderFrame!==undefined){
+      const owner=(await query('SELECT username FROM users WHERE id=$1',[req.session.user_id])).rows[0];
+      if(String(owner?.username||'').toLowerCase()!=='thienha_666') return res.status(403).json({error:'Chức năng cập nhật viền chưa được mở cho môn nhân này.'});
+      if(safeBorderFrame.length>1600000)return res.status(400).json({error:'Ảnh viền quá lớn. Hãy chọn ảnh nhẹ hơn.'});
+      if(safeBorderFrame && !/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(safeBorderFrame))return res.status(400).json({error:'Ảnh viền không hợp lệ.'});
+    }
     if(safeAvatar!==undefined){
       if(safeAvatar.length>1600000)return res.status(400).json({error:'Ảnh đại diện quá lớn. Hãy chọn ảnh nhẹ hơn.'});
       if(safeAvatar.startsWith('data:image/')){
@@ -3586,7 +3594,8 @@ app.patch('/api/profile',auth,async(req,res)=>{
     const tavernOwner=(await query(`SELECT user_id FROM tavern_roles WHERE active=true AND user_id=$1`,[req.session.user_id])).rows[0];
     const protectedTavernOwner=Boolean(tavernOwner);
     if(protectedTavernOwner){ chosenPosition='Lâu Chủ'; }
-    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,protectedTavernOwner?'Tửu Lâu Chi Chủ':title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),safeAvatar]);
+    await query(`UPDATE profiles SET title=COALESCE($2,title), sect=COALESCE($3,sect), position=COALESCE($4,position), birthday=COALESCE($5,birthday), hobby=COALESCE($6,hobby), bio=COALESCE($7,bio), avatar=COALESCE($8,avatar), border_frame=COALESCE($9,border_frame), updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,protectedTavernOwner?'Tửu Lâu Chi Chủ':title?.toString().slice(0,60),sect?.toString().slice(0,60),chosenPosition,birthday?.toString().slice(0,30),hobby?.toString().slice(0,100),bio?.toString().slice(0,500),safeAvatar,safeBorderFrame]);
+    __dataCache=null; __dataCacheAt=0;
     res.json({ok:true});
   } catch(e){res.status(500).json({error:'Không thể cập nhật hồ sơ.'});}
 });
@@ -5600,7 +5609,7 @@ const ELDER_DEFAULT_NOTIFICATIONS=[
 function defaultElderNotification(position){ return ELDER_DEFAULT_NOTIFICATIONS[Math.max(0,Math.min(2,Number(position||1)-1))]; }
 
 async function topElders(limit=3){
-  const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
+  const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,p.border_frame,
       COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
       COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count,
       (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
@@ -5726,7 +5735,7 @@ app.get('/api/leaderboard',async(req,res)=>{
       (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
       FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY achievement_score DESC, u.id ASC LIMIT 50`);
     const aura=await sectAuraRankMap();
-    res.json({rows:r.rows.map((x,i)=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex,auraRank:aura.get(Number(x.id))||0,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
+    res.json({rows:r.rows.map((x,i)=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex,borderFrame:x.border_frame||'',auraRank:aura.get(Number(x.id))||0,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
   } catch(e){res.status(500).json({error:'Không thể tải bảng thành tích.'});}
 });
 
