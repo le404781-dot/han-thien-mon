@@ -74,6 +74,14 @@ async function ensureRuntimeSchemaImpl(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT '🧑🏻‍🎓';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_power_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_attack_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_defense_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_speed_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_comprehension_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_luck_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_damage_reduction_pct INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_special_effect TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ALTER COLUMN spirit_stones TYPE BIGINT USING COALESCE(spirit_stones,0)::BIGINT;
     ALTER TABLE profiles ALTER COLUMN spirit_stones SET DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
@@ -1429,6 +1437,14 @@ async function initDb() {
     );
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS realm_tier INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_stones BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_power_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_attack_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_defense_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_speed_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_comprehension_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_luck_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_damage_reduction_pct INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_special_effect TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_stone_claim DATE;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root TEXT;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_beast TEXT;
@@ -3542,11 +3558,13 @@ app.get('/api/profile',auth,async(req,res)=>{
       FROM user_techniques ut JOIN cultivation_techniques ct ON ct.id=ut.technique_id JOIN profiles p ON p.user_id=ut.user_id WHERE ut.user_id=$1 ORDER BY ct.realm_index,ct.id`,[p.id])).rows;
     const mansion=(await query(`SELECT um.active,m.id,m.name,m.grade,m.spirit_per_hour,um.last_tick_at FROM user_mansions um JOIN mansions m ON m.id=um.mansion_id WHERE um.user_id=$1`,[p.id])).rows[0]||null;
     const baseAttr=attributesFor(p.spirit_power,p.comprehension);
-    const equipmentPower=(Number(eq.beast_power)||0)+(Number(eq.root_power)||0)+(Number(eq.artifact_power)||0)+(Number(eq.immortal_power)||0)+(Number(eq.immortal_artifact_power)||0);
+    const auctionBuff={power:Number(p.auction_power_bonus)||0,attack:Number(p.auction_attack_bonus)||0,defense:Number(p.auction_defense_bonus)||0,speed:Number(p.auction_speed_bonus)||0,comprehension:Number(p.auction_comprehension_bonus)||0,luck:Number(p.auction_luck_bonus)||0,damageReduction:Number(p.auction_damage_reduction_pct)||0};
+    const buffedAttr={...baseAttr,congLuc:baseAttr.congLuc+auctionBuff.attack,phongThu:baseAttr.phongThu+auctionBuff.defense,thanPhap:baseAttr.thanPhap+auctionBuff.speed,ngoTinh:baseAttr.ngoTinh+auctionBuff.comprehension,khiVan:baseAttr.khiVan+auctionBuff.luck};
+    const equipmentPower=(Number(eq.beast_power)||0)+(Number(eq.root_power)||0)+(Number(eq.artifact_power)||0)+(Number(eq.immortal_power)||0)+(Number(eq.immortal_artifact_power)||0)+auctionBuff.power;
     const techniquePower=techniquePowerFor(techniqueRows);
     const secretDebuffActive=p.secret_realm_debuff_until && new Date(p.secret_realm_debuff_until)>new Date();
     const secretDebuffPct=secretDebuffActive?Math.max(0,Number(p.secret_realm_debuff_percent)||0):0;
-    const artifactGradeBuff=immortalArtifactBuff({immortal_artifact_grade:eq.immortal_artifact_grade}); const artifactRandomBuff=immortalArtifactRandomBuff({immortal_artifact_grade:eq.immortal_artifact_grade,immortal_artifact_buff_type:p.equipped_immortal_artifact_buff_type,immortal_artifact_buff_value:p.equipped_immortal_artifact_buff_value,immortal_artifact_spirit_bonus:p.equipped_immortal_artifact_spirit_bonus}); const combatPower=Math.max(1,Math.round((Object.values(baseAttr).reduce((n,v)=>n+(Number(v)||0),0)+equipmentPower+techniquePower)*(1+(artifactGradeBuff.attackPct+artifactRandomBuff.value)/100)*(1-secretDebuffPct/100)));
+    const artifactGradeBuff=immortalArtifactBuff({immortal_artifact_grade:eq.immortal_artifact_grade}); const artifactRandomBuff=immortalArtifactRandomBuff({immortal_artifact_grade:eq.immortal_artifact_grade,immortal_artifact_buff_type:p.equipped_immortal_artifact_buff_type,immortal_artifact_buff_value:p.equipped_immortal_artifact_buff_value,immortal_artifact_spirit_bonus:p.equipped_immortal_artifact_spirit_bonus}); const combatPower=Math.max(1,Math.round((Object.values(buffedAttr).reduce((n,v)=>n+(Number(v)||0),0)+equipmentPower+techniquePower)*(1+(artifactGradeBuff.attackPct+artifactRandomBuff.value)/100)*(1-secretDebuffPct/100)));
     const today=(new Date()).toLocaleDateString('en-CA',{timeZone:'Asia/Ho_Chi_Minh'});
     const last=p.last_stone_claim ? new Date(p.last_stone_claim).toISOString().slice(0,10) : null;
     await touchDailyActivity(p.id);
@@ -3564,7 +3582,7 @@ app.get('/api/profile',auth,async(req,res)=>{
 
     if(!isTavernOwner && !allowedPositions.includes(p.position)){ await query('UPDATE profiles SET position=$2 WHERE user_id=$1',[p.id,defaultPositionFor(stage.realmIndex)]); p.position=defaultPositionFor(stage.realmIndex); }
     const auraRank=(await sectAuraRankMap()).get(Number(p.id))||0;
-    res.json({profile:{...p,auraRank,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),attributes:{...baseAttr,combatPower,equipmentPower,techniquePower,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,equippedImmortalTechniqueId:p.equipped_immortal_technique_id?Number(p.equipped_immortal_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null,immortalArtifact:eq.equipped_immortal_artifact_id?{id:eq.equipped_immortal_artifact_id,name:eq.immortal_artifact_name,power:Number(eq.immortal_artifact_power)||0,ability:eq.immortal_artifact_ability,category:eq.immortal_artifact_category,grade:eq.immortal_artifact_grade,avatar:eq.immortal_artifact_avatar,spiritGain:Number(eq.immortal_artifact_spirit_gain)||0,buffType:p.equipped_immortal_artifact_buff_type||'',buffValue:Number(p.equipped_immortal_artifact_buff_value)||0,spiritBonus:Number(p.equipped_immortal_artifact_spirit_bonus)||0}:null,immortal:eq.equipped_immortal_technique_id?{id:eq.equipped_immortal_technique_id,name:eq.immortal_name,power:Number(eq.immortal_power)||0,ability:eq.immortal_ability,grade:eq.immortal_grade}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,foundation:{current:Number(p.spirit_root_foundation??foundationMaxForStage(stage)),max:foundationMaxForStage(stage),injuryUntil:p.spirit_root_injury_until||null},trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:999999999}});
+    res.json({profile:{...p,auraRank,secretRealmDebuffActive:secretDebuffActive,secretRealmDebuffPercent:secretDebuffPct,realm:stage.realm,realmIndex:stage.realmIndex,tier:stage.tier,stage:stage.stage,positionOptions:allowedPositions,canClaimStones:last!==today,progress:progressFor(p.spirit_power),auctionEffect:{active:auctionBuff.power>0,power:auctionBuff.power,attack:auctionBuff.attack,defense:auctionBuff.defense,speed:auctionBuff.speed,comprehension:auctionBuff.comprehension,luck:auctionBuff.luck,damageReduction:auctionBuff.damageReduction,specialEffect:p.auction_special_effect||''},attributes:{...buffedAttr,combatPower,equipmentPower,techniquePower,auctionBuff,health:Math.max(0,Math.round(healthCurrent)),healthMax:Math.max(1,Math.round(activeBattle?(Number(activeBattle.challenger_id)===Number(p.id)?Number(activeBattle.challenger_max_hp):Number(activeBattle.opponent_max_hp)):healthMax))},activeBattle:activeBattle?battleSnapshot(activeBattle,p.id):null,techniques:techniqueRows,techniqueCount:techniqueRows.length,techniqueSlots:null,techniqueUnlimited:true,equippedTechniqueId:p.equipped_technique_id?Number(p.equipped_technique_id):null,equippedImmortalTechniqueId:p.equipped_immortal_technique_id?Number(p.equipped_immortal_technique_id):null,mansion:mansion?{active:Boolean(mansion.active),id:mansion.id,name:mansion.name,grade:mansion.grade,spiritPerHour:Number(mansion.spirit_per_hour)||0,lastTickAt:mansion.last_tick_at}:null,equipment:{beast:eq.equipped_beast_id?{id:eq.equipped_beast_id,name:eq.beast_name,power:Number(eq.beast_power)||0,ability:eq.beast_ability,avatar:eq.beast_avatar}:null,root:eq.equipped_root_id?{id:eq.equipped_root_id,name:eq.root_name,power:Number(eq.root_power)||0,ability:eq.root_ability}:null,artifact:eq.equipped_artifact_id?{id:eq.equipped_artifact_id,name:eq.artifact_name,power:Number(eq.artifact_power)||0,ability:eq.artifact_ability,avatar:eq.artifact_avatar}:null,immortalArtifact:eq.equipped_immortal_artifact_id?{id:eq.equipped_immortal_artifact_id,name:eq.immortal_artifact_name,power:Number(eq.immortal_artifact_power)||0,ability:eq.immortal_artifact_ability,category:eq.immortal_artifact_category,grade:eq.immortal_artifact_grade,avatar:eq.immortal_artifact_avatar,spiritGain:Number(eq.immortal_artifact_spirit_gain)||0,buffType:p.equipped_immortal_artifact_buff_type||'',buffValue:Number(p.equipped_immortal_artifact_buff_value)||0,spiritBonus:Number(p.equipped_immortal_artifact_spirit_bonus)||0}:null,immortal:eq.equipped_immortal_technique_id?{id:eq.equipped_immortal_technique_id,name:eq.immortal_name,power:Number(eq.immortal_power)||0,ability:eq.immortal_ability,grade:eq.immortal_grade}:null},spiritRoot:p.spirit_root,rootRarity:p.spirit_root_rarity,spiritBeast:p.spirit_beast,beastRarity:p.spirit_beast_rarity,beastAttributes:{attack:Number(p.beast_attack)||0,defense:Number(p.beast_defense)||0,speed:Number(p.beast_speed)||0,spirit:Number(p.beast_spirit)||0,skill:p.beast_skill||'—'},beastRealm:p.beast_realm||'Nhất Giai',beastRealmTier:Number(p.beast_realm_tier)||1,gachaClaimed:Boolean(p.gacha_claimed),supportBonus:Math.round((1+rarityBonus(p.spirit_root_rarity))*100-100),storageCapacity:Number(p.storage_capacity)||30,foundation:{current:Number(p.spirit_root_foundation??foundationMaxForStage(stage)),max:foundationMaxForStage(stage),injuryUntil:p.spirit_root_injury_until||null},trainCount,maxDaily,onlineRate,onlineUnlocked,onlineDailyCap:999999999}});
   } catch(e){console.error('profile load:', e);res.status(500).json({error:'Không thể tải hồ sơ. Hãy thử lại sau khi tải lại trang.'});}
 });
 
@@ -5539,7 +5557,7 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
     if(!Number.isInteger(realmId)||realmId<1)return res.status(400).json({error:'Bí Cảnh không hợp lệ.'});
     await client.query('BEGIN');
     const realm=(await client.query(`SELECT * FROM secret_realms WHERE id=$1 FOR UPDATE`,[realmId])).rows[0];
-    const p=(await client.query(`SELECT p.*,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power FROM profiles p WHERE p.user_id=$1 FOR UPDATE`,[uid])).rows[0];
+    const p=(await client.query(`SELECT p.*,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0)+COALESCE(p.auction_power_bonus,0) AS equipment_power FROM profiles p WHERE p.user_id=$1 FOR UPDATE`,[uid])).rows[0];
     if(!realm||!p){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Bí Cảnh hoặc hồ sơ.'});}
     if(realm.status!=='active'){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh hiện không hoạt động.'});}
     const st=stageFor(Number(p.spirit_power)||0);
@@ -5743,10 +5761,15 @@ async function ensureAuctionSchemaImpl(){
   await query(`
     CREATE TABLE IF NOT EXISTS auction_listings (
       id BIGSERIAL PRIMARY KEY,
-      seller_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+      seller_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
       item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE RESTRICT,
       item_name TEXT NOT NULL,
       item_avatar TEXT,
+      item_intro TEXT NOT NULL DEFAULT '',
+      item_hidden_effect TEXT NOT NULL DEFAULT '',
+      item_stat_buff TEXT NOT NULL DEFAULT '',
+      item_special_effect TEXT NOT NULL DEFAULT '',
+      item_rarity TEXT NOT NULL DEFAULT '',
       quantity INTEGER NOT NULL CHECK(quantity > 0),
       starting_price BIGINT NOT NULL CHECK(starting_price > 0),
       min_increment BIGINT NOT NULL CHECK(min_increment > 0),
@@ -5755,6 +5778,9 @@ async function ensureAuctionSchemaImpl(){
       starts_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       ends_at TIMESTAMPTZ NOT NULL,
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','sold','unsold','cancelled')),
+      system_listing BOOLEAN NOT NULL DEFAULT FALSE,
+      featured BOOLEAN NOT NULL DEFAULT FALSE,
+      featured_code TEXT,
       settled_at TIMESTAMPTZ,
       seller_payout BIGINT NOT NULL DEFAULT 0,
       chairman_fee BIGINT NOT NULL DEFAULT 0,
@@ -5762,12 +5788,23 @@ async function ensureAuctionSchemaImpl(){
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CHECK(ends_at > starts_at)
     );
+    ALTER TABLE auction_listings ALTER COLUMN seller_id DROP NOT NULL;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_intro TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_hidden_effect TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_stat_buff TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_special_effect TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_rarity TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS system_listing BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS featured_code TEXT;
     ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS seller_payout BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS chairman_fee BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS chairman_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_auction_featured_code ON auction_listings(featured_code) WHERE featured_code IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_auction_active_end ON auction_listings(status,ends_at,id);
     CREATE INDEX IF NOT EXISTS idx_auction_current_bidder ON auction_listings(current_bidder_id,status);
     CREATE INDEX IF NOT EXISTS idx_auction_seller_status ON auction_listings(seller_id,status,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_auction_featured_active ON auction_listings(featured,status,ends_at);
     CREATE TABLE IF NOT EXISTS auction_bids (
       id BIGSERIAL PRIMARY KEY,
       auction_id BIGINT NOT NULL REFERENCES auction_listings(id) ON DELETE CASCADE,
@@ -5806,7 +5843,47 @@ async function ensureAuctionSchemaImpl(){
     );
     CREATE UNIQUE INDEX IF NOT EXISTS ux_auction_pending_request_user ON auction_permission_requests(requester_id) WHERE status='pending';
     CREATE INDEX IF NOT EXISTS idx_auction_permission_status ON auction_permission_requests(status,requested_at DESC);
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_power_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_attack_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_defense_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_speed_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_comprehension_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_luck_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_damage_reduction_pct INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_special_effect TEXT NOT NULL DEFAULT '';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS auction_locked BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS auction_unique_code TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_treasure_auction_unique_code ON treasure_items(auction_unique_code) WHERE auction_unique_code IS NOT NULL;
   `);
+
+  // v3.8.02: Đế Thú độc bản được hệ thống niêm yết tự động một lần.
+  const chairman=(await query(`SELECT u.id,u.display_name FROM users u WHERE LOWER(u.username)=LOWER($1) LIMIT 1`,['cuu_vi_ho'])).rows[0]||null;
+  if(chairman){
+    // Bảo đảm đúng người dùng được chỉ định là Hội Trưởng, idempotent sau mỗi lần deploy/restart.
+    await query(`DELETE FROM auction_officers WHERE role='chairman' AND user_id<>$1`,[chairman.id]);
+    await query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at)
+      VALUES($1,'chairman',$1,NOW())
+      ON CONFLICT(user_id) DO UPDATE SET role='chairman',appointed_by=$1,appointed_at=NOW()`,[chairman.id]);
+
+    const intro='Đế Thú Lục Túc Phi Vũ Xà — Tiên Thú Đế Cảnh hiếm thấy, thân mang huyết mạch phi vũ và đế uy. Sáu túc đạp hư không, phi vũ hóa phong, long xà chi thế cuộn qua thiên khung. Sở hữu Đế Thú sẽ mở khóa một tầng đế uy đặc biệt, đồng thời gia tăng chiến lực và các thuộc tính cốt lõi của chủ nhân.';
+    const hidden='【Hiệu ứng Ẩn · Đế Uy Phi Vũ】 Khi sở hữu, Đế Thú cộng thẳng chiến lực và buff Công Lực, Phòng Thủ, Thân Pháp, Ngộ Tính, Khí Vận. Hiệu ứng là buff sở hữu, không cần trang bị và không chiếm ô trang bị.';
+    const stats='+5.000.000 chiến lực · +1.200.000 Công Lực · +900.000 Phòng Thủ · +800.000 Thân Pháp · +300 Ngộ Tính · +200 Khí Vận · +8% giảm sát thương trực tiếp';
+    const special='【Đế Cảnh · Phi Vũ Hộ Thể】 Giảm 8% sát thương nhận vào trong giao chiến; tạo Đế Uy quang hoàn quanh ảnh Đế Thú. Hiệu ứng chỉ cộng một lần cho mỗi chủ nhân.';
+    const item=(await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm,reward_grade,power_bonus,ability,avatar,auction_locked,auction_unique_code)
+      VALUES($1,'Đế Thú · Tiên Thú Đế Cảnh',$2,0,0,0,'Tiên Thú Đế Cảnh',5000000,$3,$4,TRUE,$5)
+      ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,reward_grade=EXCLUDED.reward_grade,power_bonus=EXCLUDED.power_bonus,ability=EXCLUDED.ability,avatar=EXCLUDED.avatar,auction_locked=TRUE,auction_unique_code=EXCLUDED.auction_unique_code
+      RETURNING id`,['Lục Túc Phi Vũ Xà',intro,stats,'/assets/images/luc-tuc-phi-vu-xa.jpeg','de_thu_luc_tuc_phi_vu_xa'])).rows[0];
+
+    const exists=(await query(`SELECT id FROM auction_listings WHERE featured_code=$1 LIMIT 1`,['de_thu_luc_tuc_phi_vu_xa'])).rows[0];
+    if(!exists){
+      await query(`INSERT INTO auction_listings(seller_id,item_id,item_name,item_avatar,item_intro,item_hidden_effect,item_stat_buff,item_special_effect,item_rarity,quantity,starting_price,min_increment,current_price,starts_at,ends_at,status,system_listing,featured,featured_code,chairman_id)
+        VALUES($1,$2,'Lục Túc Phi Vũ Xà','/assets/images/luc-tuc-phi-vu-xa.jpeg',$3,$4,$5,$6,'Tiên Thú Đế Cảnh',1,100000000000,20000000000,0,NOW(),NOW()+INTERVAL '24 hours','active',TRUE,TRUE,$7,$1)`,
+        [chairman.id,item.id,intro,hidden,stats,special,'de_thu_luc_tuc_phi_vu_xa']);
+      console.log('[AUCTION] Đã tạo phiên đầu tiên: Lục Túc Phi Vũ Xà · khởi điểm 100.000.000.000 · bước giá 20.000.000.000.');
+    }
+  }else{
+    console.warn('[AUCTION] Chưa tìm thấy tài khoản cuu_vi_ho; sẽ tự bổ nhiệm và tạo phiên Đế Thú khi tài khoản xuất hiện.');
+  }
 }
 
 const AUCTION_ADMIN_USERNAME='thienha_666';
@@ -5837,29 +5914,40 @@ async function settleAuctionTx(client, auctionId){
     const fee=(total*15n)/100n;
     const sellerNet=total-fee;
     const chairmanId=Number(chairman.user_id);
-    const sellerId=Number(a.seller_id);
-    if(sellerId===chairmanId){
+    const sellerId=a.seller_id==null?null:Number(a.seller_id);
+    if(a.system_listing){
+      // Phiên hệ thống không có người bán; không phát sinh doanh thu giả cho Hội Trưởng.
+    }else if(sellerId===chairmanId){
       await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1`,[sellerId,total.toString()]);
     }else{
       await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1`,[sellerId,sellerNet.toString()]);
       await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1`,[chairmanId,fee.toString()]);
+    }
+    if(a.featured_code==='de_thu_luc_tuc_phi_vu_xa'){
+      const already=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[a.current_bidder_id,a.item_id])).rows[0];
+      if(already && Number(already.quantity)>0)throw Object.assign(new Error('Đế Thú độc bản đã tồn tại trong Tu Di Giới của môn nhân này.'),{statusCode:409});
     }
     await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at)
       VALUES($1,$2,$3,NOW())
       ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,
       [a.current_bidder_id,a.item_id,a.quantity]);
     await client.query(`UPDATE auction_bids SET status='won' WHERE auction_id=$1 AND status='active'`,[auctionId]);
+    if(a.featured_code==='de_thu_luc_tuc_phi_vu_xa'){
+      await client.query(`UPDATE profiles SET auction_power_bonus=GREATEST(COALESCE(auction_power_bonus,0),5000000),auction_attack_bonus=GREATEST(COALESCE(auction_attack_bonus,0),1200000),auction_defense_bonus=GREATEST(COALESCE(auction_defense_bonus,0),900000),auction_speed_bonus=GREATEST(COALESCE(auction_speed_bonus,0),800000),auction_comprehension_bonus=GREATEST(COALESCE(auction_comprehension_bonus,0),300),auction_luck_bonus=GREATEST(COALESCE(auction_luck_bonus,0),200),auction_damage_reduction_pct=GREATEST(COALESCE(auction_damage_reduction_pct,0),8),auction_special_effect=$2,updated_at=NOW() WHERE user_id=$1`,[a.current_bidder_id,'Đế Cảnh · Phi Vũ Hộ Thể']);
+    }
     await client.query(`UPDATE auction_listings SET status='sold',settled_at=NOW(),seller_payout=$2,chairman_fee=$3,chairman_id=$4 WHERE id=$1`,
-      [auctionId,sellerNet.toString(),fee.toString(),chairmanId]);
+      [auctionId,a.system_listing?'0':sellerNet.toString(),a.system_listing?'0':fee.toString(),chairmanId]);
     await client.query(`INSERT INTO auction_history(auction_id,bidder_id,event,amount,note)
       VALUES($1,$2,'sold',$3,$4)`,[auctionId,a.current_bidder_id,a.current_price,
-      `Thắng đấu giá, nhận ${a.quantity} × ${a.item_name}. Người bán nhận ${sellerNet.toLocaleString('vi-VN')} Linh Thạch; Hội Trưởng nhận ${fee.toLocaleString('vi-VN')} Linh Thạch (15%).`]);
+      `Thắng đấu giá, nhận ${a.quantity} × ${a.item_name}. ${a.system_listing?'Đây là vật phẩm hệ thống độc bản; không phát sinh doanh thu người bán.':`Người bán nhận ${sellerNet.toLocaleString('vi-VN')} Linh Thạch; Hội Trưởng nhận ${fee.toLocaleString('vi-VN')} Linh Thạch (15%).`}`]);
     return {id:Number(a.id),status:'sold',winnerId:Number(a.current_bidder_id),amount:Number(a.current_price)};
   }
-  await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at)
-    VALUES($1,$2,$3,NOW())
-    ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,
-    [a.seller_id,a.item_id,a.quantity]);
+  if(!a.system_listing && a.seller_id!=null){
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at)
+      VALUES($1,$2,$3,NOW())
+      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,
+      [a.seller_id,a.item_id,a.quantity]);
+  }
   await client.query(`UPDATE auction_listings SET status='unsold',settled_at=NOW() WHERE id=$1`,[auctionId]);
   await client.query(`INSERT INTO auction_history(auction_id,event,amount,note)
     VALUES($1,'unsold',0,$2)`,[auctionId,`Hết thời gian nhưng không có người ra giá; vật phẩm đã hoàn về kho.`]);
@@ -5886,16 +5974,16 @@ async function settleExpiredAuctions(limit=20){
 app.get('/api/auction',async(req,res)=>{
   try{
     await ensureAuctionSchema();
-    const rows=(await query(`SELECT a.id,a.item_id,a.item_name,a.item_avatar,a.quantity,a.starting_price,a.min_increment,
-      a.current_price,a.current_bidder_id,a.starts_at,a.ends_at,a.status,a.created_at,
+    const rows=(await query(`SELECT a.id,a.item_id,a.item_name,a.item_avatar,a.item_intro,a.item_hidden_effect,a.item_stat_buff,a.item_special_effect,a.item_rarity,a.quantity,a.starting_price,a.min_increment,
+      a.current_price,a.current_bidder_id,a.starts_at,a.ends_at,a.status,a.created_at,a.system_listing,a.featured,a.featured_code,
       u.display_name AS bidder_name
       FROM auction_listings a LEFT JOIN users u ON u.id=a.current_bidder_id
-      WHERE a.status='active' AND a.starts_at<=NOW() ORDER BY a.ends_at ASC,a.id DESC LIMIT 50`)).rows;
+      WHERE a.status='active' AND a.starts_at<=NOW() ORDER BY a.featured DESC,a.ends_at ASC,a.id DESC LIMIT 50`)).rows;
     const history=(await query(`SELECT h.id,h.auction_id,h.bidder_id,h.event,h.amount,h.note,h.created_at,a.item_name,a.quantity,u.display_name AS bidder_name
       FROM auction_history h JOIN auction_listings a ON a.id=h.auction_id LEFT JOIN users u ON u.id=h.bidder_id ORDER BY h.id DESC LIMIT 50`)).rows;
     let access={chairman:null,officers:[],isChairman:false,isManager:false,isAdmin:false,pendingRequestId:null};
     if(req.session?.user_id){access=await getAuctionAccess(req.session.user_id);access.isAdmin=isAuctionAdmin(req);}
-    res.json({rows:rows.map(x=>({...x,id:Number(x.id),itemId:Number(x.item_id),quantity:Number(x.quantity),startingPrice:Number(x.starting_price),minIncrement:Number(x.min_increment),currentPrice:Number(x.current_price),currentBidderId:x.current_bidder_id==null?null:Number(x.current_bidder_id),endsAt:x.ends_at,createdAt:x.created_at,currentBidderName:x.bidder_name||null})),
+    res.json({rows:rows.map(x=>({...x,id:Number(x.id),itemId:Number(x.item_id),quantity:Number(x.quantity),startingPrice:Number(x.starting_price),minIncrement:Number(x.min_increment),currentPrice:Number(x.current_price),currentBidderId:x.current_bidder_id==null?null:Number(x.current_bidder_id),endsAt:x.ends_at,createdAt:x.created_at,currentBidderName:x.bidder_name||null,featured:Boolean(x.featured),systemListing:Boolean(x.system_listing),featuredCode:x.featured_code||null,itemIntro:x.item_intro||'',itemHiddenEffect:x.item_hidden_effect||'',itemStatBuff:x.item_stat_buff||'',itemSpecialEffect:x.item_special_effect||'',itemRarity:x.item_rarity||''})),
       history:history.map(x=>({...x,id:Number(x.id),auctionId:Number(x.auction_id),bidderId:x.bidder_id==null?null:Number(x.bidder_id),amount:Number(x.amount),bidderName:x.bidder_name||null})),access});
   }catch(e){console.error('auction load:',e);res.status(500).json({error:'Không thể mở Đấu Giá Hội.'});}
 });
@@ -5955,7 +6043,7 @@ app.post('/api/auction/permission-revoke',auth,async(req,res)=>{
 
 app.get('/api/auction/admin/items',auth,async(req,res)=>{
   if(!(await canOpenAuction(req)))return res.status(403).json({error:'Bạn chưa được cấp quyền mở phiên Đấu Giá Hội.'});
-  try{await ensureAuctionSchema();const rows=(await query(`SELECT i.item_id,i.quantity,t.name,t.category,t.description,t.avatar FROM inventory i JOIN treasure_items t ON t.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY t.name`,[req.session.user_id])).rows;res.json({rows:rows.map(x=>({itemId:Number(x.item_id),quantity:Number(x.quantity),name:x.name,category:x.category,description:x.description,avatar:x.avatar||''}))});}
+  try{await ensureAuctionSchema();const rows=(await query(`SELECT i.item_id,i.quantity,t.name,t.category,t.description,t.avatar FROM inventory i JOIN treasure_items t ON t.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 AND COALESCE(t.auction_locked,FALSE)=FALSE ORDER BY t.name`,[req.session.user_id])).rows;res.json({rows:rows.map(x=>({itemId:Number(x.item_id),quantity:Number(x.quantity),name:x.name,category:x.category,description:x.description,avatar:x.avatar||''}))});}
   catch(e){res.status(500).json({error:'Không thể tải kho vật phẩm đấu giá.'});}
 });
 
@@ -5967,7 +6055,7 @@ app.post('/api/auction',auth,async(req,res)=>{
   if(!Number.isFinite(durationHours)||durationHours<1||durationHours>24)return res.status(400).json({error:'Thời gian đấu giá phải từ 1 đến 24 giờ.'});
   if(startingPrice<1||minIncrement<1)return res.status(400).json({error:'Giá khởi điểm và bước giá phải lớn hơn 0.'});
   const client=await dbConnect();
-  try{await client.query('BEGIN');const inv=(await client.query(`SELECT i.quantity,t.name,t.avatar FROM inventory i JOIN treasure_items t ON t.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 FOR UPDATE`,[req.session.user_id,itemId])).rows[0];if(!inv||Number(inv.quantity)<quantity)throw Object.assign(new Error('Kho không đủ số lượng vật phẩm để niêm yết.'),{statusCode:400});
+  try{await client.query('BEGIN');const inv=(await client.query(`SELECT i.quantity,t.name,t.avatar,t.auction_locked FROM inventory i JOIN treasure_items t ON t.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 FOR UPDATE`,[req.session.user_id,itemId])).rows[0];if(!inv||Number(inv.quantity)<quantity)throw Object.assign(new Error('Kho không đủ số lượng vật phẩm để niêm yết.'),{statusCode:400});if(inv.auction_locked)throw Object.assign(new Error('Đây là Đế Thú độc bản của Đấu Giá Hội và không thể tự niêm yết lại.'),{statusCode:400});
     await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[req.session.user_id,itemId,quantity]);
     const r=(await client.query(`INSERT INTO auction_listings(seller_id,item_id,item_name,item_avatar,quantity,starting_price,min_increment,current_price,starts_at,ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,0,NOW(),NOW()+($8 * INTERVAL '1 hour')) RETURNING id,ends_at`,[req.session.user_id,itemId,inv.name,inv.avatar||'',quantity,startingPrice,minIncrement,durationHours])).rows[0];
     await client.query(`INSERT INTO auction_history(auction_id,event,amount,note) VALUES($1,'created',0,$2)`,[r.id,`Niêm yết ${quantity} × ${inv.name}; khởi điểm ${startingPrice.toLocaleString('vi-VN')} Linh Thạch.`]);await client.query('COMMIT');res.status(201).json({ok:true,id:Number(r.id),endsAt:r.ends_at,message:'Đã mở phiên Đấu Giá Hội.'});
@@ -6572,10 +6660,10 @@ function challengePower(row){
   const challengeDebuff=challengeDebuffActive?Math.max(0,Number(row.challenge_debuff_percent)||0):0;
   const secretDebuff=secretDebuffActive?Math.max(0,Number(row.secret_realm_debuff_percent)||0):0;
   const debuffPct=Math.min(90,challengeDebuff+secretDebuff);
-  const equipment=Number(row.equipment_power)||0;
+  const equipment=(Number(row.equipment_power)||0)+(Number(row.auction_power_bonus)||0);
   const immortalBuff=immortalArtifactBuff(row);
   const randomBuff=immortalArtifactRandomBuff(row);
-  const base=spirit*1.15+st.realmIndex*850+st.tier*120+beast*2+equipment;
+  const base=spirit*1.15+st.realmIndex*850+st.tier*120+beast*2+equipment+(Number(row.auction_attack_bonus)||0)*0.35;
   return Math.max(1,base*(1+(immortalBuff.attackPct+randomBuff.value)/100)*(1-debuffPct/100));
 }
 
@@ -6600,9 +6688,10 @@ function challengeHealth(row){
   const spirit=Math.max(0,Number(row.spirit_power)||0);
   const st=stageFor(spirit);
   const base=attributesFor(spirit);
-  const equipment=Number(row.equipment_power)||0;
+  const equipment=(Number(row.equipment_power)||0)+(Number(row.auction_power_bonus)||0);
   const immortalBuff=immortalArtifactBuff(row);
-  return Math.max(1200,Math.round((1200 + spirit*0.045 + base.phongThu*30 + base.congLuc*8 + st.realmIndex*700 + st.tier*120 + equipment*2)*(1+immortalBuff.defensePct/100)));
+  const defenseBonus=Number(row.auction_defense_bonus)||0;
+  return Math.max(1200,Math.round((1200 + spirit*0.045 + (base.phongThu+defenseBonus)*30 + (base.congLuc+(Number(row.auction_attack_bonus)||0))*8 + st.realmIndex*700 + st.tier*120 + equipment*2)*(1+immortalBuff.defensePct/100)));
 }
 
 function ultimateDamage(attacker, defender){
@@ -6682,6 +6771,8 @@ function challengeMoveDamage(attacker,defender,moveId,equipmentPowerOverride){
   const aStage=stageFor(aSpirit), dStage=stageFor(dSpirit);
   const aAttr=attributesFor(aSpirit,attacker.comprehension);
   const dAttr=attributesFor(dSpirit,defender.comprehension);
+  aAttr.congLuc+=Number(attacker.auction_attack_bonus)||0; aAttr.thanPhap+=Number(attacker.auction_speed_bonus)||0;
+  dAttr.phongThu+=Number(defender.auction_defense_bonus)||0; dAttr.thanPhap+=Number(defender.auction_speed_bonus)||0;
   const equipment=Math.max(0,Number(equipmentPowerOverride ?? attacker.equipment_power)||0);
   const attackerImmortalBuff=immortalArtifactBuff(attacker);
   // Tăng dần theo cảnh giới + tầng, đồng thời vẫn chịu ảnh hưởng linh lực/trang bị.
@@ -6692,7 +6783,7 @@ function challengeMoveDamage(attacker,defender,moveId,equipmentPowerOverride){
   if(realmGap>0) gapMultiplier=1+Math.min(1.65,realmGap*0.18);
   else if(realmGap<0) gapMultiplier=Math.max(0.30,1-Math.min(0.70,Math.abs(realmGap)*0.20));
   else gapMultiplier=1+Math.max(0,dStage.tier-aStage.tier)*0.025;
-  const defenseReduction=Math.max(0.35,1-(dAttr.phongThu/(dAttr.phongThu+900)))*(1-immortalArtifactBuff(defender).defensePct/200);
+  const defenseReduction=Math.max(0.35,1-(dAttr.phongThu/(dAttr.phongThu+900)))*(1-immortalArtifactBuff(defender).defensePct/200)*(1-Math.min(50,Math.max(0,Number(defender.auction_damage_reduction_pct)||0))/100);
   return Math.max(1,Math.round(base*realmGrowth*gapMultiplier*defenseReduction*move.multiplier));
 }
 function challengeMovePreview(attacker,defender){
@@ -7287,9 +7378,9 @@ app.get('/api/challenges',auth,async(req,res)=>{
     await ensureChallengeSchema();
     const uid=req.session.user_id;
     const [users,pending,history,activeRows,publicBattles]=await Promise.all([
-      query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier,p.challenge_debuff_until,p.challenge_debuff_percent,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
+      query(`SELECT u.id,u.display_name,u.username,p.avatar,p.title,p.rank,p.spirit_power,p.realm_tier,p.challenge_debuff_until,p.challenge_debuff_percent,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0)+COALESCE(p.auction_power_bonus,0) AS equipment_power
              FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name,u.id`,[uid]),
-      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.mode,cr.created_at,u.display_name AS challenger_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
+      query(`SELECT cr.id,cr.challenger_id,cr.opponent_id,cr.mode,cr.created_at,u.display_name AS challenger_name,p.avatar,p.rank,p.spirit_power,p.realm_tier,(SELECT reward_grade FROM treasure_items WHERE id=p.equipped_immortal_artifact_id) AS immortal_artifact_grade,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0)+COALESCE(p.auction_power_bonus,0) AS equipment_power
              FROM challenge_requests cr JOIN users u ON u.id=cr.challenger_id JOIN profiles p ON p.user_id=u.id
              WHERE cr.opponent_id=$1 AND cr.status='pending' AND cr.mode='online' ORDER BY cr.created_at DESC LIMIT 20`,[uid]),
       query(`SELECT cr.*,cu.display_name AS challenger_name,ou.display_name AS opponent_name,
@@ -7485,7 +7576,7 @@ app.post('/api/challenges/online/respond',auth,async(req,res)=>{
     const rows=(await client.query(`SELECT u.id,u.display_name,p.* FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id IN ($1,$2) ORDER BY u.id FOR UPDATE`,[ids[0],ids[1]])).rows;
     const challenger=rows.find(x=>Number(x.id)===Number(reqRow.challenger_id)), opponent=rows.find(x=>Number(x.id)===Number(reqRow.opponent_id));
     if(!challenger||!opponent){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ chiến đấu.'});}
-    const eqRows=(await client.query(`SELECT p.user_id,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power FROM profiles p WHERE p.user_id IN ($1,$2)`,[challenger.id,opponent.id])).rows;
+    const eqRows=(await client.query(`SELECT p.user_id,COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0)+COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0)+COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0)+COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0)+COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0)+COALESCE(p.auction_power_bonus,0) AS equipment_power FROM profiles p WHERE p.user_id IN ($1,$2)`,[challenger.id,opponent.id])).rows;
     for(const r of eqRows){const target=Number(r.user_id)===Number(challenger.id)?challenger:opponent;target.equipment_power=Number(r.equipment_power)||0;}
     const challengerMoves=challengeMovePreview(challenger,opponent);
     const opponentMoves=challengeMovePreview(opponent,challenger);

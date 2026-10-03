@@ -1,10 +1,10 @@
-const CACHE_NAME = 'han-thien-mon-3.7.82-audio-embedded';
+const CACHE_NAME = 'han-thien-mon-3.8.02-auction-de-thu';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/style.css?v=3.7.82',
-  '/script.js?v=3.7.82',
-  '/manifest.webmanifest?v=3.7.82',
+  '/style.css?v=3.8.02',
+  '/script.js?v=3.8.02',
+  '/manifest.webmanifest?v=3.8.02',
   '/icons/icon-192-3-7-74.png?v=3.7.82',
   '/icons/icon-512-3-7-74.png?v=3.7.82',
   '/icons/icon-1024-3-7-74.png?v=3.7.82',
