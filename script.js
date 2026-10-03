@@ -22,7 +22,7 @@ const avatarHtml=(v,cls='',realmIndex=null,auraRank=0)=>{
 const itemAvatarHtml=(v)=>avatarHtml(v);
 const immortalArtifactAvatarHtml=(v,cls='')=>{const x=String(v??'').trim();const inner=/^data:image\//i.test(x)?`<img class="avatar-img ${cls}" src="${esc(x)}" alt="Ảnh Tiên Khí" loading="lazy">`:`<span class="immortal-artifact-glyph ${cls}">${esc(x||'⚜️')}</span>`;return `<span class="immortal-artifact-avatar-winged">${inner}<span class="immortal-wing immortal-wing-left" aria-hidden="true"></span><span class="immortal-wing immortal-wing-right" aria-hidden="true"></span></span>`;};
 const beastAvatarHtml=(v,tier=1,cls='',name='')=>{const x=String(v??'').trim();const inner=/^data:image\//i.test(x)?`<img class="avatar-img ${cls}" src="${esc(x)}" alt="Ảnh linh thú" loading="lazy">`:`<span class="beast-glyph">${esc(x||'🐉')}</span>`;const immortal=Number(tier)>=10||/Tiên Thú|Cửu Vĩ Thiên Hồ|Kỳ Lân|Thần Long/i.test(String(name||''));const t=Math.max(1,Math.min(18,Number(tier)||1));return `<span class="beast-avatar-frame ${immortal?'beast-immortal':''} beast-tier-${t}">${inner}</span>`;};
-const deThuDisplayHtml=(src,name='Lục Túc Phi Vũ Xà')=>{const x=String(src||'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.10').trim();return `<span class="de-thu-display-avatar"><img src="${esc(x)}" alt="${esc(name)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.10'"></span>`;};
+const deThuDisplayHtml=(src,name='Lục Túc Phi Vũ Xà')=>{const x=String(src||'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.11').trim();return `<span class="de-thu-display-avatar"><img src="${esc(x)}" alt="${esc(name)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.11'"></span>`;};
 
 const fmtDate=v=>v?new Date(v).toLocaleDateString('vi-VN'):'—';
 const REALM_NAMES=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần','Luyện Hư','Hợp Thể','Đại Thừa','Độ Kiếp','Nhân Tiên','Chân Tiên','Địa Tiên','Thiên Tiên','Huyền Tiên','Kim Tiên','Tiên Quân','Tiên Tôn','Tiên Đế','Chí Cao'];
@@ -1635,8 +1635,8 @@ function auctionCountdown(iso){
 }
 function auctionImageHtml(src,alt=''){
  const raw=String(src||'').trim();
- const value=raw||'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.10';
- if(/^https?:\/\/|^\/|^data:image\//i.test(value)) return `<img class="auction-featured-img" src="${esc(value)}" alt="${esc(alt)}" loading="eager" decoding="async" onerror="this.onerror=null;this.src='/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.10'">`;
+ const value=raw||'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.11';
+ if(/^https?:\/\/|^\/|^data:image\//i.test(value)) return `<img class="auction-featured-img" src="${esc(value)}" alt="${esc(alt)}" loading="eager" decoding="async" onerror="this.onerror=null;this.src='/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.11'">`;
  return esc(value||'💎');
 }
 async function loadAuction(){

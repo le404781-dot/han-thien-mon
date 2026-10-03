@@ -5977,6 +5977,35 @@ async function ensureInitialAuctionChairman(){
   }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
 }
 
+async function recognizeCuuViHoChairmanV3811(){
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
+    const flag=(await client.query(`SELECT value FROM auction_settings WHERE key='chairman_cuu_vi_ho_v3811' FOR UPDATE`)).rows[0];
+    if(flag){
+      await client.query('COMMIT');
+      return null;
+    }
+    const target=(await client.query(`SELECT u.id,u.display_name,u.username
+      FROM users u JOIN profiles p ON p.user_id=u.id
+      WHERE LOWER(u.username)=LOWER('Cuu_Vi_Ho') LIMIT 1 FOR UPDATE`)).rows[0]||null;
+    if(!target){
+      await client.query('COMMIT');
+      console.warn('[AUCTION v3.8.11] Chưa tìm thấy @Cuu_Vi_Ho; migration sẽ thử lại ở lần khởi động tiếp theo.');
+      return null;
+    }
+    await client.query(`DELETE FROM auction_officers WHERE role='chairman'`);
+    await client.query(`DELETE FROM auction_officers WHERE user_id=$1`,[target.id]);
+    await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'chairman',$1,NOW())`,[target.id]);
+    await client.query(`INSERT INTO auction_chairman_applications(applicant_id,result,applied_at,decided_at) VALUES($1,'won',NOW(),NOW())`,[target.id]);
+    await client.query(`INSERT INTO auction_settings(key,value,updated_at) VALUES('chairman_cuu_vi_ho_v3811','recognized',NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`);
+    await client.query('COMMIT');
+    console.log(`[AUCTION v3.8.11] Công nhận @${target.username} đã ứng chức thành công và trở thành Hội Trưởng mới.`);
+    return target;
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+}
+
 async function appointAuctionChairmanByUserId(userId,appointedBy){
   const client=await dbConnect();
   try{
@@ -9499,6 +9528,8 @@ async function initializeDatabaseWithRetry(){
     await initDb();
     if(shuttingDown||poolClosed)return;
     await ensureAuctionSchema();
+    if(shuttingDown||poolClosed)return;
+    await recognizeCuuViHoChairmanV3811();
     if(shuttingDown||poolClosed)return;
     await ensureRuntimeSchema();
     if(shuttingDown||poolClosed)return;

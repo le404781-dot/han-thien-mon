@@ -2253,7 +2253,7 @@ body.focus-mode.auction-focus #auction.focus-active .auction-officer-list{
 .auction-image-admin-actions .btn{flex:1 1 150px}
 @media(max-width:600px){.auction-image-admin-actions{display:grid;grid-template-columns:1fr}.auction-image-admin-actions .btn{width:100%}}
 
-/* v3.8.10 · Đế Thú — thêm 1 lớp ngoại vi đỏ kiểu Tiên Thú */
+/* v3.8.11 · Đế Thú — thêm 1 lớp ngoại vi đỏ kiểu Tiên Thú */
 .auction-de-thu-outer-ring{position:absolute;inset:-15px;z-index:6;border-radius:29px;border:1px solid rgba(255,54,64,.78);box-shadow:0 0 12px rgba(255,36,48,.92),0 0 30px rgba(255,0,24,.58),0 0 72px rgba(170,0,18,.28);pointer-events:none;opacity:.72;animation:auctionDeThuOuterRing 3.4s ease-in-out infinite;will-change:transform,opacity,filter}
 .auction-de-thu-outer-ring::before{content:"";position:absolute;inset:3px;border-radius:inherit;border:1px solid rgba(255,112,118,.34);box-shadow:inset 0 0 18px rgba(255,35,45,.18);animation:auctionDeThuOuterShimmer 2.8s ease-in-out infinite}
 @keyframes auctionDeThuOuterRing{0%,100%{transform:scale(.992);opacity:.48;filter:brightness(.96)}35%{transform:scale(1.006);opacity:.78;filter:brightness(1.1)}55%{transform:scale(1.018);opacity:1;filter:brightness(1.2)}78%{transform:scale(1.006);opacity:.62;filter:brightness(1.04)}}
