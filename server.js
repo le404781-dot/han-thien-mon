@@ -108,6 +108,7 @@ async function ensureRuntimeSchemaImpl(){
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_immortal_artifact_buff_type TEXT NOT NULL DEFAULT '';
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_immortal_artifact_buff_value INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS equipped_immortal_artifact_spirit_bonus INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS displayed_de_thu_id INTEGER;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS comprehension INTEGER NOT NULL DEFAULT 8;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root_foundation INTEGER NOT NULL DEFAULT 100;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS spirit_root_injury_until TIMESTAMPTZ;
@@ -230,6 +231,8 @@ async function ensureRuntimeSchemaImpl(){
       END IF;
     END $$;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS avatar TEXT;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS auction_locked BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS auction_unique_code TEXT;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS buyback_price BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE treasure_items ALTER COLUMN buyback_price TYPE BIGINT USING COALESCE(buyback_price,0)::BIGINT;
     ALTER TABLE treasure_items ALTER COLUMN buyback_price SET DEFAULT 0;
@@ -3362,6 +3365,7 @@ let __dataCache=null;
 let __dataCacheAt=0;
 app.get('/api/data',async(req,res)=>{
   res.setHeader('Cache-Control','private, max-age=10, stale-while-revalidate=10');
+  try{await ensureEquipmentSchema();}catch(e){return res.status(500).json({error:'Không thể chuẩn bị dữ liệu Đệ Tử Bảng.'});}
   if(__dataCache && Date.now()-__dataCacheAt<5000) return res.json(__dataCache);
   try {
     const [m,t,u] = await Promise.all([
@@ -3379,8 +3383,15 @@ app.get('/api/data',async(req,res)=>{
              ROUND(ik.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10))::BIGINT AS equipped_immortal_artifact_power,
              COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) AS equipped_immortal_artifact_enhance_level,
              ik.spirit_gain AS equipped_immortal_artifact_spirit_gain,ik.ability AS equipped_immortal_artifact_ability,COALESCE(iak.avatar,ik.avatar) AS equipped_immortal_artifact_avatar,
-             COALESCE((SELECT SUM(ti.beast_gear_power) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=u.id AND sbe.beast_id=p.equipped_beast_id),0)::int AS equipped_beast_gear_power
-             FROM users u JOIN profiles p ON p.user_id=u.id LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id LEFT JOIN owned_spirit_beasts ob ON ob.user_id=u.id AND ob.beast_id=p.equipped_beast_id LEFT JOIN spirit_roots_catalog r ON r.id=p.equipped_root_id LEFT JOIN treasure_items ik ON ik.id=p.equipped_immortal_artifact_id LEFT JOIN inventory iak ON iak.user_id=u.id AND iak.item_id=p.equipped_immortal_artifact_id AND iak.quantity>0 ORDER BY u.id`)
+             COALESCE((SELECT SUM(ti.beast_gear_power) FROM spirit_beast_equipment sbe JOIN treasure_items ti ON ti.id=sbe.item_id WHERE sbe.user_id=u.id AND sbe.beast_id=p.equipped_beast_id),0)::int AS equipped_beast_gear_power,
+             CASE WHEN EXISTS(SELECT 1 FROM inventory di WHERE di.user_id=u.id AND di.item_id=p.displayed_de_thu_id AND di.quantity>0) THEN dt.name ELSE NULL END AS displayed_de_thu_name,
+             CASE WHEN EXISTS(SELECT 1 FROM inventory di WHERE di.user_id=u.id AND di.item_id=p.displayed_de_thu_id AND di.quantity>0) THEN COALESCE(dt.avatar,dt2.avatar) ELSE NULL END AS displayed_de_thu_avatar,
+             CASE WHEN EXISTS(SELECT 1 FROM inventory di WHERE di.user_id=u.id AND di.item_id=p.displayed_de_thu_id AND di.quantity>0) THEN dt.reward_grade ELSE NULL END AS displayed_de_thu_grade,
+             CASE WHEN EXISTS(SELECT 1 FROM inventory di WHERE di.user_id=u.id AND di.item_id=p.displayed_de_thu_id AND di.quantity>0) THEN dt.power_bonus ELSE NULL END AS displayed_de_thu_power,
+             CASE WHEN EXISTS(SELECT 1 FROM inventory di WHERE di.user_id=u.id AND di.item_id=p.displayed_de_thu_id AND di.quantity>0) THEN dt.ability ELSE NULL END AS displayed_de_thu_ability
+             FROM users u JOIN profiles p ON p.user_id=u.id LEFT JOIN spirit_beasts_catalog b ON b.id=p.equipped_beast_id LEFT JOIN owned_spirit_beasts ob ON ob.user_id=u.id AND ob.beast_id=p.equipped_beast_id LEFT JOIN spirit_roots_catalog r ON r.id=p.equipped_root_id LEFT JOIN treasure_items ik ON ik.id=p.equipped_immortal_artifact_id LEFT JOIN inventory iak ON iak.user_id=u.id AND iak.item_id=p.equipped_immortal_artifact_id AND iak.quantity>0
+             LEFT JOIN treasure_items dt ON dt.id=p.displayed_de_thu_id AND (dt.name='Lục Túc Phi Vũ Xà' OR dt.auction_unique_code='de_thu_luc_tuc_phi_vu_xa')
+             LEFT JOIN inventory dt2 ON dt2.user_id=u.id AND dt2.item_id=p.displayed_de_thu_id AND dt2.quantity>0 ORDER BY u.id`)
     ]);
     // Môn nhân hiển thị phải khớp 1:1 với tài khoản đã đăng ký.
     // Danh sách mẫu cũ trong bảng members chỉ là dữ liệu legacy, không tính vào quân số môn nhân.
@@ -5216,13 +5227,20 @@ app.get('/api/equipment',auth,async(req,res)=>{
       WHERE p.user_id=$1 AND p.equipped_artifact_id IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
         WHERE i.user_id=p.user_id AND i.item_id=p.equipped_artifact_id AND i.quantity>0)`,[userId]);
+    await query(`UPDATE profiles p SET displayed_de_thu_id=NULL,updated_at=NOW()
+      WHERE p.user_id=$1 AND p.displayed_de_thu_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM inventory i WHERE i.user_id=p.user_id AND i.item_id=p.displayed_de_thu_id AND i.quantity>0)`,[userId]);
 
-    const [p,b,r,a,immortalArtifacts,techniques,immortalTechniques]=await Promise.all([
-      query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,p.equipped_immortal_artifact_id,p.equipped_immortal_artifact_buff_type,p.equipped_immortal_artifact_buff_value,p.equipped_immortal_artifact_spirit_bonus,COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) AS equipped_immortal_artifact_enhance_level,
+    const [p,dethu,b,r,a,immortalArtifacts,techniques,immortalTechniques]=await Promise.all([
+      query(`SELECT p.equipped_beast_id,p.equipped_root_id,p.equipped_artifact_id,p.equipped_immortal_artifact_id,p.displayed_de_thu_id,p.equipped_immortal_artifact_buff_type,p.equipped_immortal_artifact_buff_value,p.equipped_immortal_artifact_spirit_bonus,COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) AS equipped_immortal_artifact_enhance_level,
         COALESCE((SELECT power_bonus FROM spirit_beasts_catalog WHERE id=p.equipped_beast_id),0) +
         COALESCE((SELECT power_bonus FROM spirit_roots_catalog WHERE id=p.equipped_root_id),0) +
         COALESCE((SELECT power_bonus FROM treasure_items WHERE id=p.equipped_artifact_id),0) + COALESCE((SELECT ROUND(ti.power_bonus * (1 + COALESCE((SELECT e.enhance_level FROM immortal_artifact_enhancements e WHERE e.user_id=p.user_id AND e.item_id=p.equipped_immortal_artifact_id),0) * 0.10)) FROM treasure_items ti WHERE ti.id=p.equipped_immortal_artifact_id),0) + COALESCE((SELECT power_bonus FROM immortal_techniques WHERE id=p.equipped_immortal_technique_id),0) AS equipment_power
         FROM profiles p WHERE p.user_id=$1`,[userId]),
+      query(`SELECT i.item_id AS id,i.quantity,ti.name,ti.category,ti.description,ti.reward_grade,ti.power_bonus,ti.ability,COALESCE(i.avatar,ti.avatar) AS avatar,(p.displayed_de_thu_id=ti.id) AS displayed
+        FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id JOIN profiles p ON p.user_id=i.user_id
+        WHERE i.user_id=$1 AND i.quantity>0 AND (ti.name='Lục Túc Phi Vũ Xà' OR ti.auction_unique_code='de_thu_luc_tuc_phi_vu_xa')
+        LIMIT 1`,[userId]),
       query(`SELECT o.id,o.beast_id,o.quantity,c.name,c.rarity,c.description,c.beast_realm,c.beast_realm_tier,c.attack,c.defense,c.speed,c.spirit,c.skill,c.power_bonus,c.ability,c.min_realm,o.avatar
         FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id
         WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.beast_realm_tier DESC,c.power_bonus DESC,c.id`,[userId]),
@@ -5242,7 +5260,7 @@ app.get('/api/equipment',auth,async(req,res)=>{
         FROM user_immortal_techniques uit JOIN immortal_techniques it ON it.id=uit.technique_id JOIN profiles p ON p.user_id=uit.user_id
         WHERE uit.user_id=$1 ORDER BY it.realm_index,it.id`,[userId])
     ]);
-    res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipped_immortal_artifact_id:null,equipped_technique_id:null,equipped_immortal_technique_id:null,equipment_power:0},beasts:b.rows,roots:r.rows,artifacts:a.rows,immortalArtifacts:immortalArtifacts.rows,techniques:techniques.rows,immortalTechniques:immortalTechniques.rows});
+    res.json({ok:true,equipped:p.rows[0]||{equipped_beast_id:null,equipped_root_id:null,equipped_artifact_id:null,equipped_immortal_artifact_id:null,displayed_de_thu_id:null,equipped_technique_id:null,equipped_immortal_technique_id:null,equipment_power:0},deThu:dethu.rows[0]||null,beasts:b.rows,roots:r.rows,artifacts:a.rows,immortalArtifacts:immortalArtifacts.rows,techniques:techniques.rows,immortalTechniques:immortalTechniques.rows});
   }catch(e){console.error('equipment:',e);res.status(500).json({error:'Không thể mở Trang Bị: '+(e?.message||'lỗi cơ sở dữ liệu')});}
 });
 app.patch('/api/equipment/avatar',auth,async(req,res)=>{
@@ -5308,6 +5326,32 @@ app.post('/api/equipment/equip',auth,async(req,res)=>{
     await client.query('COMMIT'); res.json({ok:true,type,id,name,power,artifactBuff:rb,ability,message:`Đã trang bị ${name}. Chiến lực +${power} · Linh lực +${rb.spiritBonus} · Buff ${rb.type||'theo trang bị'} +${rb.value||0}%.`});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('equipment equip:',e);res.status(500).json({error:'Không thể trang bị vật phẩm.'});}finally{client.release();}
 });
+app.post('/api/equipment/de-thu-display',auth,async(req,res)=>{
+  await ensureEquipmentSchema();
+  const client=await dbConnect();
+  try{
+    const action=String(req.body?.action||'').trim().toLowerCase();
+    if(!['show','hide'].includes(action))return res.status(400).json({error:'Lựa chọn hiển thị Đế Thú không hợp lệ.'});
+    await client.query('BEGIN');
+    if(action==='hide'){
+      await client.query(`UPDATE profiles SET displayed_de_thu_id=NULL,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id]);
+      await client.query('COMMIT');
+      __dataCache=null; __dataCacheAt=0;
+      return res.json({ok:true,displayed:false,message:'Đã ẩn diện mạo Đế Thú khỏi Đệ Tử Bảng.'});
+    }
+    const owned=(await client.query(`SELECT ti.id,ti.name,ti.avatar,ti.reward_grade,ti.power_bonus,ti.ability,i.quantity
+      FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id
+      WHERE i.user_id=$1 AND i.quantity>0 AND ti.auction_unique_code='de_thu_luc_tuc_phi_vu_xa'
+      FOR UPDATE`,[req.session.user_id])).rows[0];
+    if(!owned){await client.query('ROLLBACK');return res.status(403).json({error:'Bạn chưa sở hữu Đế Thú Lục Túc Phi Vũ Xà.'});}
+    await client.query(`UPDATE profiles SET displayed_de_thu_id=$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,owned.id]);
+    await client.query('COMMIT');
+    __dataCache=null; __dataCacheAt=0;
+    res.json({ok:true,displayed:true,name:owned.name,avatar:owned.avatar,message:`Đã hiện ${owned.name} trên Đệ Tử Bảng.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('de thu display:',e);res.status(500).json({error:'Không thể thay đổi hiển thị Đế Thú.'});}
+  finally{client.release();}
+});
+
 app.post('/api/equipment/unequip',auth,async(req,res)=>{
   try{await ensureEquipmentSchema();const type=String(req.body?.type||''); const col={beast:'equipped_beast_id',root:'equipped_root_id',artifact:'equipped_artifact_id','immortal-artifact':'equipped_immortal_artifact_id',immortal:'equipped_immortal_technique_id'}[type]; if(!col)return res.status(400).json({error:'Ô trang bị không hợp lệ.'}); await query(`UPDATE profiles SET ${col}=NULL,equipped_immortal_artifact_buff_type=CASE WHEN $2='immortal-artifact' THEN '' ELSE equipped_immortal_artifact_buff_type END,equipped_immortal_artifact_buff_value=CASE WHEN $2='immortal-artifact' THEN 0 ELSE equipped_immortal_artifact_buff_value END,equipped_immortal_artifact_spirit_bonus=CASE WHEN $2='immortal-artifact' THEN 0 ELSE equipped_immortal_artifact_spirit_bonus END,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,type]); res.json({ok:true});}
   catch(e){res.status(500).json({error:'Không thể tháo trang bị.'});}
@@ -5856,6 +5900,14 @@ async function ensureAuctionSchemaImpl(){
     );
     CREATE UNIQUE INDEX IF NOT EXISTS ux_auction_pending_request_user ON auction_permission_requests(requester_id) WHERE status='pending';
     CREATE INDEX IF NOT EXISTS idx_auction_permission_status ON auction_permission_requests(status,requested_at DESC);
+    CREATE TABLE IF NOT EXISTS auction_chairman_applications (
+      id BIGSERIAL PRIMARY KEY,
+      applicant_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      result TEXT NOT NULL DEFAULT 'won' CHECK(result IN ('won','lost')),
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      decided_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_auction_chairman_applications_time ON auction_chairman_applications(applied_at DESC,id DESC);
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_power_bonus BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_attack_bonus BIGINT NOT NULL DEFAULT 0;
     ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_defense_bonus BIGINT NOT NULL DEFAULT 0;
@@ -6145,6 +6197,29 @@ app.post('/api/auction/de-thu-image',auth,async(req,res)=>{
       res.json({ok:true,reset,avatar,message:reset?'Đã khôi phục chính xác ảnh Đế Thú mặc định.':'Đã thay ảnh mặc định Đế Thú. Toàn bộ môn nhân sẽ thấy ảnh mới.'});
     }catch(e){try{await client.query('ROLLBACK')}catch{};return res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể thay ảnh Đế Thú.'});}finally{client.release();}
   }catch(e){return res.status(500).json({error:'Không thể thay ảnh Đế Thú.'});}
+});
+
+app.post('/api/auction/chairman-apply',auth,async(req,res)=>{
+  await ensureAuctionSchema();
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    // Race-safe: exactly one applicant can acquire the chairman role when it is vacant.
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
+    const current=(await client.query(`SELECT o.user_id,u.username,u.display_name FROM auction_officers o JOIN users u ON u.id=o.user_id WHERE o.role='chairman' ORDER BY o.appointed_at DESC,o.user_id LIMIT 1 FOR UPDATE`)).rows[0]||null;
+    if(current){
+      await client.query('ROLLBACK');
+      return res.status(409).json({error:`Hội Trưởng hiện tại là @${current.username}. Đợt ứng tuyển đã đóng.`});
+    }
+    const applicant=(await client.query(`SELECT id,username,display_name FROM users WHERE id=$1 LIMIT 1 FOR UPDATE`,[req.session.user_id])).rows[0];
+    if(!applicant){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy môn nhân ứng tuyển.'});}
+    await client.query(`INSERT INTO auction_chairman_applications(applicant_id,result,applied_at,decided_at) VALUES($1,'won',NOW(),NOW())`,[applicant.id]);
+    await client.query(`DELETE FROM auction_officers WHERE role='chairman'`);
+    await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'chairman',$1,NOW()) ON CONFLICT(user_id) DO UPDATE SET role='chairman',appointed_by=EXCLUDED.appointed_by,appointed_at=NOW()`,[applicant.id]);
+    await client.query('COMMIT');
+    res.status(201).json({ok:true,winner:{id:Number(applicant.id),username:applicant.username,displayName:applicant.display_name},message:`Ứng tuyển thành công! @${applicant.username} là Hội Trưởng Đấu Giá Hội.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('auction chairman apply:',e);res.status(500).json({error:'Ứng tuyển Hội Trưởng thất bại. Giao dịch đã được hoàn tác.'});}
+  finally{client.release();}
 });
 
 app.post('/api/auction/permission-request',auth,async(req,res)=>{
