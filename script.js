@@ -2071,9 +2071,12 @@ async function loadMailbox(){
  }catch(e){area.innerHTML=`<div class="empty-state compact"><p>${esc(e.message)}</p></div>`;}
 }
 let lastChallengeAnnouncementId=0;
+let challengeAnnouncementBusy=false;
 async function pollChallengeAnnouncement(force=false){
- if(!getToken())return;
- try{const d=await api('/api/challenges/announcement',{headers:authHeaders()});const a=d.announcement;if(!a)return;const id=Number(a.id);if(!force&&id<=lastChallengeAnnouncementId)return;lastChallengeAnnouncementId=id;let el=document.getElementById('challengeGlobalAnnouncement');if(!el){el=document.createElement('div');el.id='challengeGlobalAnnouncement';el.className='challenge-global-announcement';document.body.appendChild(el);}el.textContent=a.message;el.classList.remove('show');void el.offsetWidth;el.classList.add('show');const ms=Math.max(0,new Date(a.expires_at).getTime()-Date.now());setTimeout(()=>{if(el)el.classList.remove('show');},Math.min(10000,ms||10000));}catch{}
+ if(!getToken()||challengeAnnouncementBusy)return;
+ challengeAnnouncementBusy=true;
+ try{const d=await api('/api/challenges/announcement',{headers:authHeaders()});const a=d.announcement;if(!a)return;const id=Number(a.id);if(!force&&id<=lastChallengeAnnouncementId)return;lastChallengeAnnouncementId=id;let el=document.getElementById('challengeGlobalAnnouncement');if(!el){el=document.createElement('div');el.id='challengeGlobalAnnouncement';el.className='challenge-global-announcement';document.body.appendChild(el);}el.textContent=a.message;el.classList.remove('show');void el.offsetWidth;el.classList.add('show');const ms=Math.max(0,new Date(a.expires_at).getTime()-Date.now());setTimeout(()=>{if(el)el.classList.remove('show');},Math.min(10000,ms||10000));}
+ catch{} finally{challengeAnnouncementBusy=false;}
 }
 
 async function loadChat(){
@@ -2100,14 +2103,20 @@ async function openRedPacketComposer(){
  $('#redPacketForm').onsubmit=async e=>{e.preventDefault();const total=Number($('#redPacketTotal').value),recipients=Number($('#redPacketRecipients').value),msg=$('#redPacketFormMsg'),btn=e.currentTarget.querySelector('button[type=submit]');btn.disabled=true;try{const x=await api('/api/red-packets',{method:'POST',headers:authHeaders(),body:JSON.stringify({totalStones:total,recipientCount:recipients})});msg.textContent='✓ '+x.message;host.innerHTML='';await Promise.all([loadProfile(),loadRedPackets(),loadGlobalAnnouncement(true)]);}catch(err){msg.textContent='❌ '+err.message;}finally{btn.disabled=false;}};
 }
 
+let redPacketsBusy=false;
 async function loadRedPackets(){
- if(!getToken())return;const host=$('#redPacketArea');if(!host)return;
+ if(!getToken()||redPacketsBusy)return;const host=$('#redPacketArea');if(!host)return;
+ redPacketsBusy=true;
  if(host.querySelector('#redPacketForm'))return;
- try{const d=await api('/api/red-packets',{headers:authHeaders()});const rows=d.rows||[];if(!rows.length){host.innerHTML='';return;}host.innerHTML=`<div class="red-packet-list">${rows.map(x=>`<article class="red-packet-card ${x.claimed?'claimed':''}"><div class="red-packet-icon">🧧</div><div class="red-packet-copy"><b>${esc(x.sender_name)} · Lì Xì</b><small>${Number(x.claimed_count)}/${Number(x.recipient_limit)} người đã nhận · còn ${Number(x.remaining_stones).toLocaleString('vi-VN')} linh thạch</small></div><button class="btn small primary red-packet-claim" data-id="${x.id}" ${x.claimed?'disabled':''}>${x.claimed?'✓ Đã nhận':'🧧 Nhận Lì Xì'}</button></article>`).join('')}</div>`;document.querySelectorAll('.red-packet-claim').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/red-packets/'+b.dataset.id+'/claim',{method:'POST',headers:authHeaders(),body:'{}'});b.textContent='✓ +'+Number(x.amount).toLocaleString('vi-VN')+' 💎';await Promise.all([loadProfile(),loadRedPackets()]);}catch(e){b.disabled=false;alert(e.message);}});}catch(e){}
+ try{const d=await api('/api/red-packets',{headers:authHeaders()});const rows=d.rows||[];if(!rows.length){host.innerHTML='';return;}host.innerHTML=`<div class="red-packet-list">${rows.map(x=>`<article class="red-packet-card ${x.claimed?'claimed':''}"><div class="red-packet-icon">🧧</div><div class="red-packet-copy"><b>${esc(x.sender_name)} · Lì Xì</b><small>${Number(x.claimed_count)}/${Number(x.recipient_limit)} người đã nhận · còn ${Number(x.remaining_stones).toLocaleString('vi-VN')} linh thạch</small></div><button class="btn small primary red-packet-claim" data-id="${x.id}" ${x.claimed?'disabled':''}>${x.claimed?'✓ Đã nhận':'🧧 Nhận Lì Xì'}</button></article>`).join('')}</div>`;document.querySelectorAll('.red-packet-claim').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const x=await api('/api/red-packets/'+b.dataset.id+'/claim',{method:'POST',headers:authHeaders(),body:'{}'});b.textContent='✓ +'+Number(x.amount).toLocaleString('vi-VN')+' 💎';await Promise.all([loadProfile(),loadRedPackets()]);}catch(e){b.disabled=false;alert(e.message);}});}catch(e){} finally{redPacketsBusy=false;}
 }
 let lastGlobalAnnouncementId=0;
+let globalAnnouncementBusy=false;
 async function loadGlobalAnnouncement(force=false){
- if(!getToken())return;try{const d=await api('/api/global-announcement',{headers:authHeaders()});const a=d.announcement;if(!a)return;const id=Number(a.id);if(!force&&id<=lastGlobalAnnouncementId)return;lastGlobalAnnouncementId=id;let el=document.getElementById('globalAnnouncementToast');if(!el){el=document.createElement('div');el.id='globalAnnouncementToast';el.className='global-announcement-toast';document.body.appendChild(el);}el.textContent=a.message;el.classList.remove('show');void el.offsetWidth;el.classList.add('show');const ms=Math.max(0,new Date(a.expires_at).getTime()-Date.now());setTimeout(()=>{el.classList.remove('show');},Math.min(10000,ms||10000));}catch{}
+ if(!getToken()||globalAnnouncementBusy)return;
+ globalAnnouncementBusy=true;
+ try{const d=await api('/api/global-announcement',{headers:authHeaders()});const a=d.announcement;if(!a)return;const id=Number(a.id);if(!force&&id<=lastGlobalAnnouncementId)return;lastGlobalAnnouncementId=id;let el=document.getElementById('globalAnnouncementToast');if(!el){el=document.createElement('div');el.id='globalAnnouncementToast';el.className='global-announcement-toast';document.body.appendChild(el);}el.textContent=a.message;el.classList.remove('show');void el.offsetWidth;el.classList.add('show');const ms=Math.max(0,new Date(a.expires_at).getTime()-Date.now());setTimeout(()=>{el.classList.remove('show');},Math.min(10000,ms||10000));}
+ catch{} finally{globalAnnouncementBusy=false;}
 }
 
 function accountSummary(){
@@ -2167,9 +2176,9 @@ if(localStorage.getItem('colorMode')==='flow'){document.body.classList.add('colo
 setupTutorial();
 
 loadData();loadSect();checkSession();startRewardWatcher();
-setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();loadWealth();loadAuction();}},30000);
-setInterval(()=>{if(getToken()&&!document.hidden){loadGlobalAnnouncement();loadRedPackets();}},5000);
-setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},2000);
+setInterval(()=>{if(getToken()&&!document.hidden){loadChat();loadData();loadMailbox();loadArenaLive();loadChallenges();loadWealth();loadAuction();}},45000);
+setInterval(()=>{if(getToken()&&!document.hidden){loadGlobalAnnouncement();loadRedPackets();}},10000);
+setInterval(()=>{if(getToken()&&!document.hidden)pollChallengeAnnouncement();},3000);
 window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navigator.sendBeacon('/api/presence/heartbeat',new Blob(['{}'],{type:'application/json'}));});
 
 /* v3.7.99 · Đấu Giá Hội + fix trạng thái khách của Tài Phú */
