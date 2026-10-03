@@ -1629,9 +1629,10 @@ function auctionCountdown(iso){
  const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
  return h?`${h} giờ ${String(m).padStart(2,'0')} phút`:m?`${m} phút ${String(sec).padStart(2,'0')} giây`:`${sec} giây`;
 }
-function auctionImageHtml(src,alt=''){ 
- const value=String(src||'').trim();
- if(/^https?:\/\/|^\/|^data:image\//i.test(value)) return `<img class="auction-featured-img" src="${esc(value)}" alt="${esc(alt)}" loading="eager" decoding="async">`;
+function auctionImageHtml(src,alt=''){
+ const raw=String(src||'').trim();
+ const value=raw||'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06';
+ if(/^https?:\/\/|^\/|^data:image\//i.test(value)) return `<img class="auction-featured-img" src="${esc(value)}" alt="${esc(alt)}" loading="eager" decoding="async" onerror="this.onerror=null;this.src='/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06'">`;
  return esc(value||'💎');
 }
 async function loadAuction(){
@@ -1646,7 +1647,8 @@ async function loadAuction(){
    if(admin){
      let requests=[], members=[];
      try{auctionItems=(await api('/api/auction/admin/items',{headers:authHeaders()})).rows||[];}catch(e){}
-     try{const r=await api('/api/auction/permission-requests',{headers:authHeaders()});requests=r.requests||[];members=r.members||[];}catch(e){}
+     try{const r=await api('/api/auction/permission-requests',{headers:authHeaders()});requests=r.requests||[];}catch(e){}
+     members=d.members||[];
      const managers=(access.officers||[]).filter(x=>x.role==='manager');
      adminHtml=`<div class="auction-admin-card">
        <div class="auction-admin-head"><div><span class="eyebrow">⚜️ QUẢN TRỊ ĐẤU GIÁ HỘI</span><h3>thienha_666 · Trung tâm quyền hạn</h3><p>Hội Trưởng được hệ thống khóa cố định theo tài khoản yêu cầu.</p></div><span class="auction-role-badge">👑 Đặc Quyền Sơn Môn</span></div>

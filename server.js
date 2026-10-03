@@ -5871,12 +5871,15 @@ async function ensureAuctionSchemaImpl(){
     const item=(await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm,reward_grade,power_bonus,ability,avatar,auction_locked,auction_unique_code)
       VALUES($1,'Đế Thú · Tiên Thú Đế Cảnh',$2,0,0,0,'Tiên Thú Đế Cảnh',5000000,$3,$4,TRUE,$5)
       ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,reward_grade=EXCLUDED.reward_grade,power_bonus=EXCLUDED.power_bonus,ability=EXCLUDED.ability,avatar=EXCLUDED.avatar,auction_locked=TRUE,auction_unique_code=EXCLUDED.auction_unique_code
-      RETURNING id`,['Lục Túc Phi Vũ Xà',intro,stats,'/assets/images/luc-tuc-phi-vu-xa.jpeg','de_thu_luc_tuc_phi_vu_xa'])).rows[0];
+      RETURNING id`,['Lục Túc Phi Vũ Xà',intro,stats,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06','de_thu_luc_tuc_phi_vu_xa'])).rows[0];
 
+    // v3.8.06: Luôn đồng bộ ảnh chuẩn cho cả phiên đã tồn tại; tránh DB cũ giữ avatar rỗng/sai.
+    await query(`UPDATE treasure_items SET avatar=$2,auction_locked=TRUE,auction_unique_code=$3 WHERE id=$1`,[item.id,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06','de_thu_luc_tuc_phi_vu_xa']);
+    await query(`UPDATE auction_listings SET item_avatar=$2,item_name='Lục Túc Phi Vũ Xà',item_intro=$3,item_hidden_effect=$4,item_stat_buff=$5,item_special_effect=$6,item_rarity='Tiên Thú Đế Cảnh',featured=TRUE,system_listing=TRUE WHERE featured_code=$1 AND status='active'`,['de_thu_luc_tuc_phi_vu_xa','/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06',intro,hidden,stats,special]);
     const exists=(await query(`SELECT id FROM auction_listings WHERE featured_code=$1 LIMIT 1`,['de_thu_luc_tuc_phi_vu_xa'])).rows[0];
     if(!exists){
       await query(`INSERT INTO auction_listings(seller_id,item_id,item_name,item_avatar,item_intro,item_hidden_effect,item_stat_buff,item_special_effect,item_rarity,quantity,starting_price,min_increment,current_price,starts_at,ends_at,status,system_listing,featured,featured_code,chairman_id)
-        VALUES($1,$2,'Lục Túc Phi Vũ Xà','/assets/images/luc-tuc-phi-vu-xa.jpeg',$3,$4,$5,$6,'Tiên Thú Đế Cảnh',1,100000000000,20000000000,0,NOW(),NOW()+INTERVAL '24 hours','active',TRUE,TRUE,$7,$1)`,
+        VALUES($1,$2,'Lục Túc Phi Vũ Xà','/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06',$3,$4,$5,$6,'Tiên Thú Đế Cảnh',1,100000000000,20000000000,0,NOW(),NOW()+INTERVAL '24 hours','active',TRUE,TRUE,$7,$1)`,
         [chairman.id,item.id,intro,hidden,stats,special,'de_thu_luc_tuc_phi_vu_xa']);
       console.log('[AUCTION] Đã tạo phiên đầu tiên: Lục Túc Phi Vũ Xà · khởi điểm 100.000.000.000 · bước giá 20.000.000.000.');
     }
@@ -6026,9 +6029,16 @@ app.get('/api/auction',async(req,res)=>{
     const history=(await query(`SELECT h.id,h.auction_id,h.bidder_id,h.event,h.amount,h.note,h.created_at,a.item_name,a.quantity,u.display_name AS bidder_name
       FROM auction_history h JOIN auction_listings a ON a.id=h.auction_id LEFT JOIN users u ON u.id=h.bidder_id ORDER BY h.id DESC LIMIT 50`)).rows;
     let access={chairman:null,officers:[],isChairman:false,isManager:false,isAdmin:false,pendingRequestId:null};
-    if(req.session?.user_id){access=await getAuctionAccess(req.session.user_id);access.isAdmin=isAuctionAdmin(req);}
+    let chairmanMembers=[];
+    if(req.session?.user_id){
+      access=await getAuctionAccess(req.session.user_id);
+      access.isAdmin=isAuctionAdmin(req);
+      if(access.isAdmin){
+        chairmanMembers=(await query(`SELECT id,username,display_name FROM users ORDER BY display_name ASC, id ASC LIMIT 1000`)).rows;
+      }
+    }
     res.json({rows:rows.map(x=>({...x,id:Number(x.id),itemId:Number(x.item_id),quantity:Number(x.quantity),startingPrice:Number(x.starting_price),minIncrement:Number(x.min_increment),currentPrice:Number(x.current_price),currentBidderId:x.current_bidder_id==null?null:Number(x.current_bidder_id),endsAt:x.ends_at,createdAt:x.created_at,currentBidderName:x.bidder_name||null,featured:Boolean(x.featured),systemListing:Boolean(x.system_listing),featuredCode:x.featured_code||null,itemIntro:x.item_intro||'',itemHiddenEffect:x.item_hidden_effect||'',itemStatBuff:x.item_stat_buff||'',itemSpecialEffect:x.item_special_effect||'',itemRarity:x.item_rarity||''})),
-      history:history.map(x=>({...x,id:Number(x.id),auctionId:Number(x.auction_id),bidderId:x.bidder_id==null?null:Number(x.bidder_id),amount:Number(x.amount),bidderName:x.bidder_name||null})),access});
+      history:history.map(x=>({...x,id:Number(x.id),auctionId:Number(x.auction_id),bidderId:x.bidder_id==null?null:Number(x.bidder_id),amount:Number(x.amount),bidderName:x.bidder_name||null})),access,members:chairmanMembers});
   }catch(e){console.error('auction load:',e);res.status(500).json({error:'Không thể mở Đấu Giá Hội.'});}
 });
 
@@ -6047,8 +6057,13 @@ app.post('/api/auction/chairman',auth,async(req,res)=>{
       return res.json({ok:true,action:'dismiss',message:current?`Đã bãi nhiệm Hội Trưởng @${current.username}.`:'Hiện không có Hội Trưởng để bãi nhiệm.'});
     }
     if(action==='appoint'){
-      const userId=Math.floor(Number(req.body?.userId)||0);
-      if(!userId)return res.status(400).json({error:'Vui lòng chọn một môn nhân để bổ nhiệm Hội Trưởng.'});
+      let userId=Math.floor(Number(req.body?.userId)||0);
+      const username=String(req.body?.username||'').trim().toLowerCase();
+      if(!userId && username){
+        const found=(await query(`SELECT id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,[username])).rows[0];
+        userId=found?Number(found.id):0;
+      }
+      if(!userId)return res.status(400).json({error:'Vui lòng chọn đúng môn nhân cần bổ nhiệm.'});
       const target=await appointAuctionChairmanByUserId(userId,req.session.user_id);
       return res.json({ok:true,action:'appoint',message:`Đã bổ nhiệm chính xác @${target.username} (${target.display_name}) làm Hội Trưởng Đấu Giá Hội.`});
     }
