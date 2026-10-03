@@ -1631,8 +1631,8 @@ function auctionCountdown(iso){
 }
 function auctionImageHtml(src,alt=''){
  const raw=String(src||'').trim();
- const value=raw||'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.08';
- if(/^https?:\/\/|^\/|^data:image\//i.test(value)) return `<img class="auction-featured-img" src="${esc(value)}" alt="${esc(alt)}" loading="eager" decoding="async" onerror="this.onerror=null;this.src='/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.08'">`;
+ const value=raw||'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.09';
+ if(/^https?:\/\/|^\/|^data:image\//i.test(value)) return `<img class="auction-featured-img" src="${esc(value)}" alt="${esc(alt)}" loading="eager" decoding="async" onerror="this.onerror=null;this.src='/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.09'">`;
  return esc(value||'💎');
 }
 async function loadAuction(){

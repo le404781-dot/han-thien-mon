@@ -3892,6 +3892,7 @@ app.get('/api/treasury',auth,async(req,res)=>{
       COALESCE(i.quantity,0)::int AS quantity
       FROM treasure_items ti
       LEFT JOIN inventory i ON i.item_id=ti.id AND i.user_id=$1
+      WHERE COALESCE(ti.auction_locked,FALSE)=FALSE
       ORDER BY ti.min_realm,ti.price,ti.id`,[req.session.user_id])).rows;
     const pillSetting=(await query(`SELECT immortal_pills_unlocked FROM alchemy_shop_settings WHERE id=1`)).rows[0]||{immortal_pills_unlocked:false};
     const danMaster=(await query(`SELECT user_id FROM venue_roles WHERE venue_code='dan-duong' LIMIT 1`)).rows[0]||null;
@@ -3909,10 +3910,15 @@ app.post('/api/treasury/buy',auth,async(req,res)=>{
     const quantity=Math.max(1,Math.min(99,Math.floor(Number(req.body?.quantity)||1)));
     if(!Number.isInteger(itemId)||itemId<1)return res.status(400).json({error:'Vật phẩm không hợp lệ.'});
     await client.query('BEGIN');
-    const itemR=await client.query(`SELECT id,name,category,description,price,spirit_gain,min_realm
+    const itemR=await client.query(`SELECT id,name,category,description,price,spirit_gain,min_realm,COALESCE(auction_locked,FALSE) AS auction_locked,auction_unique_code
       FROM treasure_items WHERE id=$1 FOR UPDATE`,[itemId]);
     if(!itemR.rows.length){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy vật phẩm.'});}
     const item=itemR.rows[0];
+    // v3.8.09: Đế Thú độc bản chỉ tồn tại trong Đấu Giá Hội. Không được mua tại Tàng Bảo Các.
+    if(Boolean(item.auction_locked) || String(item.name||'').trim()==='Lục Túc Phi Vũ Xà' || String(item.auction_unique_code||'')==='de_thu_luc_tuc_phi_vu_xa'){
+      await client.query('ROLLBACK');
+      return res.status(423).json({error:'Lục Túc Phi Vũ Xà là Đế Thú độc bản của Đấu Giá Hội và không thể mua tại Tàng Bảo Các.'});
+    }
     // Tiên Đan trong Tàng Bảo Các dùng chung khóa với Đan Pháp.
     // Chỉ Đan Chủ mới có quyền mở khóa thông qua /api/dan-phap/tien-dan-lock.
     const isImmortalPill=String(item.category||'').trim().toLowerCase().endsWith('tiên đan');
@@ -4671,7 +4677,8 @@ function pickByItemValue(rows){
 }
 
 async function pickTienBanItem(client,{tienPhamOnly=false}={}){
-  const whereBase=`category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị'`;
+  // v3.8.09: loại tuyệt đối vật phẩm độc bản của Đấu Giá Hội khỏi mọi pool Tiên Bàn.
+  const whereBase=`category NOT LIKE 'Dược Đường · Linh thú thức ăn' AND category NOT LIKE 'Dược Đường · Linh thú trang bị' AND COALESCE(auction_locked,FALSE)=FALSE AND COALESCE(auction_unique_code,'') <> 'de_thu_luc_tuc_phi_vu_xa' AND LOWER(TRIM(name)) <> LOWER('Lục Túc Phi Vũ Xà')`;
   const whereTienPham=tienPhamOnly?` AND reward_grade='Tiên Phẩm'`:``;
   const rows=(await client.query(`SELECT id,name,category,description,price,spirit_gain,reward_grade,power_bonus,ability FROM treasure_items WHERE ${whereBase}${whereTienPham}`)).rows;
   return {item:pickByItemValue(rows),rare:tienPhamOnly};
@@ -5860,6 +5867,10 @@ async function ensureAuctionSchemaImpl(){
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS auction_locked BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS auction_unique_code TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS ux_treasure_auction_unique_code ON treasure_items(auction_unique_code) WHERE auction_unique_code IS NOT NULL;
+    -- v3.8.09: khóa cưỡng chế Đế Thú độc bản, kể cả với Database đã tồn tại từ phiên bản cũ.
+    UPDATE treasure_items
+       SET auction_locked=TRUE, auction_unique_code='de_thu_luc_tuc_phi_vu_xa'
+     WHERE LOWER(TRIM(name))=LOWER('Lục Túc Phi Vũ Xà');
   `);
 
   // v3.8.05: Chỉ khởi tạo Hội Trưởng mặc định một lần; không ghi đè lựa chọn quản trị sau này.
