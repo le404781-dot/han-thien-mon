@@ -6053,9 +6053,9 @@ async function canOpenAuction(req){
   return !!r.rows[0];
 }
 
-async function settleAuctionTx(client, auctionId){
+async function settleAuctionTx(client, auctionId, force=false){
   const a=(await client.query(`SELECT * FROM auction_listings WHERE id=$1 FOR UPDATE`,[auctionId])).rows[0];
-  if(!a || a.status!=='active' || new Date(a.ends_at)>new Date()) return null;
+  if(!a || a.status!=='active' || (!force && new Date(a.ends_at)>new Date())) return null;
   if(a.current_bidder_id){
     // Phiên bán thành công cần một Hội Trưởng để nhận đúng 15% phí Hội.
     const chairman=(await client.query(`SELECT o.user_id FROM auction_officers o WHERE o.role='chairman' LIMIT 1 FOR UPDATE`)).rows[0];
@@ -6306,6 +6306,31 @@ app.post('/api/auction',auth,async(req,res)=>{
     const r=(await client.query(`INSERT INTO auction_listings(seller_id,item_id,item_name,item_avatar,quantity,starting_price,min_increment,current_price,starts_at,ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,0,NOW(),NOW()+($8 * INTERVAL '1 hour')) RETURNING id,ends_at`,[req.session.user_id,itemId,inv.name,inv.avatar||'',quantity,startingPrice,minIncrement,durationHours])).rows[0];
     await client.query(`INSERT INTO auction_history(auction_id,event,amount,note) VALUES($1,'created',0,$2)`,[r.id,`Niêm yết ${quantity} × ${inv.name}; khởi điểm ${startingPrice.toLocaleString('vi-VN')} Linh Thạch.`]);await client.query('COMMIT');res.status(201).json({ok:true,id:Number(r.id),endsAt:r.ends_at,message:'Đã mở phiên Đấu Giá Hội.'});
   }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể mở phiên đấu giá.'});}finally{client.release();}
+});
+
+app.post('/api/auction/:id/finish',auth,async(req,res)=>{
+  if(!isAuctionAdmin(req))return res.status(403).json({error:'Chỉ môn nhân thienha_666 được kết thúc đấu giá sớm và trao vật phẩm.'});
+  await ensureAuctionSchema();
+  const auctionId=Math.floor(Number(req.params.id)||0);
+  if(!auctionId)return res.status(400).json({error:'Mã phiên đấu giá không hợp lệ.'});
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:settle:'+auctionId]);
+    const a=(await client.query(`SELECT * FROM auction_listings WHERE id=$1 FOR UPDATE`,[auctionId])).rows[0];
+    if(!a)throw Object.assign(new Error('Phiên đấu giá không tồn tại.'),{statusCode:404});
+    if(a.status!=='active')throw Object.assign(new Error('Phiên đấu giá đã kết thúc hoặc đã được chốt trước đó.'),{statusCode:409});
+    const result=await settleAuctionTx(client,auctionId,true);
+    if(!result)throw Object.assign(new Error('Không thể chốt phiên đấu giá.'),{statusCode:409});
+    if(result.status==='awaiting_chairman'){
+      await client.query('ROLLBACK');
+      return res.status(409).json({error:'Chưa có Hội Trưởng để nhận phí Hội; không thể chốt phiên này.'});
+    }
+    await client.query(`INSERT INTO auction_history(auction_id,event,amount,note) VALUES($1,'early_end',$2,$3)`,[auctionId,a.current_price||0,result.status==='sold'?`thienha_666 kết thúc sớm và trao vật phẩm cho người dẫn giá cao nhất.`:`thienha_666 kết thúc sớm; không có người ra giá, vật phẩm đã hoàn về kho.`]);
+    await client.query('COMMIT');
+    return res.json({ok:true,status:result.status,winnerId:result.winnerId||null,amount:result.amount||0,message:result.status==='sold'?`Đã kết thúc sớm và trao ${a.quantity} × ${a.item_name} cho người thắng với giá ${Number(result.amount||0).toLocaleString('vi-VN')} Linh Thạch.`:`Đã kết thúc sớm; chưa có người ra giá nên vật phẩm đã hoàn về kho.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};return res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể kết thúc đấu giá.'});}
+  finally{client.release();}
 });
 
 app.post('/api/auction/:id/bid',auth,async(req,res)=>{

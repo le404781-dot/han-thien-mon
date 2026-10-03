@@ -2253,7 +2253,7 @@ body.focus-mode.auction-focus #auction.focus-active .auction-officer-list{
 .auction-image-admin-actions .btn{flex:1 1 150px}
 @media(max-width:600px){.auction-image-admin-actions{display:grid;grid-template-columns:1fr}.auction-image-admin-actions .btn{width:100%}}
 
-/* v3.8.11 · Đế Thú — thêm 1 lớp ngoại vi đỏ kiểu Tiên Thú */
+/* v3.8.12 · Đế Thú — thêm 1 lớp ngoại vi đỏ kiểu Tiên Thú */
 .auction-de-thu-outer-ring{position:absolute;inset:-15px;z-index:6;border-radius:29px;border:1px solid rgba(255,54,64,.78);box-shadow:0 0 12px rgba(255,36,48,.92),0 0 30px rgba(255,0,24,.58),0 0 72px rgba(170,0,18,.28);pointer-events:none;opacity:.72;animation:auctionDeThuOuterRing 3.4s ease-in-out infinite;will-change:transform,opacity,filter}
 .auction-de-thu-outer-ring::before{content:"";position:absolute;inset:3px;border-radius:inherit;border:1px solid rgba(255,112,118,.34);box-shadow:inset 0 0 18px rgba(255,35,45,.18);animation:auctionDeThuOuterShimmer 2.8s ease-in-out infinite}
 @keyframes auctionDeThuOuterRing{0%,100%{transform:scale(.992);opacity:.48;filter:brightness(.96)}35%{transform:scale(1.006);opacity:.78;filter:brightness(1.1)}55%{transform:scale(1.018);opacity:1;filter:brightness(1.2)}78%{transform:scale(1.006);opacity:.62;filter:brightness(1.04)}}
@@ -2276,3 +2276,7 @@ body.focus-mode.auction-focus #auction.focus-active .auction-officer-list{
 .auction-chairman-apply-card h3{margin:3px 0;color:#ffd66b;font-family:'Noto Serif SC',serif}.auction-chairman-apply-card p{margin:4px 0;color:var(--muted);font-size:.72rem;line-height:1.55}.auction-chairman-apply-card .btn{white-space:nowrap}
 @media(max-width:700px){.auction-de-thu-outer-ring{inset:-10px;border-radius:24px}.equipment-de-thu-display-panel{grid-template-columns:auto 1fr}.equipment-de-thu-actions{grid-column:1/-1;justify-content:stretch}.equipment-de-thu-actions .btn{width:100%}.auction-chairman-apply-card{grid-template-columns:1fr}.auction-chairman-apply-card .btn{width:100%}}
 @media(prefers-reduced-motion:reduce){.auction-de-thu-outer-ring,.auction-de-thu-outer-ring::before,.de-thu-display-avatar,.de-thu-display-avatar::before{animation:none}}
+
+/* v3.8.12 · thienha_666 early auction settlement */
+.auction-admin-finish-row{display:flex;justify-content:flex-end;margin-top:12px;padding-top:10px;border-top:1px dashed rgba(255,215,128,.22)}
+.auction-finish-btn{border-color:rgba(255,120,80,.45);font-weight:800}
