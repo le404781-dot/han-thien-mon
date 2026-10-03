@@ -5825,6 +5825,11 @@ async function ensureAuctionSchemaImpl(){
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_auction_history_auction ON auction_history(auction_id,id DESC);
+    CREATE TABLE IF NOT EXISTS auction_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS auction_officers (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       role TEXT NOT NULL CHECK(role IN ('chairman','manager')),
@@ -5856,9 +5861,8 @@ async function ensureAuctionSchemaImpl(){
     CREATE UNIQUE INDEX IF NOT EXISTS ux_treasure_auction_unique_code ON treasure_items(auction_unique_code) WHERE auction_unique_code IS NOT NULL;
   `);
 
-  // v3.8.03: Đồng bộ Hội Trưởng trong transaction có advisory lock để
-  // restart/deploy hoặc thao tác quản trị đồng thời không thể tạo hai Hội Trưởng.
-  const chairman=await syncAuctionChairman('cuu_vi_ho',null);
+  // v3.8.05: Chỉ khởi tạo Hội Trưởng mặc định một lần; không ghi đè lựa chọn quản trị sau này.
+  const chairman=await ensureInitialAuctionChairman();
   if(chairman){
     const intro='Đế Thú Lục Túc Phi Vũ Xà — Tiên Thú Đế Cảnh hiếm thấy, thân mang huyết mạch phi vũ và đế uy. Sáu túc đạp hư không, phi vũ hóa phong, long xà chi thế cuộn qua thiên khung. Sở hữu Đế Thú sẽ mở khóa một tầng đế uy đặc biệt, đồng thời gia tăng chiến lực và các thuộc tính cốt lõi của chủ nhân.';
     const hidden='【Hiệu ứng Ẩn · Đế Uy Phi Vũ】 Khi sở hữu, Đế Thú cộng thẳng chiến lực và buff Công Lực, Phòng Thủ, Thân Pháp, Ngộ Tính, Khí Vận. Hiệu ứng là buff sở hữu, không cần trang bị và không chiếm ô trang bị.';
@@ -5881,24 +5885,49 @@ async function ensureAuctionSchemaImpl(){
   }
 }
 
-async function syncAuctionChairman(username='cuu_vi_ho',appointedBy=null){
+async function ensureInitialAuctionChairman(){
   const client=await dbConnect();
   try{
     await client.query('BEGIN');
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
-    const target=(await client.query(`SELECT id,display_name,username FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1 FOR UPDATE`,[username])).rows[0]||null;
+    const flag=(await client.query(`SELECT value FROM auction_settings WHERE key='chairman_bootstrap_v3805' FOR UPDATE`)).rows[0];
+    const current=(await client.query(`SELECT o.user_id,u.display_name,u.username FROM auction_officers o JOIN users u ON u.id=o.user_id WHERE o.role='chairman' ORDER BY o.appointed_at DESC,o.user_id LIMIT 1 FOR UPDATE`)).rows[0]||null;
+    if(flag){await client.query('COMMIT');return current;}
+    let target=current;
     if(!target){
-      await client.query('ROLLBACK');
-      return null;
+      target=(await client.query(`SELECT id,display_name,username FROM users WHERE LOWER(username)=LOWER('cuu_vi_ho') LIMIT 1 FOR UPDATE`)).rows[0]||null;
+      if(target){
+        await client.query(`DELETE FROM auction_officers WHERE role='chairman' AND user_id<>$1`,[target.id]);
+        await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'chairman',$1,NOW()) ON CONFLICT(user_id) DO UPDATE SET role='chairman',appointed_by=EXCLUDED.appointed_by,appointed_at=NOW()`,[target.id]);
+      }
     }
+    await client.query(`INSERT INTO auction_settings(key,value,updated_at) VALUES('chairman_bootstrap_v3805',$1,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[target?'initialized':'no_default_user']);
+    await client.query('COMMIT'); return target;
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+}
+
+async function appointAuctionChairmanByUserId(userId,appointedBy){
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
+    const target=(await client.query(`SELECT id,display_name,username FROM users WHERE id=$1 LIMIT 1 FOR UPDATE`,[userId])).rows[0]||null;
+    if(!target)throw Object.assign(new Error('Không tìm thấy môn nhân được chọn trong Database.'),{statusCode:404});
     await client.query(`DELETE FROM auction_officers WHERE role='chairman' AND user_id<>$1`,[target.id]);
-    await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at)
-      VALUES($1,'chairman',$2,NOW())
-      ON CONFLICT(user_id) DO UPDATE SET role='chairman',appointed_by=COALESCE(EXCLUDED.appointed_by,auction_officers.appointed_by),appointed_at=NOW()`,[target.id,appointedBy==null?target.id:appointedBy]);
-    await client.query('COMMIT');
-    return target;
-  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}
-  finally{client.release();}
+    await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'chairman',$2,NOW()) ON CONFLICT(user_id) DO UPDATE SET role='chairman',appointed_by=EXCLUDED.appointed_by,appointed_at=NOW()`,[target.id,appointedBy]);
+    await client.query('COMMIT'); return target;
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+}
+
+async function dismissAuctionChairman(){
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
+    const current=(await client.query(`SELECT o.user_id,u.display_name,u.username FROM auction_officers o JOIN users u ON u.id=o.user_id WHERE o.role='chairman' ORDER BY o.appointed_at DESC,o.user_id LIMIT 1 FOR UPDATE`)).rows[0]||null;
+    if(current)await client.query(`DELETE FROM auction_officers WHERE user_id=$1 AND role='chairman'`,[current.user_id]);
+    await client.query('COMMIT'); return current;
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
 }
 
 const AUCTION_ADMIN_USERNAME='thienha_666';
@@ -6009,13 +6038,25 @@ app.get('/api/auction/access',auth,async(req,res)=>{
 });
 
 app.post('/api/auction/chairman',auth,async(req,res)=>{
-  if(!isAuctionAdmin(req))return res.status(403).json({error:'Chỉ môn nhân thienha_666 được đồng bộ Hội Trưởng.'});
+  if(!isAuctionAdmin(req))return res.status(403).json({error:'Chỉ môn nhân thienha_666 được bãi nhiệm/bổ nhiệm Hội Trưởng.'});
   await ensureAuctionSchema();
+  const action=String(req.body?.action||'').trim().toLowerCase();
   try{
-    const target=await syncAuctionChairman('cuu_vi_ho',req.session.user_id);
-    if(!target)throw Object.assign(new Error('Không tìm thấy môn nhân @cuu_vi_ho trong Database. Chưa thể bổ nhiệm Hội Trưởng.'),{statusCode:404});
-    res.json({ok:true,message:`Đã đồng bộ chính xác @cuu_vi_ho (${target.display_name}) làm Hội Trưởng Đấu Giá Hội duy nhất.`});
-  }catch(e){res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể đồng bộ Hội Trưởng.'});}
+    if(action==='dismiss'){
+      const current=await dismissAuctionChairman();
+      return res.json({ok:true,action:'dismiss',message:current?`Đã bãi nhiệm Hội Trưởng @${current.username}.`:'Hiện không có Hội Trưởng để bãi nhiệm.'});
+    }
+    if(action==='appoint'){
+      const userId=Math.floor(Number(req.body?.userId)||0);
+      if(!userId)return res.status(400).json({error:'Vui lòng chọn một môn nhân để bổ nhiệm Hội Trưởng.'});
+      const target=await appointAuctionChairmanByUserId(userId,req.session.user_id);
+      return res.json({ok:true,action:'appoint',message:`Đã bổ nhiệm chính xác @${target.username} (${target.display_name}) làm Hội Trưởng Đấu Giá Hội.`});
+    }
+    const target=(await query(`SELECT id FROM users WHERE LOWER(username)=LOWER('cuu_vi_ho') LIMIT 1`)).rows[0]||null;
+    if(!target)throw Object.assign(new Error('Không tìm thấy môn nhân @cuu_vi_ho trong Database.'),{statusCode:404});
+    const appointed=await appointAuctionChairmanByUserId(Number(target.id),req.session.user_id);
+    res.json({ok:true,action:'appoint',message:`Đã bổ nhiệm chính xác @${appointed.username} (${appointed.display_name}) làm Hội Trưởng Đấu Giá Hội.`});
+  }catch(e){res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể thay đổi Hội Trưởng.'});}
 });
 
 app.post('/api/auction/permission-request',auth,async(req,res)=>{
