@@ -1647,14 +1647,13 @@ async function loadAuction(){
      let requests=[], members=[];
      try{auctionItems=(await api('/api/auction/admin/items',{headers:authHeaders()})).rows||[];}catch(e){}
      try{const r=await api('/api/auction/permission-requests',{headers:authHeaders()});requests=r.requests||[];members=r.members||[];}catch(e){}
-     const chairmanId=access.chairman?.user_id||'';
      const managers=(access.officers||[]).filter(x=>x.role==='manager');
      adminHtml=`<div class="auction-admin-card">
-       <div class="auction-admin-head"><div><span class="eyebrow">⚜️ QUẢN TRỊ ĐẤU GIÁ HỘI</span><h3>thienha_666 · Trung tâm quyền hạn</h3><p>Hội Trưởng là duy nhất. Người được cấp phép mới được mở phiên.</p></div><span class="auction-role-badge">👑 Đặc Quyền Sơn Môn</span></div>
+       <div class="auction-admin-head"><div><span class="eyebrow">⚜️ QUẢN TRỊ ĐẤU GIÁ HỘI</span><h3>thienha_666 · Trung tâm quyền hạn</h3><p>Hội Trưởng được hệ thống khóa cố định theo tài khoản yêu cầu.</p></div><span class="auction-role-badge">👑 Đặc Quyền Sơn Môn</span></div>
        <div class="auction-management-grid">
-         <div class="auction-manager-panel"><b>👑 Bổ nhiệm Hội Trưởng</b><p class="muted">Hội Trưởng nhận <strong>15%</strong> giá cuối của mỗi phiên bán thành công.</p>
-           <div class="auction-action-row"><select id="auctionChairmanSelect">${members.map(m=>`<option value="${m.id}" ${Number(m.id)===Number(chairmanId)?'selected':''}>${esc(m.display_name)} · @${esc(m.username)}</option>`).join('')}</select><button class="btn primary" id="auctionChairmanBtn">👑 Bổ nhiệm</button></div>
-           <small>${access.chairman?`Hiện tại: <strong>${esc(access.chairman.display_name)}</strong> (@${esc(access.chairman.username)})`:'Chưa có Hội Trưởng — phiên có người thắng sẽ chờ bổ nhiệm để thanh toán.'}</small>
+         <div class="auction-manager-panel"><b>👑 Hội Trưởng Đấu Giá Hội</b><p class="muted">Tài khoản duy nhất: <strong>@cuu_vi_ho</strong>. Hệ thống tự đồng bộ sau mỗi lần khởi động/deploy; không cho phép bổ nhiệm nhầm tài khoản khác.</p>
+           <div class="auction-action-row"><span class="auction-fixed-chairman">👑 @cuu_vi_ho</span><button class="btn primary" id="auctionChairmanBtn">🔒 Đồng bộ Hội Trưởng</button></div>
+           <small>${access.chairman?`Hiện tại: <strong>${esc(access.chairman.display_name)}</strong> (@${esc(access.chairman.username)})`:'Chưa tìm thấy @cuu_vi_ho trong Database.'}</small>
            <p id="auctionRoleMsg" class="train-msg"></p>
          </div>
          <div class="auction-manager-panel"><b>📨 Đơn xin cấp phép mở phiên</b><p class="muted">Duyệt để môn nhân có thể niêm yết vật phẩm của chính họ.</p>
@@ -1682,7 +1681,7 @@ async function loadAuction(){
    area.innerHTML=adminHtml+createHtml+`<div class="auction-rules"><span class="eyebrow">📜 LUẬT ĐẤU GIÁ HỘI</span><p>Môn nhân Hàn Thiên Môn mới đủ điều kiện tham gia. Giá phải cao hơn giá hiện tại theo đúng bước giá. Linh Thạch đặt giá được tạm khóa; khi bị vượt sẽ hoàn trả ngay. Hết thời gian, người có giá cao nhất nhận vật phẩm. <strong>${chairmanNote}</strong></p></div><div class="auction-list">${cards||`<div class="empty-state compact"><h3>Đấu Giá Hội đang yên tĩnh</h3><p>Chưa có vật phẩm nào được mở đấu giá.</p></div>`}</div><div class="auction-history-card"><div class="section-head"><div><span class="eyebrow">📜 LỊCH SỬ ĐẤU GIÁ</span><h3>Giao dịch gần đây</h3></div></div><div class="auction-history-list">${(d.history||[]).slice(0,30).map(h=>`<div class="auction-history-row"><span>${h.event==='bid'?'⚔️':h.event==='sold'?'🏆':h.event==='created'?'📦':'↩️'}</span><div><b>${esc(h.item_name||'Vật phẩm')}</b><small>${h.event==='bid'&&h.bidderName?esc(h.bidderName)+' ra '+auctionMoney(h.amount)+' Linh Thạch':esc(h.note||'Hệ thống ghi nhận giao dịch')}</small></div><time>${new Date(h.created_at).toLocaleString('vi-VN')}</time></div>`).join('')||'<p class="muted">Chưa có lịch sử.</p>'}</div></div>`;
    $('#auctionCreateBtn')?.addEventListener('click',async()=>{const b=$('#auctionCreateBtn'),msg=$('#auctionAdminMsg');b.disabled=true;try{const r=await api('/api/auction',{method:'POST',headers:authHeaders(),body:JSON.stringify({itemId:Number($('#auctionItemSelect').value),quantity:Number($('#auctionQty').value),durationHours:Number($('#auctionDuration').value),startingPrice:Number($('#auctionStart').value),minIncrement:Number($('#auctionStep').value)})});msg.textContent='✓ '+r.message;await loadAuction();}catch(e){msg.textContent='❌ '+e.message;b.disabled=false;}});
    $('#auctionPermissionBtn')?.addEventListener('click',async()=>{const b=$('#auctionPermissionBtn'),msg=$('#auctionPermissionMsg');b.disabled=true;try{const r=await api('/api/auction/permission-request',{method:'POST',headers:authHeaders(),body:JSON.stringify({})});msg.textContent='✓ '+r.message;await loadAuction();}catch(e){msg.textContent='❌ '+e.message;b.disabled=false;}});
-   $('#auctionChairmanBtn')?.addEventListener('click',async()=>{const b=$('#auctionChairmanBtn'),msg=$('#auctionRoleMsg');b.disabled=true;try{const r=await api('/api/auction/chairman',{method:'POST',headers:authHeaders(),body:JSON.stringify({userId:Number($('#auctionChairmanSelect').value)})});msg.textContent='✓ '+r.message;await loadAuction();}catch(e){msg.textContent='❌ '+e.message;b.disabled=false;}});
+   $('#auctionChairmanBtn')?.addEventListener('click',async()=>{const b=$('#auctionChairmanBtn'),msg=$('#auctionRoleMsg');b.disabled=true;try{const r=await api('/api/auction/chairman',{method:'POST',headers:authHeaders(),body:JSON.stringify({})});msg.textContent='✓ '+r.message;await loadAuction();}catch(e){msg.textContent='❌ '+e.message;b.disabled=false;}});
    document.querySelectorAll('.auction-review').forEach(btn=>btn.addEventListener('click',async()=>{btn.disabled=true;try{await api('/api/auction/permission-review',{method:'POST',headers:authHeaders(),body:JSON.stringify({requestId:Number(btn.dataset.id),action:btn.dataset.action})});await loadAuction();}catch(e){alert(e.message);btn.disabled=false;}}));
    document.querySelectorAll('[data-revoke-user]').forEach(btn=>btn.addEventListener('click',async()=>{if(!confirm('Thu hồi quyền mở phiên của môn nhân này?'))return;btn.disabled=true;try{await api('/api/auction/permission-revoke',{method:'POST',headers:authHeaders(),body:JSON.stringify({userId:Number(btn.dataset.revokeUser)})});await loadAuction();}catch(e){alert(e.message);btn.disabled=false;}}));
    document.querySelectorAll('.auction-bid-btn').forEach(btn=>btn.addEventListener('click',async()=>{if(!getToken()){renderAuth('login');return;}const id=Number(btn.dataset.auctionId),input=document.querySelector(`.auction-bid-input[data-auction-id="${id}"]`);btn.disabled=true;try{const r=await api(`/api/auction/${id}/bid`,{method:'POST',headers:authHeaders(),body:JSON.stringify({amount:Number(input.value)})});window.showAuctionToast?.('✓ '+r.message);await Promise.all([loadAuction(),loadProfile()]);}catch(e){alert(e.message);btn.disabled=false;}}));
@@ -2381,4 +2380,15 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
     else await pollTienMenh();
   }catch{}finally{busy=false;}
  },5000);
+})();
+
+/* v3.8.03 · PWA update guard: register the current Service Worker and force
+ * an update check so old Render/iPhone caches cannot keep an older bundle. */
+(function registerCurrentServiceWorker(){
+ if(!('serviceWorker' in navigator))return;
+ window.addEventListener('load',()=>{
+  navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'})
+   .then(reg=>reg.update().catch(()=>{}))
+   .catch(()=>{});
+ });
 })();
