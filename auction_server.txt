@@ -1,0 +1,436 @@
+
+app.get('/api/leaderboard',async(req,res)=>{
+  try {
+    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_power,p.position,p.avatar,
+      COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_points,
+      COALESCE((SELECT COUNT(*) FROM achievements a WHERE a.user_id=u.id),0)::int AS achievement_count,
+      (p.spirit_power + COALESCE((SELECT SUM(points) FROM achievements a WHERE a.user_id=u.id),0)*10)::bigint AS achievement_score
+      FROM users u JOIN profiles p ON p.user_id=u.id ORDER BY achievement_score DESC, u.id ASC LIMIT 50`);
+    const aura=await sectAuraRankMap();
+    res.json({rows:r.rows.map((x,i)=>({...x,realmIndex:stageFor(Number(x.spirit_power)||0).realmIndex,auraRank:aura.get(Number(x.id))||0,isElder:i<3,elderTitle:i<3?'Đại Lão':''}))});
+  } catch(e){res.status(500).json({error:'Không thể tải bảng thành tích.'});}
+});
+
+
+// v3.8.00 · Đấu Giá Hội: Hội Trưởng + cấp phép mở phiên + chia 15% phí Hội
+let __ensureAuctionSchemaPromise=null;
+async function ensureAuctionSchema(){
+  if(!__ensureAuctionSchemaPromise) __ensureAuctionSchemaPromise=ensureAuctionSchemaImpl().catch(err=>{__ensureAuctionSchemaPromise=null;throw err;});
+  return __ensureAuctionSchemaPromise;
+}
+async function ensureAuctionSchemaImpl(){
+  await query(`
+    CREATE TABLE IF NOT EXISTS auction_listings (
+      id BIGSERIAL PRIMARY KEY,
+      seller_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      item_id INTEGER NOT NULL REFERENCES treasure_items(id) ON DELETE RESTRICT,
+      item_name TEXT NOT NULL,
+      item_avatar TEXT,
+      item_intro TEXT NOT NULL DEFAULT '',
+      item_hidden_effect TEXT NOT NULL DEFAULT '',
+      item_stat_buff TEXT NOT NULL DEFAULT '',
+      item_special_effect TEXT NOT NULL DEFAULT '',
+      item_rarity TEXT NOT NULL DEFAULT '',
+      quantity INTEGER NOT NULL CHECK(quantity > 0),
+      starting_price BIGINT NOT NULL CHECK(starting_price > 0),
+      min_increment BIGINT NOT NULL CHECK(min_increment > 0),
+      current_price BIGINT NOT NULL CHECK(current_price >= 0),
+      current_bidder_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      starts_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ends_at TIMESTAMPTZ NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','sold','unsold','cancelled')),
+      system_listing BOOLEAN NOT NULL DEFAULT FALSE,
+      featured BOOLEAN NOT NULL DEFAULT FALSE,
+      featured_code TEXT,
+      settled_at TIMESTAMPTZ,
+      seller_payout BIGINT NOT NULL DEFAULT 0,
+      chairman_fee BIGINT NOT NULL DEFAULT 0,
+      chairman_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK(ends_at > starts_at)
+    );
+    ALTER TABLE auction_listings ALTER COLUMN seller_id DROP NOT NULL;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_intro TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_hidden_effect TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_stat_buff TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_special_effect TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS item_rarity TEXT NOT NULL DEFAULT '';
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS system_listing BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS featured_code TEXT;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS seller_payout BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS chairman_fee BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE auction_listings ADD COLUMN IF NOT EXISTS chairman_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_auction_featured_code ON auction_listings(featured_code) WHERE featured_code IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_auction_active_end ON auction_listings(status,ends_at,id);
+    CREATE INDEX IF NOT EXISTS idx_auction_current_bidder ON auction_listings(current_bidder_id,status);
+    CREATE INDEX IF NOT EXISTS idx_auction_seller_status ON auction_listings(seller_id,status,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_auction_featured_active ON auction_listings(featured,status,ends_at);
+    CREATE TABLE IF NOT EXISTS auction_bids (
+      id BIGSERIAL PRIMARY KEY,
+      auction_id BIGINT NOT NULL REFERENCES auction_listings(id) ON DELETE CASCADE,
+      bidder_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+      amount BIGINT NOT NULL CHECK(amount > 0),
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','outbid','won','refunded')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_auction_bids_auction ON auction_bids(auction_id,id DESC);
+    CREATE INDEX IF NOT EXISTS idx_auction_bids_bidder_status ON auction_bids(bidder_id,status);
+    CREATE TABLE IF NOT EXISTS auction_history (
+      id BIGSERIAL PRIMARY KEY,
+      auction_id BIGINT NOT NULL REFERENCES auction_listings(id) ON DELETE CASCADE,
+      bidder_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      event TEXT NOT NULL,
+      amount BIGINT NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_auction_history_auction ON auction_history(auction_id,id DESC);
+    CREATE TABLE IF NOT EXISTS auction_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS auction_officers (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK(role IN ('chairman','manager')),
+      appointed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      appointed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_auction_one_chairman ON auction_officers(role) WHERE role='chairman';
+    CREATE INDEX IF NOT EXISTS idx_auction_officers_role ON auction_officers(role,user_id);
+    CREATE TABLE IF NOT EXISTS auction_permission_requests (
+      id BIGSERIAL PRIMARY KEY,
+      requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','revoked')),
+      requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      reviewed_at TIMESTAMPTZ,
+      reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_auction_pending_request_user ON auction_permission_requests(requester_id) WHERE status='pending';
+    CREATE INDEX IF NOT EXISTS idx_auction_permission_status ON auction_permission_requests(status,requested_at DESC);
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_power_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_attack_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_defense_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_speed_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_comprehension_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_luck_bonus BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_damage_reduction_pct INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE profiles ADD COLUMN IF NOT EXISTS auction_special_effect TEXT NOT NULL DEFAULT '';
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS auction_locked BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE treasure_items ADD COLUMN IF NOT EXISTS auction_unique_code TEXT;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_treasure_auction_unique_code ON treasure_items(auction_unique_code) WHERE auction_unique_code IS NOT NULL;
+  `);
+
+  // v3.8.05: Chỉ khởi tạo Hội Trưởng mặc định một lần; không ghi đè lựa chọn quản trị sau này.
+  const chairman=await ensureInitialAuctionChairman();
+  if(chairman){
+    const intro='Đế Thú Lục Túc Phi Vũ Xà — Tiên Thú Đế Cảnh hiếm thấy, thân mang huyết mạch phi vũ và đế uy. Sáu túc đạp hư không, phi vũ hóa phong, long xà chi thế cuộn qua thiên khung. Sở hữu Đế Thú sẽ mở khóa một tầng đế uy đặc biệt, đồng thời gia tăng chiến lực và các thuộc tính cốt lõi của chủ nhân.';
+    const hidden='【Hiệu ứng Ẩn · Đế Uy Phi Vũ】 Khi sở hữu, Đế Thú cộng thẳng chiến lực và buff Công Lực, Phòng Thủ, Thân Pháp, Ngộ Tính, Khí Vận. Hiệu ứng là buff sở hữu, không cần trang bị và không chiếm ô trang bị.';
+    const stats='+5.000.000 chiến lực · +1.200.000 Công Lực · +900.000 Phòng Thủ · +800.000 Thân Pháp · +300 Ngộ Tính · +200 Khí Vận · +8% giảm sát thương trực tiếp';
+    const special='【Đế Cảnh · Phi Vũ Hộ Thể】 Giảm 8% sát thương nhận vào trong giao chiến; tạo Đế Uy quang hoàn quanh ảnh Đế Thú. Hiệu ứng chỉ cộng một lần cho mỗi chủ nhân.';
+    const item=(await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm,reward_grade,power_bonus,ability,avatar,auction_locked,auction_unique_code)
+      VALUES($1,'Đế Thú · Tiên Thú Đế Cảnh',$2,0,0,0,'Tiên Thú Đế Cảnh',5000000,$3,$4,TRUE,$5)
+      ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,reward_grade=EXCLUDED.reward_grade,power_bonus=EXCLUDED.power_bonus,ability=EXCLUDED.ability,avatar=EXCLUDED.avatar,auction_locked=TRUE,auction_unique_code=EXCLUDED.auction_unique_code
+      RETURNING id`,['Lục Túc Phi Vũ Xà',intro,stats,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06','de_thu_luc_tuc_phi_vu_xa'])).rows[0];
+
+    // v3.8.06: Luôn đồng bộ ảnh chuẩn cho cả phiên đã tồn tại; tránh DB cũ giữ avatar rỗng/sai.
+    await query(`UPDATE treasure_items SET avatar=$2,auction_locked=TRUE,auction_unique_code=$3 WHERE id=$1`,[item.id,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06','de_thu_luc_tuc_phi_vu_xa']);
+    await query(`UPDATE auction_listings SET item_avatar=$2,item_name='Lục Túc Phi Vũ Xà',item_intro=$3,item_hidden_effect=$4,item_stat_buff=$5,item_special_effect=$6,item_rarity='Tiên Thú Đế Cảnh',featured=TRUE,system_listing=TRUE WHERE featured_code=$1 AND status='active'`,['de_thu_luc_tuc_phi_vu_xa','/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06',intro,hidden,stats,special]);
+    const exists=(await query(`SELECT id FROM auction_listings WHERE featured_code=$1 LIMIT 1`,['de_thu_luc_tuc_phi_vu_xa'])).rows[0];
+    if(!exists){
+      await query(`INSERT INTO auction_listings(seller_id,item_id,item_name,item_avatar,item_intro,item_hidden_effect,item_stat_buff,item_special_effect,item_rarity,quantity,starting_price,min_increment,current_price,starts_at,ends_at,status,system_listing,featured,featured_code,chairman_id)
+        VALUES($1,$2,'Lục Túc Phi Vũ Xà','/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06',$3,$4,$5,$6,'Tiên Thú Đế Cảnh',1,100000000000,20000000000,0,NOW(),NOW()+INTERVAL '24 hours','active',TRUE,TRUE,$7,$1)`,
+        [chairman.id,item.id,intro,hidden,stats,special,'de_thu_luc_tuc_phi_vu_xa']);
+      console.log('[AUCTION] Đã tạo phiên đầu tiên: Lục Túc Phi Vũ Xà · khởi điểm 100.000.000.000 · bước giá 20.000.000.000.');
+    }
+  }else{
+    console.warn('[AUCTION] Chưa tìm thấy tài khoản cuu_vi_ho; sẽ tự bổ nhiệm và tạo phiên Đế Thú khi tài khoản xuất hiện.');
+  }
+}
+
+async function ensureInitialAuctionChairman(){
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
+    const flag=(await client.query(`SELECT value FROM auction_settings WHERE key='chairman_bootstrap_v3805' FOR UPDATE`)).rows[0];
+    const current=(await client.query(`SELECT o.user_id,u.display_name,u.username FROM auction_officers o JOIN users u ON u.id=o.user_id WHERE o.role='chairman' ORDER BY o.appointed_at DESC,o.user_id LIMIT 1 FOR UPDATE`)).rows[0]||null;
+    if(flag){await client.query('COMMIT');return current;}
+    let target=current;
+    if(!target){
+      target=(await client.query(`SELECT id,display_name,username FROM users WHERE LOWER(username)=LOWER('cuu_vi_ho') LIMIT 1 FOR UPDATE`)).rows[0]||null;
+      if(target){
+        await client.query(`DELETE FROM auction_officers WHERE role='chairman' AND user_id<>$1`,[target.id]);
+        await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'chairman',$1,NOW()) ON CONFLICT(user_id) DO UPDATE SET role='chairman',appointed_by=EXCLUDED.appointed_by,appointed_at=NOW()`,[target.id]);
+      }
+    }
+    await client.query(`INSERT INTO auction_settings(key,value,updated_at) VALUES('chairman_bootstrap_v3805',$1,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[target?'initialized':'no_default_user']);
+    await client.query('COMMIT'); return target;
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+}
+
+async function appointAuctionChairmanByUserId(userId,appointedBy){
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
+    const target=(await client.query(`SELECT id,display_name,username FROM users WHERE id=$1 LIMIT 1 FOR UPDATE`,[userId])).rows[0]||null;
+    if(!target)throw Object.assign(new Error('Không tìm thấy môn nhân được chọn trong Database.'),{statusCode:404});
+    await client.query(`DELETE FROM auction_officers WHERE role='chairman' AND user_id<>$1`,[target.id]);
+    await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'chairman',$2,NOW()) ON CONFLICT(user_id) DO UPDATE SET role='chairman',appointed_by=EXCLUDED.appointed_by,appointed_at=NOW()`,[target.id,appointedBy]);
+    await client.query('COMMIT'); return target;
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+}
+
+async function dismissAuctionChairman(){
+  const client=await dbConnect();
+  try{
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
+    const current=(await client.query(`SELECT o.user_id,u.display_name,u.username FROM auction_officers o JOIN users u ON u.id=o.user_id WHERE o.role='chairman' ORDER BY o.appointed_at DESC,o.user_id LIMIT 1 FOR UPDATE`)).rows[0]||null;
+    if(current)await client.query(`DELETE FROM auction_officers WHERE user_id=$1 AND role='chairman'`,[current.user_id]);
+    await client.query('COMMIT'); return current;
+  }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
+}
+
+const AUCTION_ADMIN_USERNAME='thienha_666';
+function isAuctionAdmin(req){ return String(req.session?.username||'').toLowerCase()===AUCTION_ADMIN_USERNAME; }
+
+async function getAuctionAccess(userId){
+  const rows=(await query(`SELECT o.user_id,o.role,u.display_name,u.username
+    FROM auction_officers o JOIN users u ON u.id=o.user_id ORDER BY CASE WHEN o.role='chairman' THEN 0 ELSE 1 END,u.display_name`)).rows;
+  const chairman=rows.find(x=>x.role==='chairman')||null;
+  const me=rows.find(x=>Number(x.user_id)===Number(userId));
+  const pending=(await query(`SELECT id FROM auction_permission_requests WHERE requester_id=$1 AND status='pending' LIMIT 1`,[userId])).rows[0];
+  return {chairman,officers:rows,isChairman:me?.role==='chairman',isManager:me?.role==='manager',isAdmin:false,pendingRequestId:pending?Number(pending.id):null};
+}
+async function canOpenAuction(req){
+  if(isAuctionAdmin(req))return true;
+  const r=await query(`SELECT 1 FROM auction_officers WHERE user_id=$1 AND role IN ('chairman','manager') LIMIT 1`,[req.session.user_id]);
+  return !!r.rows[0];
+}
+
+async function settleAuctionTx(client, auctionId){
+  const a=(await client.query(`SELECT * FROM auction_listings WHERE id=$1 FOR UPDATE`,[auctionId])).rows[0];
+  if(!a || a.status!=='active' || new Date(a.ends_at)>new Date()) return null;
+  if(a.current_bidder_id){
+    // Phiên bán thành công cần một Hội Trưởng để nhận đúng 15% phí Hội.
+    const chairman=(await client.query(`SELECT o.user_id FROM auction_officers o WHERE o.role='chairman' LIMIT 1 FOR UPDATE`)).rows[0];
+    if(!chairman) return {id:Number(a.id),status:'awaiting_chairman',winnerId:Number(a.current_bidder_id),amount:Number(a.current_price)};
+    const total=BigInt(Math.max(0,Number(a.current_price)||0));
+    const fee=(total*15n)/100n;
+    const sellerNet=total-fee;
+    const chairmanId=Number(chairman.user_id);
+    const sellerId=a.seller_id==null?null:Number(a.seller_id);
+    if(a.system_listing){
+      // Phiên hệ thống không có người bán; không phát sinh doanh thu giả cho Hội Trưởng.
+    }else if(sellerId===chairmanId){
+      await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1`,[sellerId,total.toString()]);
+    }else{
+      await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1`,[sellerId,sellerNet.toString()]);
+      await client.query(`UPDATE profiles SET spirit_stones=COALESCE(spirit_stones,0)+$2,updated_at=NOW() WHERE user_id=$1`,[chairmanId,fee.toString()]);
+    }
+    if(a.featured_code==='de_thu_luc_tuc_phi_vu_xa'){
+      const already=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 FOR UPDATE`,[a.current_bidder_id,a.item_id])).rows[0];
+      if(already && Number(already.quantity)>0)throw Object.assign(new Error('Đế Thú độc bản đã tồn tại trong Tu Di Giới của môn nhân này.'),{statusCode:409});
+    }
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at)
+      VALUES($1,$2,$3,NOW())
+      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,
+      [a.current_bidder_id,a.item_id,a.quantity]);
+    await client.query(`UPDATE auction_bids SET status='won' WHERE auction_id=$1 AND status='active'`,[auctionId]);
+    if(a.featured_code==='de_thu_luc_tuc_phi_vu_xa'){
+      await client.query(`UPDATE profiles SET auction_power_bonus=GREATEST(COALESCE(auction_power_bonus,0),5000000),auction_attack_bonus=GREATEST(COALESCE(auction_attack_bonus,0),1200000),auction_defense_bonus=GREATEST(COALESCE(auction_defense_bonus,0),900000),auction_speed_bonus=GREATEST(COALESCE(auction_speed_bonus,0),800000),auction_comprehension_bonus=GREATEST(COALESCE(auction_comprehension_bonus,0),300),auction_luck_bonus=GREATEST(COALESCE(auction_luck_bonus,0),200),auction_damage_reduction_pct=GREATEST(COALESCE(auction_damage_reduction_pct,0),8),auction_special_effect=$2,updated_at=NOW() WHERE user_id=$1`,[a.current_bidder_id,'Đế Cảnh · Phi Vũ Hộ Thể']);
+    }
+    await client.query(`UPDATE auction_listings SET status='sold',settled_at=NOW(),seller_payout=$2,chairman_fee=$3,chairman_id=$4 WHERE id=$1`,
+      [auctionId,a.system_listing?'0':sellerNet.toString(),a.system_listing?'0':fee.toString(),chairmanId]);
+    await client.query(`INSERT INTO auction_history(auction_id,bidder_id,event,amount,note)
+      VALUES($1,$2,'sold',$3,$4)`,[auctionId,a.current_bidder_id,a.current_price,
+      `Thắng đấu giá, nhận ${a.quantity} × ${a.item_name}. ${a.system_listing?'Đây là vật phẩm hệ thống độc bản; không phát sinh doanh thu người bán.':`Người bán nhận ${sellerNet.toLocaleString('vi-VN')} Linh Thạch; Hội Trưởng nhận ${fee.toLocaleString('vi-VN')} Linh Thạch (15%).`}`]);
+    return {id:Number(a.id),status:'sold',winnerId:Number(a.current_bidder_id),amount:Number(a.current_price)};
+  }
+  if(!a.system_listing && a.seller_id!=null){
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at)
+      VALUES($1,$2,$3,NOW())
+      ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,
+      [a.seller_id,a.item_id,a.quantity]);
+  }
+  await client.query(`UPDATE auction_listings SET status='unsold',settled_at=NOW() WHERE id=$1`,[auctionId]);
+  await client.query(`INSERT INTO auction_history(auction_id,event,amount,note)
+    VALUES($1,'unsold',0,$2)`,[auctionId,`Hết thời gian nhưng không có người ra giá; vật phẩm đã hoàn về kho.`]);
+  return {id:Number(a.id),status:'unsold',winnerId:null,amount:0};
+}
+
+async function settleExpiredAuctions(limit=20){
+  if(shuttingDown||poolClosed||!dbReady)return 0;
+  const client=await dbConnect(); let count=0;
+  try{
+    for(let i=0;i<limit;i++){
+      await client.query('BEGIN');
+      const row=(await client.query(`SELECT id FROM auction_listings WHERE status='active' AND ends_at<=NOW() ORDER BY ends_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`)).rows[0];
+      if(!row){await client.query('ROLLBACK');break;}
+      const result=await settleAuctionTx(client,Number(row.id));
+      if(result?.status==='awaiting_chairman'){await client.query('ROLLBACK');break;}
+      await client.query('COMMIT'); count++;
+    }
+    return count;
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('auction settlement:',e);return count;}
+  finally{client.release();}
+}
+
+app.get('/api/auction',async(req,res)=>{
+  try{
+    await ensureAuctionSchema();
+    const rows=(await query(`SELECT a.id,a.item_id,a.item_name,a.item_avatar,a.item_intro,a.item_hidden_effect,a.item_stat_buff,a.item_special_effect,a.item_rarity,a.quantity,a.starting_price,a.min_increment,
+      a.current_price,a.current_bidder_id,a.starts_at,a.ends_at,a.status,a.created_at,a.system_listing,a.featured,a.featured_code,
+      u.display_name AS bidder_name
+      FROM auction_listings a LEFT JOIN users u ON u.id=a.current_bidder_id
+      WHERE a.status='active' AND a.starts_at<=NOW() ORDER BY a.featured DESC,a.ends_at ASC,a.id DESC LIMIT 50`)).rows;
+    const history=(await query(`SELECT h.id,h.auction_id,h.bidder_id,h.event,h.amount,h.note,h.created_at,a.item_name,a.quantity,u.display_name AS bidder_name
+      FROM auction_history h JOIN auction_listings a ON a.id=h.auction_id LEFT JOIN users u ON u.id=h.bidder_id ORDER BY h.id DESC LIMIT 50`)).rows;
+    let access={chairman:null,officers:[],isChairman:false,isManager:false,isAdmin:false,pendingRequestId:null};
+    let chairmanMembers=[];
+    if(req.session?.user_id){
+      access=await getAuctionAccess(req.session.user_id);
+      access.isAdmin=isAuctionAdmin(req);
+      if(access.isAdmin){
+        chairmanMembers=(await query(`SELECT id,username,display_name FROM users ORDER BY display_name ASC, id ASC LIMIT 1000`)).rows;
+      }
+    }
+    res.json({rows:rows.map(x=>({...x,id:Number(x.id),itemId:Number(x.item_id),quantity:Number(x.quantity),startingPrice:Number(x.starting_price),minIncrement:Number(x.min_increment),currentPrice:Number(x.current_price),currentBidderId:x.current_bidder_id==null?null:Number(x.current_bidder_id),endsAt:x.ends_at,createdAt:x.created_at,currentBidderName:x.bidder_name||null,featured:Boolean(x.featured),systemListing:Boolean(x.system_listing),featuredCode:x.featured_code||null,itemIntro:x.item_intro||'',itemHiddenEffect:x.item_hidden_effect||'',itemStatBuff:x.item_stat_buff||'',itemSpecialEffect:x.item_special_effect||'',itemRarity:x.item_rarity||''})),
+      history:history.map(x=>({...x,id:Number(x.id),auctionId:Number(x.auction_id),bidderId:x.bidder_id==null?null:Number(x.bidder_id),amount:Number(x.amount),bidderName:x.bidder_name||null})),access,members:chairmanMembers});
+  }catch(e){console.error('auction load:',e);res.status(500).json({error:'Không thể mở Đấu Giá Hội.'});}
+});
+
+app.get('/api/auction/access',auth,async(req,res)=>{
+  try{await ensureAuctionSchema();const access=await getAuctionAccess(req.session.user_id);access.isAdmin=isAuctionAdmin(req);res.json({ok:true,...access});}
+  catch(e){res.status(500).json({error:'Không thể tải quyền Đấu Giá Hội.'});}
+});
+
+app.post('/api/auction/chairman',auth,async(req,res)=>{
+  if(!isAuctionAdmin(req))return res.status(403).json({error:'Chỉ môn nhân thienha_666 được bãi nhiệm/bổ nhiệm Hội Trưởng.'});
+  await ensureAuctionSchema();
+  const action=String(req.body?.action||'').trim().toLowerCase();
+  try{
+    if(action==='dismiss'){
+      const current=await dismissAuctionChairman();
+      return res.json({ok:true,action:'dismiss',message:current?`Đã bãi nhiệm Hội Trưởng @${current.username}.`:'Hiện không có Hội Trưởng để bãi nhiệm.'});
+    }
+    if(action==='appoint'){
+      let userId=Math.floor(Number(req.body?.userId)||0);
+      const username=String(req.body?.username||'').trim().toLowerCase();
+      if(!userId && username){
+        const found=(await query(`SELECT id FROM users WHERE LOWER(username)=LOWER($1) LIMIT 1`,[username])).rows[0];
+        userId=found?Number(found.id):0;
+      }
+      if(!userId)return res.status(400).json({error:'Vui lòng chọn đúng môn nhân cần bổ nhiệm.'});
+      const target=await appointAuctionChairmanByUserId(userId,req.session.user_id);
+      return res.json({ok:true,action:'appoint',message:`Đã bổ nhiệm chính xác @${target.username} (${target.display_name}) làm Hội Trưởng Đấu Giá Hội.`});
+    }
+    const target=(await query(`SELECT id FROM users WHERE LOWER(username)=LOWER('cuu_vi_ho') LIMIT 1`)).rows[0]||null;
+    if(!target)throw Object.assign(new Error('Không tìm thấy môn nhân @cuu_vi_ho trong Database.'),{statusCode:404});
+    const appointed=await appointAuctionChairmanByUserId(Number(target.id),req.session.user_id);
+    res.json({ok:true,action:'appoint',message:`Đã bổ nhiệm chính xác @${appointed.username} (${appointed.display_name}) làm Hội Trưởng Đấu Giá Hội.`});
+  }catch(e){res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể thay đổi Hội Trưởng.'});}
+});
+
+app.post('/api/auction/permission-request',auth,async(req,res)=>{
+  await ensureAuctionSchema();
+  if(isAuctionAdmin(req))return res.status(400).json({error:'thienha_666 đã có toàn quyền quản lý Đấu Giá Hội.'});
+  const access=await getAuctionAccess(req.session.user_id);
+  if(access.isChairman||access.isManager)return res.status(400).json({error:'Bạn đã có quyền mở phiên đấu giá.'});
+  if(access.pendingRequestId)return res.status(409).json({error:'Bạn đã gửi một đơn xin cấp phép và đang chờ thienha_666 xét duyệt.'});
+  try{const r=await query(`INSERT INTO auction_permission_requests(requester_id,status) VALUES($1,'pending') RETURNING id`,[req.session.user_id]);res.status(201).json({ok:true,id:Number(r.rows[0].id),message:'Đã gửi đơn xin cấp phép mở phiên cho thienha_666.'});}
+  catch(e){res.status(500).json({error:'Không thể gửi đơn xin cấp phép.'});}
+});
+
+app.get('/api/auction/permission-requests',auth,async(req,res)=>{
+  if(!isAuctionAdmin(req))return res.status(403).json({error:'Chỉ thienha_666 được xem đơn xin cấp phép.'});
+  try{await ensureAuctionSchema();const rows=(await query(`SELECT r.id,r.requester_id,r.status,r.requested_at,u.username,u.display_name
+    FROM auction_permission_requests r JOIN users u ON u.id=r.requester_id WHERE r.status='pending' ORDER BY r.requested_at ASC LIMIT 100`)).rows;const members=(await query(`SELECT u.id,u.username,u.display_name FROM users u ORDER BY u.display_name,u.id LIMIT 500`)).rows;res.json({requests:rows.map(x=>({...x,id:Number(x.id),requesterId:Number(x.requester_id)})),members});}
+  catch(e){res.status(500).json({error:'Không thể tải đơn xin cấp phép.'});}
+});
+
+app.post('/api/auction/permission-review',auth,async(req,res)=>{
+  if(!isAuctionAdmin(req))return res.status(403).json({error:'Chỉ thienha_666 được xét duyệt quyền mở phiên.'});
+  const requestId=Math.floor(Number(req.body?.requestId)||0);const action=String(req.body?.action||'').toLowerCase();
+  if(!requestId||!['approve','reject'].includes(action))return res.status(400).json({error:'Yêu cầu xét duyệt không hợp lệ.'});
+  await ensureAuctionSchema();const client=await dbConnect();
+  try{await client.query('BEGIN');const r=(await client.query(`SELECT * FROM auction_permission_requests WHERE id=$1 FOR UPDATE`,[requestId])).rows[0];if(!r)throw Object.assign(new Error('Đơn xin cấp phép không tồn tại.'),{statusCode:404});if(r.status!=='pending')throw Object.assign(new Error('Đơn này đã được xử lý.'),{statusCode:409});
+    if(action==='approve')await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'manager',$2,NOW()) ON CONFLICT(user_id) DO UPDATE SET role=CASE WHEN auction_officers.role='chairman' THEN auction_officers.role ELSE 'manager' END,appointed_by=EXCLUDED.appointed_by,appointed_at=NOW()`,[r.requester_id,req.session.user_id]);
+    await client.query(`UPDATE auction_permission_requests SET status=$2,reviewed_at=NOW(),reviewed_by=$3 WHERE id=$1`,[requestId,action==='approve'?'approved':'rejected',req.session.user_id]);await client.query('COMMIT');res.json({ok:true,message:action==='approve'?'Đã cấp phép mở phiên đấu giá cho môn nhân.':'Đã từ chối đơn xin cấp phép.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể xử lý đơn xin cấp phép.'});}finally{client.release();}
+});
+
+app.post('/api/auction/permission-revoke',auth,async(req,res)=>{
+  if(!isAuctionAdmin(req))return res.status(403).json({error:'Chỉ thienha_666 được thu hồi quyền mở phiên.'});
+  const userId=Math.floor(Number(req.body?.userId)||0);if(!userId)return res.status(400).json({error:'Môn nhân không hợp lệ.'});
+  await ensureAuctionSchema();const client=await dbConnect();
+  try{await client.query('BEGIN');const role=(await client.query(`SELECT role FROM auction_officers WHERE user_id=$1 FOR UPDATE`,[userId])).rows[0];if(!role)throw Object.assign(new Error('Môn nhân này chưa có quyền mở phiên.'),{statusCode:404});if(role.role==='chairman')throw Object.assign(new Error('Hãy bổ nhiệm Hội Trưởng mới trước khi thu hồi quyền của Hội Trưởng hiện tại.'),{statusCode:400});await client.query(`DELETE FROM auction_officers WHERE user_id=$1`,[userId]);await client.query(`UPDATE auction_permission_requests SET status='revoked',reviewed_at=NOW(),reviewed_by=$2 WHERE requester_id=$1 AND status='approved'`,[userId,req.session.user_id]);await client.query('COMMIT');res.json({ok:true,message:'Đã thu hồi quyền mở phiên của môn nhân.'});}
+  catch(e){try{await client.query('ROLLBACK')}catch{};res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể thu hồi quyền.'});}finally{client.release();}
+});
+
+app.get('/api/auction/admin/items',auth,async(req,res)=>{
+  if(!(await canOpenAuction(req)))return res.status(403).json({error:'Bạn chưa được cấp quyền mở phiên Đấu Giá Hội.'});
+  try{await ensureAuctionSchema();const rows=(await query(`SELECT i.item_id,i.quantity,t.name,t.category,t.description,t.avatar FROM inventory i JOIN treasure_items t ON t.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 AND COALESCE(t.auction_locked,FALSE)=FALSE ORDER BY t.name`,[req.session.user_id])).rows;res.json({rows:rows.map(x=>({itemId:Number(x.item_id),quantity:Number(x.quantity),name:x.name,category:x.category,description:x.description,avatar:x.avatar||''}))});}
+  catch(e){res.status(500).json({error:'Không thể tải kho vật phẩm đấu giá.'});}
+});
+
+app.post('/api/auction',auth,async(req,res)=>{
+  if(!(await canOpenAuction(req)))return res.status(403).json({error:'Bạn chưa được cấp phép mở phiên Đấu Giá Hội. Hãy xin thienha_666 cấp quyền.'});
+  await ensureAuctionSchema();
+  const itemId=Math.floor(Number(req.body?.itemId)||0),quantity=Math.floor(Number(req.body?.quantity)||0),durationHours=Number(req.body?.durationHours),startingPrice=Math.floor(Number(req.body?.startingPrice)||0),minIncrement=Math.floor(Number(req.body?.minIncrement)||0);
+  if(!itemId||quantity<1||quantity>100000)return res.status(400).json({error:'Số lượng vật phẩm không hợp lệ.'});
+  if(!Number.isFinite(durationHours)||durationHours<1||durationHours>24)return res.status(400).json({error:'Thời gian đấu giá phải từ 1 đến 24 giờ.'});
+  if(startingPrice<1||minIncrement<1)return res.status(400).json({error:'Giá khởi điểm và bước giá phải lớn hơn 0.'});
+  const client=await dbConnect();
+  try{await client.query('BEGIN');const inv=(await client.query(`SELECT i.quantity,t.name,t.avatar,t.auction_locked FROM inventory i JOIN treasure_items t ON t.id=i.item_id WHERE i.user_id=$1 AND i.item_id=$2 FOR UPDATE`,[req.session.user_id,itemId])).rows[0];if(!inv||Number(inv.quantity)<quantity)throw Object.assign(new Error('Kho không đủ số lượng vật phẩm để niêm yết.'),{statusCode:400});if(inv.auction_locked)throw Object.assign(new Error('Đây là Đế Thú độc bản của Đấu Giá Hội và không thể tự niêm yết lại.'),{statusCode:400});
+    await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[req.session.user_id,itemId,quantity]);
+    const r=(await client.query(`INSERT INTO auction_listings(seller_id,item_id,item_name,item_avatar,quantity,starting_price,min_increment,current_price,starts_at,ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,0,NOW(),NOW()+($8 * INTERVAL '1 hour')) RETURNING id,ends_at`,[req.session.user_id,itemId,inv.name,inv.avatar||'',quantity,startingPrice,minIncrement,durationHours])).rows[0];
+    await client.query(`INSERT INTO auction_history(auction_id,event,amount,note) VALUES($1,'created',0,$2)`,[r.id,`Niêm yết ${quantity} × ${inv.name}; khởi điểm ${startingPrice.toLocaleString('vi-VN')} Linh Thạch.`]);await client.query('COMMIT');res.status(201).json({ok:true,id:Number(r.id),endsAt:r.ends_at,message:'Đã mở phiên Đấu Giá Hội.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể mở phiên đấu giá.'});}finally{client.release();}
+});
+
+app.post('/api/auction/:id/bid',auth,async(req,res)=>{
+  await ensureAuctionSchema();const auctionId=Math.floor(Number(req.params.id)||0),amount=Math.floor(Number(req.body?.amount)||0);if(!auctionId||amount<1)return res.status(400).json({error:'Mức ra giá không hợp lệ.'});
+  const client=await dbConnect();
+  try{await client.query('BEGIN');const a=(await client.query(`SELECT * FROM auction_listings WHERE id=$1 FOR UPDATE`,[auctionId])).rows[0];if(!a)throw Object.assign(new Error('Phiên đấu giá không tồn tại.'),{statusCode:404});if(a.status!=='active')throw Object.assign(new Error('Phiên đấu giá đã kết thúc.'),{statusCode:409});if(new Date(a.ends_at)<=new Date()){const settled=await settleAuctionTx(client,auctionId);if(settled?.status==='awaiting_chairman'){await client.query('ROLLBACK');return res.status(409).json({error:'Phiên đã hết giờ nhưng đang chờ Hội Trưởng được bổ nhiệm để hoàn tất thanh toán.'});}await client.query('COMMIT');return res.status(409).json({error:'Phiên đấu giá vừa kết thúc. Hệ thống đã chốt kết quả.'});}
+    const current=Number(a.current_price)||0,minimum=Math.max(Number(a.starting_price),current+Number(a.min_increment));if(amount<minimum)throw Object.assign(new Error(`Giá thấp nhất hiện tại là ${minimum.toLocaleString('vi-VN')} Linh Thạch.`),{statusCode:400});
+    const me=(await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[req.session.user_id])).rows[0];if(!me)throw Object.assign(new Error('Không tìm thấy hồ sơ môn nhân.'),{statusCode:404});const oldBidder=a.current_bidder_id?Number(a.current_bidder_id):null,oldAmount=oldBidder?current:0,available=Number(me.spirit_stones)||0,effectiveAvailable=available+(oldBidder===Number(req.session.user_id)?oldAmount:0);if(effectiveAvailable<amount)throw Object.assign(new Error(`Không đủ Linh Thạch. Cần ${amount.toLocaleString('vi-VN')} Linh Thạch khả dụng.`),{statusCode:400});
+    if(oldBidder===Number(req.session.user_id)){await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,amount-oldAmount]);await client.query(`UPDATE auction_bids SET status='outbid' WHERE auction_id=$1 AND bidder_id=$2 AND status='active'`,[auctionId,req.session.user_id]);}
+    else{await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[req.session.user_id,amount]);if(oldBidder){await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[oldBidder,oldAmount]);await client.query(`UPDATE auction_bids SET status='outbid' WHERE auction_id=$1 AND status='active'`,[auctionId]);}}
+    const bid=(await client.query(`INSERT INTO auction_bids(auction_id,bidder_id,amount,status) VALUES($1,$2,$3,'active') RETURNING id`,[auctionId,req.session.user_id,amount])).rows[0];const inLast10=(new Date(a.ends_at).getTime()-Date.now())<=10000,newEnd=inLast10?new Date(Math.max(new Date(a.ends_at).getTime(),Date.now())+10000):new Date(a.ends_at);await client.query(`UPDATE auction_listings SET current_price=$2,current_bidder_id=$3,ends_at=$4 WHERE id=$1`,[auctionId,amount,req.session.user_id,newEnd]);await client.query(`INSERT INTO auction_history(auction_id,bidder_id,event,amount,note) VALUES($1,$2,'bid',$3,$4)`,[auctionId,req.session.user_id,amount,inLast10?'Ra giá trong 10 giây cuối; thời gian được cộng thêm 10 giây.':'Ra giá hợp lệ.']);await client.query('COMMIT');res.json({ok:true,bidId:Number(bid.id),currentPrice:amount,endsAt:newEnd,extended:inLast10,message:'Ra giá thành công.'});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể ra giá. Vui lòng thử lại.'});}finally{client.release();}
+});
+
+app.get('/api/auction/history',async(req,res)=>{
+  try{
+    await ensureAuctionSchema();
+    const rows=(await query(`SELECT h.id,h.auction_id,h.event,h.amount,h.note,h.created_at,
+      a.item_name,a.quantity,u.display_name AS bidder_name
+      FROM auction_history h JOIN auction_listings a ON a.id=h.auction_id
+      LEFT JOIN users u ON u.id=h.bidder_id
+      ORDER BY h.id DESC LIMIT 100`)).rows;
+    res.json({rows:rows.map(x=>({...x,id:Number(x.id),auctionId:Number(x.auction_id),amount:Number(x.amount),bidderName:x.bidder_name||null}))});
+  }catch(e){res.status(500).json({error:'Không thể tải Lịch Sử Đấu Giá.'});}
+});
+
+app.get('/api/wealth',async(req,res)=>{
+  try{
+    await ensureRuntimeSchema();
+    const r=await query(`SELECT u.id,u.display_name,p.title,p.rank,p.spirit_stones,p.wealth_public,p.spirit_power,p.avatar
+      FROM users u JOIN profiles p ON p.user_id=u.id
+      ORDER BY p.spirit_stones DESC,u.id ASC LIMIT 100`);
+    res.json({rows:r.rows.map((x,i)=>({id:x.id,rankNo:i+1,display_name:x.display_name,title:x.title,rank:x.rank,spirit_power:Number(x.spirit_power)||0,avatar:x.avatar,wealthPublic:Boolean(x.wealth_public),spiritStones:x.wealth_public?Number(x.spirit_stones)||0:null}))});
+  }catch(e){res.status(500).json({error:'Không thể tải Bảng Tài Phú.'});}
+});
+
+app.patch('/api/wealth/privacy',auth,async(req,res)=>{
+  try{await ensureRuntimeSchema();const enabled=Boolean(req.body?.public);const r=await query('UPDATE profiles SET wealth_public=$2,updated_at=NOW() WHERE user_id=$1 RETURNING wealth_public',[req.session.user_id,enabled]);res.json({ok:true,wealthPublic:Boolean(r.rows[0]?.wealth_public),message:enabled?'Đã công khai số lượng linh thạch trên Bảng Tài Phú.':'Đã ẩn số lượng linh thạch, người khác sẽ thấy ??? Linh thạch.'});}
+  catch(e){res.status(500).json({error:'Không thể cập nhật quyền hiển thị Tài Phú.'});}
+});
+
+app.get('/api/achievements',auth,async(req,res)=>{
+  try { const r=await query('SELECT title,description,points,created_at FROM achievements WHERE user_id=$1 ORDER BY points DESC,id',[req.session.user_id]); res.json({rows:r.rows}); }
+  catch(e){res.status(500).json({error:'Không thể tải thành tích.'});}

@@ -2239,3 +2239,12 @@ body.focus-mode.auction-focus #auction.focus-active .auction-officer-list{
 @media(max-width:900px){.auction-featured-card{grid-template-columns:1fr}.auction-featured-media{min-height:280px}.auction-effect-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.auction-featured-card{padding:12px}.auction-featured-media{min-height:235px}.auction-featured-img{object-position:center}.auction-featured-seal{right:12px;top:12px;width:38px;height:38px;font-size:1.15rem}.auction-bid-featured{min-width:0}.auction-featured-intro p{font-size:.78rem}}
 @media(prefers-reduced-motion:reduce){.auction-rainbow,.auction-red-aura,.auction-featured-card::before{animation:none}}
+
+/* v3.8.07 · Đế Thú — tên vàng đế uy + quản lý ảnh dành riêng thienha_666 */
+.auction-featured-card .auction-card-title h3{font-family:'Noto Serif SC',serif;font-weight:900;letter-spacing:.045em;color:#ffd66b;text-shadow:0 0 10px rgba(255,194,70,.24),0 1px 0 rgba(70,25,0,.7);font-size:clamp(1.25rem,2.2vw,1.7rem)}
+.auction-de-thu-image-admin{margin-top:12px;padding:12px;border:1px solid rgba(220,170,70,.24);border-radius:13px;background:rgba(0,0,0,.16);display:grid;gap:9px}
+.auction-de-thu-image-admin>b{display:block;color:#f5d47b;font-family:'Noto Serif SC',serif}
+.auction-de-thu-image-admin small{display:block;color:var(--muted);font-size:.68rem;line-height:1.5;margin-top:3px}
+.auction-image-admin-actions{display:flex;gap:8px;flex-wrap:wrap}
+.auction-image-admin-actions .btn{flex:1 1 150px}
+@media(max-width:600px){.auction-image-admin-actions{display:grid;grid-template-columns:1fr}.auction-image-admin-actions .btn{width:100%}}

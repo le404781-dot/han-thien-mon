@@ -5830,6 +5830,7 @@ async function ensureAuctionSchemaImpl(){
       value TEXT NOT NULL DEFAULT '',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    INSERT INTO auction_settings(key,value,updated_at) VALUES('de_thu_avatar_version','3.8.07',NOW()) ON CONFLICT(key) DO NOTHING;
     CREATE TABLE IF NOT EXISTS auction_officers (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       role TEXT NOT NULL CHECK(role IN ('chairman','manager')),
@@ -5871,16 +5872,20 @@ async function ensureAuctionSchemaImpl(){
     const item=(await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm,reward_grade,power_bonus,ability,avatar,auction_locked,auction_unique_code)
       VALUES($1,'Đế Thú · Tiên Thú Đế Cảnh',$2,0,0,0,'Tiên Thú Đế Cảnh',5000000,$3,$4,TRUE,$5)
       ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,reward_grade=EXCLUDED.reward_grade,power_bonus=EXCLUDED.power_bonus,ability=EXCLUDED.ability,avatar=EXCLUDED.avatar,auction_locked=TRUE,auction_unique_code=EXCLUDED.auction_unique_code
-      RETURNING id`,['Lục Túc Phi Vũ Xà',intro,stats,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06','de_thu_luc_tuc_phi_vu_xa'])).rows[0];
+      RETURNING id`,['Lục Túc Phi Vũ Xà',intro,stats,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.07','de_thu_luc_tuc_phi_vu_xa'])).rows[0];
 
-    // v3.8.06: Luôn đồng bộ ảnh chuẩn cho cả phiên đã tồn tại; tránh DB cũ giữ avatar rỗng/sai.
-    await query(`UPDATE treasure_items SET avatar=$2,auction_locked=TRUE,auction_unique_code=$3 WHERE id=$1`,[item.id,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06','de_thu_luc_tuc_phi_vu_xa']);
-    await query(`UPDATE auction_listings SET item_avatar=$2,item_name='Lục Túc Phi Vũ Xà',item_intro=$3,item_hidden_effect=$4,item_stat_buff=$5,item_special_effect=$6,item_rarity='Tiên Thú Đế Cảnh',featured=TRUE,system_listing=TRUE WHERE featured_code=$1 AND status='active'`,['de_thu_luc_tuc_phi_vu_xa','/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06',intro,hidden,stats,special]);
+    // v3.8.07: Ảnh mặc định chính xác; nếu thienha_666 đã thay ảnh thì giữ ảnh tùy chỉnh trong Database.
+    const avatarSetting=(await query(`SELECT updated_at FROM auction_settings WHERE key='de_thu_avatar_data' LIMIT 1`)).rows[0]||null;
+    const avatarVersion=(await query(`SELECT value FROM auction_settings WHERE key='de_thu_avatar_version' LIMIT 1`)).rows[0]?.value||'3.8.07';
+    // Không nhúng base64 vào mọi bản ghi vật phẩm; chỉ lưu ảnh một lần trong auction_settings và dùng URL chung.
+    const canonicalAvatar=avatarSetting?`/api/auction/de-thu-image?v=${encodeURIComponent(avatarVersion)}`:`/assets/images/luc-tuc-phi-vu-xa.jpeg?v=${encodeURIComponent(avatarVersion)}`;
+    await query(`UPDATE treasure_items SET avatar=$2,auction_locked=TRUE,auction_unique_code=$3 WHERE id=$1`,[item.id,canonicalAvatar,'de_thu_luc_tuc_phi_vu_xa']);
+    await query(`UPDATE auction_listings SET item_avatar=$2,item_name='Lục Túc Phi Vũ Xà',item_intro=$3,item_hidden_effect=$4,item_stat_buff=$5,item_special_effect=$6,item_rarity='Tiên Thú Đế Cảnh',featured=TRUE,system_listing=TRUE WHERE featured_code=$1 AND status='active'`,['de_thu_luc_tuc_phi_vu_xa',canonicalAvatar,intro,hidden,stats,special]);
     const exists=(await query(`SELECT id FROM auction_listings WHERE featured_code=$1 LIMIT 1`,['de_thu_luc_tuc_phi_vu_xa'])).rows[0];
     if(!exists){
       await query(`INSERT INTO auction_listings(seller_id,item_id,item_name,item_avatar,item_intro,item_hidden_effect,item_stat_buff,item_special_effect,item_rarity,quantity,starting_price,min_increment,current_price,starts_at,ends_at,status,system_listing,featured,featured_code,chairman_id)
-        VALUES($1,$2,'Lục Túc Phi Vũ Xà','/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.06',$3,$4,$5,$6,'Tiên Thú Đế Cảnh',1,100000000000,20000000000,0,NOW(),NOW()+INTERVAL '24 hours','active',TRUE,TRUE,$7,$1)`,
-        [chairman.id,item.id,intro,hidden,stats,special,'de_thu_luc_tuc_phi_vu_xa']);
+        VALUES($1,$2,'Lục Túc Phi Vũ Xà',$3,$4,$5,$6,$7,'Tiên Thú Đế Cảnh',1,100000000000,20000000000,0,NOW(),NOW()+INTERVAL '24 hours','active',TRUE,TRUE,$8,$1)`,
+        [chairman.id,item.id,canonicalAvatar,intro,hidden,stats,special,'de_thu_luc_tuc_phi_vu_xa']);
       console.log('[AUCTION] Đã tạo phiên đầu tiên: Lục Túc Phi Vũ Xà · khởi điểm 100.000.000.000 · bước giá 20.000.000.000.');
     }
   }else{
@@ -5914,11 +5919,17 @@ async function appointAuctionChairmanByUserId(userId,appointedBy){
   try{
     await client.query('BEGIN');
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:chairman']);
-    const target=(await client.query(`SELECT id,display_name,username FROM users WHERE id=$1 LIMIT 1 FOR UPDATE`,[userId])).rows[0]||null;
-    if(!target)throw Object.assign(new Error('Không tìm thấy môn nhân được chọn trong Database.'),{statusCode:404});
-    await client.query(`DELETE FROM auction_officers WHERE role='chairman' AND user_id<>$1`,[target.id]);
-    await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'chairman',$2,NOW()) ON CONFLICT(user_id) DO UPDATE SET role='chairman',appointed_by=EXCLUDED.appointed_by,appointed_at=NOW()`,[target.id,appointedBy]);
-    await client.query('COMMIT'); return target;
+    const target=(await client.query(`SELECT u.id,u.display_name,u.username
+      FROM users u JOIN profiles p ON p.user_id=u.id
+      WHERE u.id=$1 AND COALESCE(p.sect,'')='Hàn Thiên Môn' LIMIT 1 FOR UPDATE`,[userId])).rows[0]||null;
+    if(!target)throw Object.assign(new Error('Không tìm thấy môn nhân Hàn Thiên Môn được chọn trong Database.'),{statusCode:404});
+    // Xóa toàn bộ ghế Hội Trưởng trước, rồi gán đúng người được chọn.
+    // Làm theo thứ tự này để không bị unique partial index chặn khi người được chọn đang là manager.
+    await client.query(`DELETE FROM auction_officers WHERE role='chairman'`);
+    await client.query(`DELETE FROM auction_officers WHERE user_id=$1`,[target.id]);
+    await client.query(`INSERT INTO auction_officers(user_id,role,appointed_by,appointed_at) VALUES($1,'chairman',$2,NOW())`,[target.id,appointedBy]);
+    await client.query('COMMIT');
+    return target;
   }catch(e){try{await client.query('ROLLBACK')}catch{};throw e;}finally{client.release();}
 }
 
@@ -6037,7 +6048,8 @@ app.get('/api/auction',async(req,res)=>{
         chairmanMembers=(await query(`SELECT id,username,display_name FROM users ORDER BY display_name ASC, id ASC LIMIT 1000`)).rows;
       }
     }
-    res.json({rows:rows.map(x=>({...x,id:Number(x.id),itemId:Number(x.item_id),quantity:Number(x.quantity),startingPrice:Number(x.starting_price),minIncrement:Number(x.min_increment),currentPrice:Number(x.current_price),currentBidderId:x.current_bidder_id==null?null:Number(x.current_bidder_id),endsAt:x.ends_at,createdAt:x.created_at,currentBidderName:x.bidder_name||null,featured:Boolean(x.featured),systemListing:Boolean(x.system_listing),featuredCode:x.featured_code||null,itemIntro:x.item_intro||'',itemHiddenEffect:x.item_hidden_effect||'',itemStatBuff:x.item_stat_buff||'',itemSpecialEffect:x.item_special_effect||'',itemRarity:x.item_rarity||''})),
+    const imageVersion=(await query(`SELECT value FROM auction_settings WHERE key='de_thu_avatar_version' LIMIT 1`)).rows[0]?.value||'3.8.07';
+    res.json({rows:rows.map(x=>({...x,id:Number(x.id),itemId:Number(x.item_id),quantity:Number(x.quantity),startingPrice:Number(x.starting_price),minIncrement:Number(x.min_increment),currentPrice:Number(x.current_price),currentBidderId:x.current_bidder_id==null?null:Number(x.current_bidder_id),endsAt:x.ends_at,createdAt:x.created_at,currentBidderName:x.bidder_name||null,featured:Boolean(x.featured),systemListing:Boolean(x.system_listing),featuredCode:x.featured_code||null,itemAvatar:x.featured?`/api/auction/de-thu-image?v=${encodeURIComponent(imageVersion)}`:(x.item_avatar||''),itemIntro:x.item_intro||'',itemHiddenEffect:x.item_hidden_effect||'',itemStatBuff:x.item_stat_buff||'',itemSpecialEffect:x.item_special_effect||'',itemRarity:x.item_rarity||''})),
       history:history.map(x=>({...x,id:Number(x.id),auctionId:Number(x.auction_id),bidderId:x.bidder_id==null?null:Number(x.bidder_id),amount:Number(x.amount),bidderName:x.bidder_name||null})),access,members:chairmanMembers});
   }catch(e){console.error('auction load:',e);res.status(500).json({error:'Không thể mở Đấu Giá Hội.'});}
 });
@@ -6072,6 +6084,56 @@ app.post('/api/auction/chairman',auth,async(req,res)=>{
     const appointed=await appointAuctionChairmanByUserId(Number(target.id),req.session.user_id);
     res.json({ok:true,action:'appoint',message:`Đã bổ nhiệm chính xác @${appointed.username} (${appointed.display_name}) làm Hội Trưởng Đấu Giá Hội.`});
   }catch(e){res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể thay đổi Hội Trưởng.'});}
+});
+
+// v3.8.07 · Ảnh mặc định Đế Thú — chỉ thienha_666 được thay, mọi môn nhân dùng chung ảnh.
+app.get('/api/auction/de-thu-image',async(req,res)=>{
+  try{
+    await ensureAuctionSchema();
+    const row=(await query(`SELECT value FROM auction_settings WHERE key='de_thu_avatar_data' LIMIT 1`)).rows[0];
+    const value=String(row?.value||'').trim();
+    if(/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(value)){
+      const m=value.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,(.*)$/i);
+      const body=Buffer.from(m[2],'base64');
+      if(!body.length)return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.07');
+      res.set('Content-Type',m[1].toLowerCase().replace('jpg','jpeg'));
+      res.set('Cache-Control','public, max-age=31536000, immutable');
+      return res.send(body);
+    }
+    return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.07');
+  }catch(e){return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.07');}
+});
+
+app.post('/api/auction/de-thu-image',auth,async(req,res)=>{
+  if(!isAuctionAdmin(req))return res.status(403).json({error:'Chỉ môn nhân thienha_666 được thay ảnh mặc định Đế Thú.'});
+  try{
+    await ensureAuctionSchema();
+    const data=String(req.body?.dataUrl||'').trim();
+    const reset=Boolean(req.body?.reset);
+    const client=await dbConnect();
+    try{
+      await client.query('BEGIN');
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:auction:de-thu-image']);
+      if(reset){
+        await client.query(`DELETE FROM auction_settings WHERE key='de_thu_avatar_data'`);
+      }else{
+        if(!/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(data))throw Object.assign(new Error('Ảnh không hợp lệ. Chỉ hỗ trợ JPG, PNG hoặc WebP.'),{statusCode:400});
+        if(data.length>5*1024*1024)throw Object.assign(new Error('Ảnh quá lớn. Vui lòng chọn ảnh nhỏ hơn 5 MB.'),{statusCode:413});
+        const m=data.match(/^data:image\/(jpeg|jpg|png|webp);base64,(.*)$/i);
+        const bytes=Buffer.from(m[2],'base64');
+        if(bytes.length<100||bytes.length>4*1024*1024)throw Object.assign(new Error('Kích thước ảnh sau mã hóa không hợp lệ.'),{statusCode:413});
+        await client.query(`INSERT INTO auction_settings(key,value,updated_at) VALUES('de_thu_avatar_data',$1,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[data]);
+      }
+      const version=String(Date.now());
+      await client.query(`INSERT INTO auction_settings(key,value,updated_at) VALUES('de_thu_avatar_version',$1,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[version]);
+      const avatar=reset?`/assets/images/luc-tuc-phi-vu-xa.jpeg?v=${version}`:`/api/auction/de-thu-image?v=${version}`;
+      const item=(await client.query(`SELECT id FROM treasure_items WHERE auction_unique_code='de_thu_luc_tuc_phi_vu_xa' LIMIT 1`)).rows[0];
+      if(item)await client.query(`UPDATE treasure_items SET avatar=$2 WHERE id=$1`,[item.id,avatar]);
+      await client.query(`UPDATE auction_listings SET item_avatar=$1 WHERE featured_code='de_thu_luc_tuc_phi_vu_xa' AND status='active'`,[avatar]);
+      await client.query('COMMIT');
+      res.json({ok:true,reset,avatar,message:reset?'Đã khôi phục chính xác ảnh Đế Thú mặc định.':'Đã thay ảnh mặc định Đế Thú. Toàn bộ môn nhân sẽ thấy ảnh mới.'});
+    }catch(e){try{await client.query('ROLLBACK')}catch{};return res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể thay ảnh Đế Thú.'});}finally{client.release();}
+  }catch(e){return res.status(500).json({error:'Không thể thay ảnh Đế Thú.'});}
 });
 
 app.post('/api/auction/permission-request',auth,async(req,res)=>{

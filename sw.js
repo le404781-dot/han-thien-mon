@@ -1,15 +1,15 @@
-const CACHE_NAME = 'han-thien-mon-3.8.06-auction-chairman';
+const CACHE_NAME = 'han-thien-mon-3.8.07-auction-chairman';
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/style.css?v=3.8.06',
-  '/script.js?v=3.8.06',
-  '/manifest.webmanifest?v=3.8.05',
-  '/icons/icon-192-3-7-74.png?v=3.8.05',
-  '/icons/icon-512-3-7-74.png?v=3.8.05',
-  '/icons/icon-1024-3-7-74.png?v=3.8.05',
-  '/icons/apple-touch-icon-3-7-74.png?v=3.8.05',
-  '/icons/favicon-3-7-74.png?v=3.8.05'
+  '/style.css?v=3.8.07',
+  '/script.js?v=3.8.07',
+  '/manifest.webmanifest?v=3.8.07',
+  '/icons/icon-192-3-7-74.png?v=3.8.07',
+  '/icons/icon-512-3-7-74.png?v=3.8.07',
+  '/icons/icon-1024-3-7-74.png?v=3.8.07',
+  '/icons/apple-touch-icon-3-7-74.png?v=3.8.07',
+  '/icons/favicon-3-7-74.png?v=3.8.07'
 ];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(APP_SHELL)).then(() => self.skipWaiting()));
