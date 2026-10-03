@@ -2095,12 +2095,12 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
 (function setupFocusNavigation(){
  const focusBar=$('#focusBar'),focusLabel=$('#focusBarLabel'),focusExit=$('#focusExit');
  const labels={
-  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','audio-player':'🔊 Âm Thanh','tavern':'🥂 Tửu Lâu','tien-menh':'🏮 Tiên Mệnh','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','tien-dao':'🌙 Đối thoại Tiên Dao','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','tien-khi-enhance':'⚜️ Cường Hóa','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','auction':'⚔️ Đấu Giá Hội','wealth':'💎 Tài Phú','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
+  'tan-nhan':'✦ Tân Nhân','profile':'☯ Hồ Sơ','disciples':'👑 Sư Đồ','cultivation':'☯ Tu Luyện','codex':'📚 Tàng Thư Các','tien-phap':'🌌 Tiên Pháp','mansion':'🏯 Động Phủ','professions':'🛠 Nghiệp Vụ','quests':'📜 Nhiệm Vụ Đường','challenge':'⚔ Khiêu Chiến','audio-player':'🔊 Âm Thanh','tavern':'🥂 Tửu Lâu','tien-menh':'🏮 Tiên Mệnh','arena-live':'👁 Lôi Đài Trực Chiến','treasure':'💎 Tàng Bảo Các','tien-ban':'🎴 Tiên Bàn','dan-cac':'⚗️ Đan Các','dan-duong':'🧪 Đan Đường','tien-dao':'🌙 Đối thoại Tiên Dao','dan-phap':'⚗️ Đan Pháp','black-market':'🕶️ Chợ Đen','tien-thai':'♻️ Tiên Thải','tien-khi-enhance':'⚜️ Cường Hóa','beast-house':'🐉 Thú Đường','beast-face':'🖼️ Thú Diện','duong-thu':'💗 Dưỡng Thú','beast-arena':'🪶 Thú Trường','linh-phap':'🌿 Linh Pháp','equipment':'⚔ Trang Bị','bicanh':'🌌 Bí Cảnh','sumeru':'◈ Tu Di Giới','market':'🏮 Phường Thị','sect':'☁ Hàn Thiên Ký Sự','sect-posts':'📜 Đăng Bài','chat':'☯ Chat Tổng','mailbox':'📬 Hòm Thư','members':'☯ Môn Nhân','xuatquan':'🟢 Xuất Quan','leaderboard':'🏆 Thành Tích','auction':'🖲️ Đấu Giá Hội','wealth':'💎 Tài Phú','linhcanbang':'🌿 Linh Căn Bảng','linhthubang':'🐉 Linh Thú Bảng','gallery':'◈ Truyền Kỳ','timeline':'☯ Môn Sử'
  };
  const sections=()=>Object.keys(labels).map(id=>document.getElementById(id)).filter(Boolean);
  function exitFocus(push=true){
    if(location.hash==='#tien-dao'||document.getElementById('tien-dao')?.classList.contains('focus-active'))clearTienDaoFocus();
-   document.body.classList.remove('focus-mode','focus-lock','function-only-focus','tien-dao-focus');document.documentElement.classList.remove('focus-lock');
+   document.body.classList.remove('focus-mode','focus-lock','function-only-focus','tien-dao-focus','auction-focus');document.documentElement.classList.remove('focus-lock');
    sections().forEach(s=>s.classList.remove('focus-active'));
    if(push && location.hash && location.hash!=='#home') history.pushState('',document.title,location.pathname+location.search);
    window.scrollTo({top:0,behavior:'smooth'});
@@ -2111,6 +2111,7 @@ window.addEventListener('beforeunload',()=>{const token=getToken();if(token)navi
    document.body.classList.toggle('function-only-focus',compactOnly);
    document.body.classList.add('focus-mode','focus-lock');document.documentElement.classList.add('focus-lock');
    if(id==='tien-dao'){document.body.classList.add('tien-dao-focus');}else{document.body.classList.remove('tien-dao-focus');}
+   if(id==='auction')document.body.classList.add('auction-focus');else document.body.classList.remove('auction-focus');
    sections().forEach(s=>s.classList.toggle('focus-active',s===target));
    if(focusLabel)focusLabel.textContent=labels[id]||target.querySelector('h2')?.textContent||'Chế độ tập trung';
    if(push)history.pushState(null,'','#'+id);

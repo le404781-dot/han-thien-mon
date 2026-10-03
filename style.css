@@ -2195,3 +2195,21 @@ body.focus-mode .tien-dao-section.focus-active .tien-dao-log-main{min-height:0;h
 .auction-request-row small,.auction-officer-row small{display:block;opacity:.62;margin-top:2px}.auction-create-card{margin-top:2px}.auction-main-action{justify-self:start}.auction-permission-card{display:flex;align-items:center;justify-content:space-between;gap:14px}
 @media(max-width:900px){.auction-management-grid{grid-template-columns:1fr 1fr}.auction-admin-head{flex-direction:column}}
 @media(max-width:600px){.auction-management-grid{grid-template-columns:1fr}.auction-admin-head{gap:8px}.auction-role-badge{white-space:normal}.auction-action-row{flex-direction:column;align-items:stretch}.auction-action-row>*{width:100%;flex:1 1 auto}.auction-permission-card{flex-direction:column;align-items:stretch}.auction-main-action{width:100%}.auction-request-row,.auction-officer-row{align-items:stretch;flex-direction:column}.auction-request-row .auction-action-row{flex-direction:row}.auction-request-row .auction-action-row .btn{width:auto}.auction-form-grid{grid-template-columns:1fr}}
+
+/* v3.8.01 · Đấu Giá Hội 🖲️ — khóa vùng, chỉ cuộn trong chức năng */
+html.focus-lock body.auction-focus,
+body.auction-focus{overscroll-behavior:none!important;}
+body.focus-mode.auction-focus #auction.focus-active{
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+}
+body.focus-mode.auction-focus #auction.focus-active .auction-list,
+body.focus-mode.auction-focus #auction.focus-active .auction-request-list,
+body.focus-mode.auction-focus #auction.focus-active .auction-officer-list{
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+@media(max-width:700px){
+  body.focus-mode.auction-focus #auction.focus-active{padding-bottom:calc(80px + env(safe-area-inset-bottom));}
+}
