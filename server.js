@@ -5830,7 +5830,7 @@ async function ensureAuctionSchemaImpl(){
       value TEXT NOT NULL DEFAULT '',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-    INSERT INTO auction_settings(key,value,updated_at) VALUES('de_thu_avatar_version','3.8.07',NOW()) ON CONFLICT(key) DO NOTHING;
+    INSERT INTO auction_settings(key,value,updated_at) VALUES('de_thu_avatar_version','3.8.08',NOW()) ON CONFLICT(key) DO NOTHING;
     CREATE TABLE IF NOT EXISTS auction_officers (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       role TEXT NOT NULL CHECK(role IN ('chairman','manager')),
@@ -5872,11 +5872,11 @@ async function ensureAuctionSchemaImpl(){
     const item=(await query(`INSERT INTO treasure_items(name,category,description,price,spirit_gain,min_realm,reward_grade,power_bonus,ability,avatar,auction_locked,auction_unique_code)
       VALUES($1,'Đế Thú · Tiên Thú Đế Cảnh',$2,0,0,0,'Tiên Thú Đế Cảnh',5000000,$3,$4,TRUE,$5)
       ON CONFLICT(name) DO UPDATE SET category=EXCLUDED.category,description=EXCLUDED.description,reward_grade=EXCLUDED.reward_grade,power_bonus=EXCLUDED.power_bonus,ability=EXCLUDED.ability,avatar=EXCLUDED.avatar,auction_locked=TRUE,auction_unique_code=EXCLUDED.auction_unique_code
-      RETURNING id`,['Lục Túc Phi Vũ Xà',intro,stats,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.07','de_thu_luc_tuc_phi_vu_xa'])).rows[0];
+      RETURNING id`,['Lục Túc Phi Vũ Xà',intro,stats,'/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.08','de_thu_luc_tuc_phi_vu_xa'])).rows[0];
 
-    // v3.8.07: Ảnh mặc định chính xác; nếu thienha_666 đã thay ảnh thì giữ ảnh tùy chỉnh trong Database.
+    // v3.8.08: Ảnh mặc định chính xác; nếu thienha_666 đã thay ảnh thì giữ ảnh tùy chỉnh trong Database.
     const avatarSetting=(await query(`SELECT updated_at FROM auction_settings WHERE key='de_thu_avatar_data' LIMIT 1`)).rows[0]||null;
-    const avatarVersion=(await query(`SELECT value FROM auction_settings WHERE key='de_thu_avatar_version' LIMIT 1`)).rows[0]?.value||'3.8.07';
+    const avatarVersion=(await query(`SELECT value FROM auction_settings WHERE key='de_thu_avatar_version' LIMIT 1`)).rows[0]?.value||'3.8.08';
     // Không nhúng base64 vào mọi bản ghi vật phẩm; chỉ lưu ảnh một lần trong auction_settings và dùng URL chung.
     const canonicalAvatar=avatarSetting?`/api/auction/de-thu-image?v=${encodeURIComponent(avatarVersion)}`:`/assets/images/luc-tuc-phi-vu-xa.jpeg?v=${encodeURIComponent(avatarVersion)}`;
     await query(`UPDATE treasure_items SET avatar=$2,auction_locked=TRUE,auction_unique_code=$3 WHERE id=$1`,[item.id,canonicalAvatar,'de_thu_luc_tuc_phi_vu_xa']);
@@ -6048,7 +6048,7 @@ app.get('/api/auction',async(req,res)=>{
         chairmanMembers=(await query(`SELECT id,username,display_name FROM users ORDER BY display_name ASC, id ASC LIMIT 1000`)).rows;
       }
     }
-    const imageVersion=(await query(`SELECT value FROM auction_settings WHERE key='de_thu_avatar_version' LIMIT 1`)).rows[0]?.value||'3.8.07';
+    const imageVersion=(await query(`SELECT value FROM auction_settings WHERE key='de_thu_avatar_version' LIMIT 1`)).rows[0]?.value||'3.8.08';
     res.json({rows:rows.map(x=>({...x,id:Number(x.id),itemId:Number(x.item_id),quantity:Number(x.quantity),startingPrice:Number(x.starting_price),minIncrement:Number(x.min_increment),currentPrice:Number(x.current_price),currentBidderId:x.current_bidder_id==null?null:Number(x.current_bidder_id),endsAt:x.ends_at,createdAt:x.created_at,currentBidderName:x.bidder_name||null,featured:Boolean(x.featured),systemListing:Boolean(x.system_listing),featuredCode:x.featured_code||null,itemAvatar:x.featured?`/api/auction/de-thu-image?v=${encodeURIComponent(imageVersion)}`:(x.item_avatar||''),itemIntro:x.item_intro||'',itemHiddenEffect:x.item_hidden_effect||'',itemStatBuff:x.item_stat_buff||'',itemSpecialEffect:x.item_special_effect||'',itemRarity:x.item_rarity||''})),
       history:history.map(x=>({...x,id:Number(x.id),auctionId:Number(x.auction_id),bidderId:x.bidder_id==null?null:Number(x.bidder_id),amount:Number(x.amount),bidderName:x.bidder_name||null})),access,members:chairmanMembers});
   }catch(e){console.error('auction load:',e);res.status(500).json({error:'Không thể mở Đấu Giá Hội.'});}
@@ -6086,7 +6086,7 @@ app.post('/api/auction/chairman',auth,async(req,res)=>{
   }catch(e){res.status(e.statusCode||500).json({error:e.statusCode?e.message:'Không thể thay đổi Hội Trưởng.'});}
 });
 
-// v3.8.07 · Ảnh mặc định Đế Thú — chỉ thienha_666 được thay, mọi môn nhân dùng chung ảnh.
+// v3.8.08 · Ảnh mặc định Đế Thú — chỉ thienha_666 được thay, mọi môn nhân dùng chung ảnh.
 app.get('/api/auction/de-thu-image',async(req,res)=>{
   try{
     await ensureAuctionSchema();
@@ -6095,13 +6095,13 @@ app.get('/api/auction/de-thu-image',async(req,res)=>{
     if(/^data:image\/(jpeg|jpg|png|webp);base64,/i.test(value)){
       const m=value.match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,(.*)$/i);
       const body=Buffer.from(m[2],'base64');
-      if(!body.length)return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.07');
+      if(!body.length)return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.08');
       res.set('Content-Type',m[1].toLowerCase().replace('jpg','jpeg'));
       res.set('Cache-Control','public, max-age=31536000, immutable');
       return res.send(body);
     }
-    return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.07');
-  }catch(e){return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.07');}
+    return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.08');
+  }catch(e){return res.redirect('/assets/images/luc-tuc-phi-vu-xa.jpeg?v=3.8.08');}
 });
 
 app.post('/api/auction/de-thu-image',auth,async(req,res)=>{
