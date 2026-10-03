@@ -486,6 +486,134 @@ async function ensureBicanhSchemaImpl(){
 
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ALTER TABLE inventory ADD COLUMN IF NOT EXISTS avatar TEXT;
+
+    -- v3.8.13: Bí Cảnh cá nhân do môn nhân chế tạo.
+    CREATE TABLE IF NOT EXISTS personal_bicanh (
+      id BIGSERIAL PRIMARY KEY,
+      owner_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      image TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      min_realm_index INTEGER NOT NULL DEFAULT 0,
+      max_realm_index INTEGER NOT NULL DEFAULT 0,
+      entry_fee_stones BIGINT NOT NULL DEFAULT 0,
+      entry_fee_spirit BIGINT NOT NULL DEFAULT 0,
+      is_open BOOLEAN NOT NULL DEFAULT FALSE,
+      visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','sect')),
+      min_participants INTEGER NOT NULL DEFAULT 1,
+      success_percent INTEGER NOT NULL DEFAULT 80,
+      fail_percent INTEGER NOT NULL DEFAULT 20,
+      income_type TEXT NOT NULL DEFAULT 'stones' CHECK(income_type IN ('stones','spirit')),
+      income_percent INTEGER NOT NULL DEFAULT 0,
+      lifetime_minutes INTEGER NOT NULL DEFAULT 1440,
+      recovery_minutes INTEGER NOT NULL DEFAULT 60,
+      expires_at TIMESTAMPTZ,
+      recovery_until TIMESTAMPTZ,
+      level INTEGER NOT NULL DEFAULT 1,
+      upgrade_stones BIGINT NOT NULL DEFAULT 0,
+      upgrade_spirit BIGINT NOT NULL DEFAULT 0,
+      rule_text TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_personal_bicanh_open ON personal_bicanh(is_open,recovery_until,expires_at);
+    CREATE INDEX IF NOT EXISTS idx_personal_bicanh_owner ON personal_bicanh(owner_id);
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS image TEXT NOT NULL DEFAULT '';
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS min_realm_index INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS max_realm_index INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS entry_fee_stones BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS entry_fee_spirit BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS is_open BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private';
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS min_participants INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS success_percent INTEGER NOT NULL DEFAULT 80;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS fail_percent INTEGER NOT NULL DEFAULT 20;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS income_type TEXT NOT NULL DEFAULT 'stones';
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS income_percent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS lifetime_minutes INTEGER NOT NULL DEFAULT 1440;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS recovery_minutes INTEGER NOT NULL DEFAULT 60;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS recovery_until TIMESTAMPTZ;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS upgrade_stones BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS upgrade_spirit BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS rule_text TEXT NOT NULL DEFAULT '';
+    ALTER TABLE personal_bicanh ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+    CREATE TABLE IF NOT EXISTS personal_bicanh_rewards (
+      id BIGSERIAL PRIMARY KEY,
+      bicanh_id BIGINT NOT NULL REFERENCES personal_bicanh(id) ON DELETE CASCADE,
+      reward_type TEXT NOT NULL CHECK(reward_type IN ('item','beast','stones','spirit')),
+      item_id INTEGER,
+      beast_id INTEGER,
+      quantity BIGINT NOT NULL DEFAULT 1,
+      chance_percent NUMERIC(6,2) NOT NULL DEFAULT 100,
+      remaining BIGINT NOT NULL DEFAULT 0,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_pb_rewards_bicanh_active ON personal_bicanh_rewards(bicanh_id,active,chance_percent);
+
+    CREATE TABLE IF NOT EXISTS personal_bicanh_bosses (
+      id BIGSERIAL PRIMARY KEY,
+      bicanh_id BIGINT NOT NULL REFERENCES personal_bicanh(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      beast_id INTEGER,
+      realm_index INTEGER NOT NULL DEFAULT 0,
+      power BIGINT NOT NULL DEFAULT 1,
+      is_final BOOLEAN NOT NULL DEFAULT FALSE,
+      description TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_pb_bosses_bicanh ON personal_bicanh_bosses(bicanh_id,is_final);
+
+    CREATE TABLE IF NOT EXISTS personal_bicanh_questions (
+      id BIGSERIAL PRIMARY KEY,
+      bicanh_id BIGINT NOT NULL REFERENCES personal_bicanh(id) ON DELETE CASCADE,
+      question TEXT NOT NULL,
+      options JSONB NOT NULL DEFAULT '[]'::jsonb,
+      answer_index INTEGER NOT NULL DEFAULT 0,
+      reward_id BIGINT REFERENCES personal_bicanh_rewards(id) ON DELETE SET NULL,
+      used BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_pb_questions_active ON personal_bicanh_questions(bicanh_id,used,id);
+
+    CREATE TABLE IF NOT EXISTS personal_bicanh_participants (
+      id BIGSERIAL PRIMARY KEY,
+      bicanh_id BIGINT NOT NULL REFERENCES personal_bicanh(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL DEFAULT 'chance' CHECK(mode IN ('chance','boss','question')),
+      status TEXT NOT NULL DEFAULT 'entered' CHECK(status IN ('entered','success','failure')),
+      score BIGINT NOT NULL DEFAULT 0,
+      reward_id BIGINT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_pb_participants_rank ON personal_bicanh_participants(bicanh_id,status,score DESC,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_pb_participants_user ON personal_bicanh_participants(user_id,bicanh_id,created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS personal_bicanh_invites (
+      id BIGSERIAL PRIMARY KEY,
+      bicanh_id BIGINT NOT NULL REFERENCES personal_bicanh(id) ON DELETE CASCADE,
+      inviter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      invitee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      responded_at TIMESTAMPTZ,
+      UNIQUE(bicanh_id,inviter_id,invitee_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pb_invites_invitee ON personal_bicanh_invites(invitee_id,status,created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS personal_bicanh_notifications (
+      id BIGSERIAL PRIMARY KEY,
+      bicanh_id BIGINT NOT NULL REFERENCES personal_bicanh(id) ON DELETE CASCADE,
+      owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_pb_notifications_owner ON personal_bicanh_notifications(owner_id,read_at,created_at DESC);
   `);
 }
 
@@ -5407,6 +5535,63 @@ app.post('/api/enhance/roll',auth,async(req,res)=>{
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+function personalBicanhEligibility(row, wealthLeaderId){
+  const username=String(row?.username||'').toLowerCase();
+  const realm=stageFor(Number(row?.spirit_power)||0);
+  const admin=username==='thienha_666';
+  const emperor=realm.realmIndex===TIEN_DE_REALM_INDEX;
+  const wealthLeader=Number(row?.id)===Number(wealthLeaderId);
+  return {admin,emperor,wealthLeader,eligible:admin||emperor||wealthLeader,reason:admin?'thienha_666':emperor?'Tiên Đế':wealthLeader?'Đứng đầu Bảng Tài Phú':'Chưa đủ điều kiện'};
+}
+async function getPersonalBicanhAccess(client,uid){
+  const me=(await client.query(`SELECT u.id,u.username,u.display_name,p.spirit_power,p.spirit_stones FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id=$1`,[uid])).rows[0];
+  if(!me) return null;
+  const leader=(await client.query(`SELECT p.user_id FROM profiles p JOIN users u ON u.id=p.user_id ORDER BY p.spirit_stones DESC,p.user_id ASC LIMIT 1`)).rows[0];
+  return {...me,...personalBicanhEligibility(me,leader?.user_id)};
+}
+async function personalBicanhOwner(client,bicanhId,uid){
+  return (await client.query(`SELECT * FROM personal_bicanh WHERE id=$1 AND owner_id=$2 FOR UPDATE`,[bicanhId,uid])).rows[0]||null;
+}
+async function grantPersonalBicanhReward(client,uid,reward){
+  if(!reward) return {type:'none',quantity:0,name:'Không có'};
+  const qty=Math.max(1,Number(reward.quantity)||1);
+  if(reward.reward_type==='stones'){
+    await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[uid,qty]);
+    return {type:'stones',quantity:qty,name:`${qty.toLocaleString('vi-VN')} linh thạch`};
+  }
+  if(reward.reward_type==='spirit'){
+    await client.query(`UPDATE profiles SET spirit_power=LEAST($3,spirit_power+$2),updated_at=NOW() WHERE user_id=$1`,[uid,qty,MAX_CHI_CAO_SPIRIT]);
+    return {type:'spirit',quantity:qty,name:`${qty.toLocaleString('vi-VN')} linh lực`};
+  }
+  if(reward.reward_type==='item' && reward.item_id){
+    await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+$3,updated_at=NOW()`,[uid,reward.item_id,qty]);
+    const n=(await client.query(`SELECT name FROM treasure_items WHERE id=$1`,[reward.item_id])).rows[0]?.name||'Vật phẩm';
+    return {type:'item',quantity:qty,name:`${n} ×${qty}`};
+  }
+  if(reward.reward_type==='beast' && reward.beast_id){
+    await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity,unbound_quantity,acquisition_type) VALUES($1,$2,$3,$3,'personal_bicanh') ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+$3,unbound_quantity=owned_spirit_beasts.unbound_quantity+$3`,[uid,reward.beast_id,qty]);
+    const n=(await client.query(`SELECT name FROM spirit_beasts_catalog WHERE id=$1`,[reward.beast_id])).rows[0]?.name||'Linh thú';
+    return {type:'beast',quantity:qty,name:`${n} ×${qty}`};
+  }
+  return {type:'none',quantity:0,name:'Phần thưởng chưa cấu hình'};
+}
+async function maybeNotifyPersonalRewardDepleted(client,bicanhId,rewardId,ownerId){
+  if(!rewardId||!ownerId)return;
+  const r=(await client.query(`SELECT remaining,active FROM personal_bicanh_rewards WHERE id=$1`,[rewardId])).rows[0];
+  if(r && Number(r.remaining)<=0){
+    await client.query(`INSERT INTO personal_bicanh_notifications(bicanh_id,owner_id,message) VALUES($1,$2,$3)`,[bicanhId,ownerId,`Phần thưởng #${rewardId} trong Bí Cảnh đã được nhận hết. Hãy thay thế hoặc bổ sung phần thưởng mới.`]);
+  }
+}
+async function weightedPersonalReward(client,bicanhId){
+  const rows=(await client.query(`SELECT r.*,ti.name AS item_name,sbc.name AS beast_name FROM personal_bicanh_rewards r LEFT JOIN treasure_items ti ON ti.id=r.item_id LEFT JOIN spirit_beasts_catalog sbc ON sbc.id=r.beast_id WHERE r.bicanh_id=$1 AND r.active=TRUE AND r.remaining<>0 ORDER BY r.id FOR UPDATE`,[bicanhId])).rows;
+  if(!rows.length) return null;
+  const total=rows.reduce((n,r)=>n+Math.max(0,Number(r.chance_percent)||0),0);
+  if(total<=0)return rows[0];
+  let roll=Math.random()*total;
+  for(const r of rows){roll-=Math.max(0,Number(r.chance_percent)||0);if(roll<=0)return r;}
+  return rows[rows.length-1];
+}
 // BÍ CẢNH · Cửu đại bí cảnh, đồng góp linh thạch + tham gia cơ duyên
 // ─────────────────────────────────────────────────────────────────────────────
 async function syncSecretRealm(realmId){
@@ -5655,6 +5840,150 @@ app.post('/api/bicanh/enter',auth,async(req,res)=>{
     res.json({ok:true,outcome:'failure',successChance,lossSpirit:loss,newSpirit,stage:ns.stage,debuffPercent:debuff,debuffMinutes:duration,message:note});
   }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('bicanh enter:',{message:e?.message,code:e?.code,detail:e?.detail,hint:e?.hint,table:e?.table,column:e?.column,query:e?.query});res.status(500).json({error:`Tham gia Bí Cảnh thất bại: ${e?.message||'Lỗi cơ sở dữ liệu.'}`});}finally{client.release();}
 });
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v3.8.13 · BÍ CẢNH CÁ NHÂN
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/bicanh/personal/access',auth,async(req,res)=>{
+  try{
+    await ensureBicanhSchema();
+    const client=await dbConnect();
+    try{
+      const access=await getPersonalBicanhAccess(client,req.session.user_id);
+      if(!access)return res.status(404).json({error:'Không tìm thấy hồ sơ môn nhân.'});
+      const owned=(await client.query(`SELECT id,name,is_open,visibility,level FROM personal_bicanh WHERE owner_id=$1`,[req.session.user_id])).rows[0]||null;
+      const realms=RANKS.map((r,i)=>({index:i,name:r.name}));
+      const inventory=(await client.query(`SELECT i.item_id AS id,ti.name,i.quantity FROM inventory i JOIN treasure_items ti ON ti.id=i.item_id WHERE i.user_id=$1 AND i.quantity>0 ORDER BY ti.name LIMIT 200`,[req.session.user_id])).rows;
+      const beasts=(await client.query(`SELECT o.beast_id AS id,c.name,o.quantity FROM owned_spirit_beasts o JOIN spirit_beasts_catalog c ON c.id=o.beast_id WHERE o.user_id=$1 AND o.quantity>0 ORDER BY c.name LIMIT 200`,[req.session.user_id])).rows;
+      const members=(await client.query(`SELECT u.id,u.display_name,u.username,p.rank,p.spirit_power FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.id<>$1 ORDER BY u.display_name LIMIT 300`,[req.session.user_id])).rows;
+      res.json({access:{...access,stage:stageFor(Number(access.spirit_power)||0).stage},owned,realms,inventory,beasts,members});
+    }finally{client.release();}
+  }catch(e){console.error('personal bicanh access:',e);res.status(500).json({error:'Không thể tải quyền chế tạo Bí Cảnh.'});}
+});
+
+app.get('/api/bicanh/personal',auth,async(req,res)=>{
+  try{
+    await ensureBicanhSchema();
+    const client=await dbConnect();
+    try{
+      const uid=req.session.user_id;
+      const rows=(await client.query(`
+        SELECT b.*,u.display_name AS owner_name,u.username AS owner_username,
+          (SELECT COUNT(*) FROM personal_bicanh_participants pp WHERE pp.bicanh_id=b.id AND pp.status IN ('entered','success'))::int AS entry_count
+        FROM personal_bicanh b JOIN users u ON u.id=b.owner_id
+        WHERE b.visibility='sect' OR b.owner_id=$1 OR EXISTS(SELECT 1 FROM personal_bicanh_invites i WHERE i.bicanh_id=b.id AND i.invitee_id=$1 AND i.status='accepted')
+        ORDER BY b.is_open DESC,b.created_at DESC`,[uid])).rows;
+      const invites=(await client.query(`SELECT i.id,i.bicanh_id,i.created_at,b.name,u.display_name AS inviter_name FROM personal_bicanh_invites i JOIN personal_bicanh b ON b.id=i.bicanh_id JOIN users u ON u.id=i.inviter_id WHERE i.invitee_id=$1 AND i.status='pending' ORDER BY i.created_at DESC`,[uid])).rows;
+      const notifications=(await client.query(`SELECT id,message,created_at,read_at FROM personal_bicanh_notifications WHERE owner_id=$1 ORDER BY created_at DESC LIMIT 20`,[uid])).rows;
+      res.json({rows,invites,notifications});
+    }finally{client.release();}
+  }catch(e){console.error('personal bicanh list:',e);res.status(500).json({error:'Không thể tải danh sách Bí Cảnh cá nhân.'});}
+});
+
+app.get('/api/bicanh/personal/:id',auth,async(req,res)=>{
+  try{
+    await ensureBicanhSchema(); const id=Number(req.params.id); if(!Number.isInteger(id)||id<1)return res.status(400).json({error:'Bí Cảnh không hợp lệ.'});
+    const client=await dbConnect();
+    try{
+      const uid=req.session.user_id;
+      const b=(await client.query(`SELECT b.*,u.display_name AS owner_name,u.username AS owner_username FROM personal_bicanh b JOIN users u ON u.id=b.owner_id WHERE b.id=$1 AND (b.visibility='sect' OR b.owner_id=$2 OR EXISTS(SELECT 1 FROM personal_bicanh_invites i WHERE i.bicanh_id=b.id AND i.invitee_id=$2 AND i.status='accepted'))`,[id,uid])).rows[0];
+      if(!b)return res.status(404).json({error:'Bí Cảnh không tồn tại hoặc bạn chưa được phép vào.'});
+      const rewards=(await client.query(`SELECT r.*,ti.name AS item_name,sbc.name AS beast_name FROM personal_bicanh_rewards r LEFT JOIN treasure_items ti ON ti.id=r.item_id LEFT JOIN spirit_beasts_catalog sbc ON sbc.id=r.beast_id WHERE r.bicanh_id=$1 ORDER BY r.id`,[id])).rows;
+      const bosses=(await client.query(`SELECT bo.*,sbc.name AS beast_name FROM personal_bicanh_bosses bo LEFT JOIN spirit_beasts_catalog sbc ON sbc.id=bo.beast_id WHERE bo.bicanh_id=$1 ORDER BY bo.is_final DESC,bo.id`,[id])).rows;
+      const questions=(await client.query(`SELECT q.id,q.question,q.options,q.reward_id,q.used,r.reward_type,r.quantity,ti.name AS item_name,sbc.name AS beast_name FROM personal_bicanh_questions q LEFT JOIN personal_bicanh_rewards r ON r.id=q.reward_id LEFT JOIN treasure_items ti ON ti.id=r.item_id LEFT JOIN spirit_beasts_catalog sbc ON sbc.id=r.beast_id WHERE q.bicanh_id=$1 AND q.used=FALSE ORDER BY q.id LIMIT 1`,[id])).rows[0]||null;
+      const ranking=(await client.query(`SELECT pp.user_id,u.display_name,u.username,MAX(pp.score)::bigint AS score,COUNT(*)::int AS runs FROM personal_bicanh_participants pp JOIN users u ON u.id=pp.user_id WHERE pp.bicanh_id=$1 AND pp.status='success' GROUP BY pp.user_id,u.display_name,u.username ORDER BY score DESC,runs DESC LIMIT 20`,[id])).rows;
+      res.json({bicanh:b,rewards,bosses,question:questions,ranking});
+    }finally{client.release();}
+  }catch(e){console.error('personal bicanh detail:',e);res.status(500).json({error:'Không thể mở Bí Cảnh.'});}
+});
+
+app.post('/api/bicanh/personal/create',auth,async(req,res)=>{
+  const client=await dbConnect();
+  try{
+    await ensureBicanhSchema(); const uid=req.session.user_id; await client.query('BEGIN'); await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,['han-thien-mon:personal-bicanh:create']);
+    const access=await getPersonalBicanhAccess(client,uid); if(!access){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy hồ sơ.'});}
+    if(!access.eligible){await client.query('ROLLBACK');return res.status(403).json({error:'Chỉ Tiên Đế, môn nhân đứng đầu Bảng Tài Phú tại thời điểm chế tạo hoặc thienha_666 mới được chế tạo Bí Cảnh.'});}
+    if((await client.query(`SELECT 1 FROM personal_bicanh WHERE owner_id=$1`,[uid])).rowCount){await client.query('ROLLBACK');return res.status(409).json({error:'Mỗi môn nhân chỉ được sở hữu 1 Bí Cảnh cá nhân.'});}
+    const name=String(req.body?.name||'').trim().slice(0,80), description=String(req.body?.description||'').trim().slice(0,1500), image=String(req.body?.image||'').trim();
+    if(name.length<2){await client.query('ROLLBACK');return res.status(400).json({error:'Tên Bí Cảnh phải có ít nhất 2 ký tự.'});}
+    if(image && !(image.startsWith('data:image/')||/^https?:\/\//i.test(image))){await client.query('ROLLBACK');return res.status(400).json({error:'Ảnh Bí Cảnh phải là ảnh tải lên hoặc URL https/http.'});}
+    if(image.startsWith('data:image/') && image.length>900000){await client.query('ROLLBACK');return res.status(400).json({error:'Ảnh Bí Cảnh quá lớn. Hãy chọn ảnh nhẹ hơn.'});}
+    const ownerRealm=stageFor(Number(access.spirit_power)||0).realmIndex;
+    const maxAllowed=Math.max(0,ownerRealm-1);
+    const min=Math.max(0,Math.min(maxAllowed,Number(req.body?.minRealmIndex)||0));
+    const max=Math.max(min,Math.min(maxAllowed,Number(req.body?.maxRealmIndex)===undefined?maxAllowed:Number(req.body.maxRealmIndex)));
+    const feeStones=Math.max(0,Math.min(10_000_000_000,Number(req.body?.entryFeeStones)||0));
+    const feeSpirit=Math.max(0,Math.min(10_000_000_000,Number(req.body?.entryFeeSpirit)||0));
+    const minParticipants=Math.max(1,Math.min(100,Number(req.body?.minParticipants)||1));
+    let success=Math.max(0,Math.min(100,Number(req.body?.successPercent)===undefined?80:Number(req.body.successPercent)));
+    let fail=Math.max(0,Math.min(100,Number(req.body?.failPercent)===undefined?20:Number(req.body.failPercent)));
+    if(success+fail!==100){fail=100-success;}
+    const incomeType=['stones','spirit'].includes(String(req.body?.incomeType))?String(req.body.incomeType):'stones';
+    const incomePct=Math.max(0,Math.min(100,Number(req.body?.incomePercent)||0));
+    const life=Math.max(10,Math.min(10080,Number(req.body?.lifetimeMinutes)||1440));
+    const recovery=Math.max(0,Math.min(10080,Number(req.body?.recoveryMinutes)||60));
+    const visibility=req.body?.visibility==='sect'?'sect':'private';
+    const rule=String(req.body?.ruleText||'').trim().slice(0,3000);
+    const r=(await client.query(`INSERT INTO personal_bicanh(owner_id,name,image,description,min_realm_index,max_realm_index,entry_fee_stones,entry_fee_spirit,is_open,visibility,min_participants,success_percent,fail_percent,income_type,income_percent,lifetime_minutes,recovery_minutes,expires_at,rule_text) VALUES($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9,$10,$11,$12,$13,$14,$15,$16,NOW()+($15::double precision*INTERVAL '1 minute'),$17) RETURNING *`,[uid,name,image,description,min,max,feeStones,feeSpirit,visibility,minParticipants,success,fail,incomeType,incomePct,life,recovery,rule])).rows[0];
+    await client.query('COMMIT'); res.json({ok:true,bicanh:r,message:`Đã chế tạo Bí Cảnh “${name}”. Bạn là Bí Cảnh Chi Chủ.`});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('personal bicanh create:',e);res.status(500).json({error:`Chế tạo Bí Cảnh thất bại: ${e?.message||'lỗi cơ sở dữ liệu'}`});}finally{client.release();}
+});
+
+app.patch('/api/bicanh/personal/:id/config',auth,async(req,res)=>{
+  const client=await dbConnect();
+  try{
+    await ensureBicanhSchema(); const id=Number(req.params.id),uid=req.session.user_id; await client.query('BEGIN');
+    const b=await personalBicanhOwner(client,id,uid); if(!b){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không phải Bí Cảnh Chi Chủ.'});}
+    const owner=(await client.query(`SELECT spirit_power FROM profiles WHERE user_id=$1`,[uid])).rows[0],ownerRealm=stageFor(Number(owner?.spirit_power)||0).realmIndex,maxAllowed=Math.max(0,ownerRealm-1);
+    const nOr=(v,d)=>v===undefined||v===null||v===''||!Number.isFinite(Number(v))?Number(d):Number(v);
+    const min=Math.max(0,Math.min(maxAllowed,nOr(req.body?.minRealmIndex,b.min_realm_index))),max=Math.max(min,Math.min(maxAllowed,nOr(req.body?.maxRealmIndex,b.max_realm_index)));
+    const success=Math.max(0,Math.min(100,nOr(req.body?.successPercent,b.success_percent))),fail=100-success;
+    const upd=(await client.query(`UPDATE personal_bicanh SET name=COALESCE(NULLIF($2,''),name),image=COALESCE($3,image),description=COALESCE($4,description),min_realm_index=$5,max_realm_index=$6,entry_fee_stones=GREATEST(0,$7),entry_fee_spirit=GREATEST(0,$8),visibility=$9,min_participants=GREATEST(1,LEAST(100,$10)),success_percent=$11,fail_percent=$12,income_type=$13,income_percent=GREATEST(0,LEAST(100,$14)),lifetime_minutes=GREATEST(10,LEAST(10080,$15)),recovery_minutes=GREATEST(0,LEAST(10080,$16)),expires_at=CASE WHEN expires_at IS NULL OR expires_at<=NOW() THEN NOW()+($15::double precision*INTERVAL '1 minute') ELSE expires_at END,rule_text=$17,updated_at=NOW() WHERE id=$1 RETURNING *`,[id,String(req.body?.name||'').trim().slice(0,80),req.body?.image===undefined?null:String(req.body.image||'').slice(0,900000),req.body?.description===undefined?null:String(req.body.description||'').slice(0,1500),min,max,nOr(req.body?.entryFeeStones,b.entry_fee_stones),nOr(req.body?.entryFeeSpirit,b.entry_fee_spirit),req.body?.visibility==='sect'?'sect':'private',nOr(req.body?.minParticipants,b.min_participants),success,fail,['stones','spirit'].includes(req.body?.incomeType)?req.body.incomeType:b.income_type,nOr(req.body?.incomePercent,b.income_percent),nOr(req.body?.lifetimeMinutes,b.lifetime_minutes),nOr(req.body?.recoveryMinutes,b.recovery_minutes),String(req.body?.ruleText??b.rule_text).slice(0,3000)])).rows[0];
+    await client.query('COMMIT');res.json({ok:true,bicanh:upd});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('personal bicanh config:',e);res.status(500).json({error:'Không thể cập nhật quy tắc Bí Cảnh.'});}finally{client.release();}
+});
+
+app.post('/api/bicanh/personal/:id/toggle',auth,async(req,res)=>{
+  const client=await dbConnect();
+  try{await ensureBicanhSchema();const id=Number(req.params.id),uid=req.session.user_id;await client.query('BEGIN');const b=await personalBicanhOwner(client,id,uid);if(!b){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không phải Bí Cảnh Chi Chủ.'});}const open=Boolean(req.body?.open);if(open && b.expires_at && new Date(b.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh đã hết thời gian tồn tại.'});}if(open && b.recovery_until && new Date(b.recovery_until)>new Date()){await client.query('ROLLBACK');return res.status(409).json({error:`Bí Cảnh đang hồi phục đến ${new Date(b.recovery_until).toLocaleString('vi-VN')}.`});}const r=(await client.query(`UPDATE personal_bicanh SET is_open=$2,updated_at=NOW() WHERE id=$1 RETURNING *`,[id,open])).rows[0];await client.query('COMMIT');res.json({ok:true,bicanh:r,message:open?'Đã mở cửa Bí Cảnh.':'Đã đóng cửa Bí Cảnh.'});}catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể đóng/mở Bí Cảnh.'});}finally{client.release();}
+});
+
+app.post('/api/bicanh/personal/:id/reward',auth,async(req,res)=>{const client=await dbConnect();try{await ensureBicanhSchema();const id=Number(req.params.id),uid=req.session.user_id;await client.query('BEGIN');if(!(await personalBicanhOwner(client,id,uid))){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không phải Bí Cảnh Chi Chủ.'});}const type=String(req.body?.rewardType||''),qty=Math.max(1,Math.min(1_000_000_000,Math.floor(Number(req.body?.quantity)||1))),chance=Math.max(0,Math.min(100,Number(req.body?.chancePercent)??0));if(!['item','beast','stones','spirit'].includes(type)){await client.query('ROLLBACK');return res.status(400).json({error:'Loại phần thưởng không hợp lệ.'});}let itemId=null,beastId=null;if(type==='item'){itemId=Number(req.body?.itemId);const own=(await client.query(`SELECT quantity FROM inventory WHERE user_id=$1 AND item_id=$2 AND quantity>=$3 FOR UPDATE`,[uid,itemId,qty])).rows[0];if(!own){await client.query('ROLLBACK');return res.status(403).json({error:'Không đủ số lượng vật phẩm để đưa vào Bí Cảnh.'});}await client.query(`UPDATE inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND item_id=$2`,[uid,itemId,qty]);}if(type==='beast'){beastId=Number(req.body?.beastId);const own=(await client.query(`SELECT quantity,unbound_quantity FROM owned_spirit_beasts WHERE user_id=$1 AND beast_id=$2 AND quantity>=$3 AND unbound_quantity>=$3 FOR UPDATE`,[uid,beastId,qty])).rows[0];if(!own){await client.query('ROLLBACK');return res.status(403).json({error:'Không đủ linh thú chưa nhận chủ để đưa vào Bí Cảnh.'});}await client.query(`UPDATE owned_spirit_beasts SET quantity=quantity-$3,unbound_quantity=unbound_quantity-$3 WHERE user_id=$1 AND beast_id=$2`,[uid,beastId,qty]);}if(type==='stones'){const own=(await client.query(`SELECT spirit_stones FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];if(Number(own?.spirit_stones||0)<qty){await client.query('ROLLBACK');return res.status(403).json({error:'Không đủ linh thạch để đưa vào Bí Cảnh.'});}await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,updated_at=NOW() WHERE user_id=$1`,[uid,qty]);}if(type==='spirit'){const own=(await client.query(`SELECT spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];if(Number(own?.spirit_power||0)<qty){await client.query('ROLLBACK');return res.status(403).json({error:'Không đủ linh lực để đưa vào Bí Cảnh.'});}await client.query(`UPDATE profiles SET spirit_power=GREATEST(0,spirit_power-$2),updated_at=NOW() WHERE user_id=$1`,[uid,qty]);}const r=(await client.query(`INSERT INTO personal_bicanh_rewards(bicanh_id,reward_type,item_id,beast_id,quantity,chance_percent,remaining) VALUES($1,$2,$3,$4,$5,$6,$5) RETURNING *`,[id,type,itemId,beastId,qty,chance])).rows[0];await client.query('COMMIT');res.json({ok:true,reward:r});}catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể thêm phần thưởng.'});}finally{client.release();}});
+app.delete('/api/bicanh/personal/:id/reward/:rewardId',auth,async(req,res)=>{const client=await dbConnect();try{await ensureBicanhSchema();await client.query('BEGIN');const r=(await client.query(`SELECT r.* FROM personal_bicanh_rewards r JOIN personal_bicanh b ON b.id=r.bicanh_id WHERE r.id=$1 AND r.bicanh_id=$2 AND b.owner_id=$3 FOR UPDATE`,[Number(req.params.rewardId),Number(req.params.id),req.session.user_id])).rows[0];if(!r){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy phần thưởng.'});}if(r.active&&Number(r.remaining)>0){if(r.reward_type==='item'&&r.item_id)await client.query(`INSERT INTO inventory(user_id,item_id,quantity,updated_at) VALUES($1,$2,$3,NOW()) ON CONFLICT(user_id,item_id) DO UPDATE SET quantity=inventory.quantity+$3,updated_at=NOW()`,[req.session.user_id,r.item_id,r.remaining]);if(r.reward_type==='beast'&&r.beast_id)await client.query(`INSERT INTO owned_spirit_beasts(user_id,beast_id,quantity,unbound_quantity,acquisition_type) VALUES($1,$2,$3,$3,'personal_bicanh_refund') ON CONFLICT(user_id,beast_id) DO UPDATE SET quantity=owned_spirit_beasts.quantity+$3,unbound_quantity=owned_spirit_beasts.unbound_quantity+$3`,[req.session.user_id,r.beast_id,r.remaining]);}await client.query(`UPDATE personal_bicanh_rewards SET active=FALSE,remaining=0 WHERE id=$1`,[r.id]);await client.query('COMMIT');res.json({ok:true});}catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể xóa phần thưởng.'});}finally{client.release();}});
+
+app.post('/api/bicanh/personal/:id/boss',auth,async(req,res)=>{const client=await dbConnect();try{await ensureBicanhSchema();const id=Number(req.params.id),uid=req.session.user_id;await client.query('BEGIN');const b=await personalBicanhOwner(client,id,uid);if(!b){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không phải Bí Cảnh Chi Chủ.'});}const owner=(await client.query(`SELECT spirit_power FROM profiles WHERE user_id=$1`,[uid])).rows[0],ownerRealm=stageFor(Number(owner?.spirit_power)||0).realmIndex,ri=Math.max(0,Math.min(Math.max(0,Number(b.max_realm_index)),Number(req.body?.realmIndex)===undefined?Number(b.max_realm_index):Number(req.body?.realmIndex))),power=Math.max(1,Math.min(10**15,Number(req.body?.power)||1)),name=String(req.body?.name||'Boss Bí Cảnh').trim().slice(0,80),isFinal=Boolean(req.body?.isFinal),beastId=Number(req.body?.beastId)||null;const r=(await client.query(`INSERT INTO personal_bicanh_bosses(bicanh_id,name,beast_id,realm_index,power,is_final,description) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,[id,name,beastId,ri,power,isFinal,String(req.body?.description||'').slice(0,1000)])).rows[0];await client.query('COMMIT');res.json({ok:true,boss:r});}catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể đặt Boss Bí Cảnh.'});}finally{client.release();}});
+
+app.post('/api/bicanh/personal/:id/question',auth,async(req,res)=>{const client=await dbConnect();try{await ensureBicanhSchema();const id=Number(req.params.id),uid=req.session.user_id;await client.query('BEGIN');if(!(await personalBicanhOwner(client,id,uid))){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không phải Bí Cảnh Chi Chủ.'});}const question=String(req.body?.question||'').trim().slice(0,800),options=Array.isArray(req.body?.options)?req.body.options.map(x=>String(x).slice(0,200)).slice(0,4):[],answer=Number(req.body?.answerIndex);const rewardId=Number(req.body?.rewardId)||null;const reward=rewardId?(await client.query(`SELECT id,active,remaining FROM personal_bicanh_rewards WHERE id=$1 AND bicanh_id=$2 FOR UPDATE`,[rewardId,id])).rows[0]:null;if(rewardId&&(!reward||!reward.active||Number(reward.remaining)<=0)){await client.query('ROLLBACK');return res.status(400).json({error:'Phần thưởng câu hỏi không còn khả dụng. Hãy chọn phần thưởng còn tồn.'});}const qCount=Number((await client.query(`SELECT COUNT(*)::int AS c FROM personal_bicanh_questions WHERE bicanh_id=$1 AND used=FALSE`,[id])).rows[0].c)||0;if(qCount>=10){await client.query('ROLLBACK');return res.status(409).json({error:'Mỗi Bí Cảnh chỉ được có tối đa 10 câu hỏi đang hoạt động.'});}if(!question||options.length<2||answer<0||answer>=options.length){await client.query('ROLLBACK');return res.status(400).json({error:'Câu hỏi cần ít nhất 2 đáp án và một đáp án đúng.'});}const r=(await client.query(`INSERT INTO personal_bicanh_questions(bicanh_id,question,options,answer_index,reward_id) VALUES($1,$2,$3::jsonb,$4,$5) RETURNING id,question,options,answer_index,reward_id`,[id,question,JSON.stringify(options),answer,rewardId])).rows[0];await client.query('COMMIT');res.json({ok:true,question:r});}catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể thêm câu hỏi.'});}finally{client.release();}});
+
+app.post('/api/bicanh/personal/:id/invite',auth,async(req,res)=>{try{await ensureBicanhSchema();const id=Number(req.params.id),uid=req.session.user_id,invitee=Number(req.body?.userId);const b=(await query(`SELECT * FROM personal_bicanh WHERE id=$1 AND owner_id=$2`,[id,uid])).rows[0];if(!b)return res.status(404).json({error:'Bạn không phải Bí Cảnh Chi Chủ.'});if(!invitee||invitee===uid)return res.status(400).json({error:'Môn nhân được mời không hợp lệ.'});const r=await query(`INSERT INTO personal_bicanh_invites(bicanh_id,inviter_id,invitee_id,status) VALUES($1,$2,$3,'pending') ON CONFLICT(bicanh_id,inviter_id,invitee_id) DO UPDATE SET status='pending',created_at=NOW(),responded_at=NULL RETURNING id`,[id,uid,invitee]);await createMailboxNotification(invitee,'personal_bicanh_invite','🌌 Mời vào Bí Cảnh',`Bí Cảnh “${b.name}” mời bạn tham gia.`,'#bicanh',{action:'personal_bicanh_invite',bicanhId:id,invitationId:Number(r.rows[0].id)});res.json({ok:true,message:'Đã gửi lời mời Bí Cảnh.'});}catch(e){res.status(500).json({error:'Không thể gửi lời mời Bí Cảnh.'});}});
+
+app.post('/api/bicanh/personal/invite/respond',auth,async(req,res)=>{try{await ensureBicanhSchema();const iid=Number(req.body?.invitationId),action=req.body?.action==='accept'?'accepted':'rejected';const r=await query(`UPDATE personal_bicanh_invites SET status=$2,responded_at=NOW() WHERE id=$1 AND invitee_id=$3 AND status='pending' RETURNING bicanh_id`,[iid,action,req.session.user_id]);if(!r.rowCount)return res.status(404).json({error:'Lời mời không còn hiệu lực.'});res.json({ok:true,status:action});}catch(e){res.status(500).json({error:'Không thể xử lý lời mời.'});}});
+
+app.post('/api/bicanh/personal/:id/upgrade',auth,async(req,res)=>{const client=await dbConnect();try{await ensureBicanhSchema();const id=Number(req.params.id),uid=req.session.user_id;await client.query('BEGIN');const b=await personalBicanhOwner(client,id,uid);if(!b){await client.query('ROLLBACK');return res.status(404).json({error:'Bạn không phải Bí Cảnh Chi Chủ.'});}const costStones=Math.max(0,Math.min(10**12,Number(req.body?.stones)||0)),costSpirit=Math.max(0,Math.min(10**12,Number(req.body?.spirit)||0));if(costStones<=0&&costSpirit<=0){await client.query('ROLLBACK');return res.status(400).json({error:'Hãy nhập chi phí nâng cấp.'});}const p=(await client.query(`SELECT spirit_stones,spirit_power FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];if(Number(p.spirit_stones)<costStones||Number(p.spirit_power)<costSpirit){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ linh thạch/linh lực để nâng cấp.'});}const r=(await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,spirit_power=spirit_power-$3,updated_at=NOW() WHERE user_id=$1 RETURNING spirit_stones,spirit_power`,[uid,costStones,costSpirit])).rows[0];const b2=(await client.query(`UPDATE personal_bicanh SET level=level+1,upgrade_stones=upgrade_stones+$2,upgrade_spirit=upgrade_spirit+$3,updated_at=NOW() WHERE id=$1 RETURNING *`,[id,costStones,costSpirit])).rows[0];await client.query('COMMIT');res.json({ok:true,bicanh:b2,wallet:r});}catch(e){try{await client.query('ROLLBACK')}catch{};res.status(500).json({error:'Không thể nâng cấp Bí Cảnh.'});}finally{client.release();}});
+
+app.post('/api/bicanh/personal/:id/enter',auth,async(req,res)=>{const client=await dbConnect();try{await ensureBicanhSchema();const id=Number(req.params.id),uid=req.session.user_id,mode=['chance','boss','question'].includes(req.body?.mode)?req.body.mode:'chance';await client.query('BEGIN');const b=(await client.query(`SELECT b.*,u.display_name AS owner_name FROM personal_bicanh b JOIN users u ON u.id=b.owner_id WHERE b.id=$1 FOR UPDATE`,[id])).rows[0];if(!b){await client.query('ROLLBACK');return res.status(404).json({error:'Không tìm thấy Bí Cảnh.'});}const access=await getPersonalBicanhAccess(client,uid);if(Number(uid)!==Number(b.owner_id)){if(b.visibility==='private' && !(await client.query(`SELECT 1 FROM personal_bicanh_invites WHERE bicanh_id=$1 AND invitee_id=$2 AND status='accepted'`,[id,uid])).rowCount){await client.query('ROLLBACK');return res.status(403).json({error:'Bí Cảnh riêng tư: bạn chưa được chủ nhân mời.'});}if(access && stageFor(Number(access.spirit_power)||0).realmIndex<Number(b.min_realm_index)){await client.query('ROLLBACK');return res.status(403).json({error:`Cần từ ${RANKS[Number(b.min_realm_index)]?.name||'cảnh giới yêu cầu'} trở lên.`});}if(stageFor(Number(access?.spirit_power)||0).realmIndex>Number(b.max_realm_index) && Number(access?.id)!==Number(b.owner_id)){await client.query('ROLLBACK');return res.status(403).json({error:'Cảnh giới hiện tại vượt quá giới hạn Bí Cảnh chủ nhân thiết lập.'});}}
+    if(!b.is_open){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh đang đóng cửa.'});}
+    if(b.expires_at && new Date(b.expires_at)<=new Date()){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh đã hết thời gian tồn tại.'});}
+    if(b.recovery_until && new Date(b.recovery_until)>new Date()){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh đang hồi phục.'});}
+    const participantCount=Number((await client.query(`SELECT COUNT(*)::int AS c FROM personal_bicanh_participants WHERE bicanh_id=$1 AND created_at>NOW()-INTERVAL '15 minutes' AND status IN ('entered','success')`,[id])).rows[0].c)||0;
+    if(participantCount+1<Math.max(1,Number(b.min_participants))){await client.query(`INSERT INTO personal_bicanh_participants(bicanh_id,user_id,mode,status,score) VALUES($1,$2,$3,'entered',0)`,[id,uid,mode]);await client.query('COMMIT');return res.json({ok:true,outcome:'waiting',score:0,message:`Đã ghi danh vào Bí Cảnh. Cần thêm ${Math.max(0,Number(b.min_participants)-participantCount-1)} môn nhân nữa trước khi phát sinh thử thách.`,waiting:true});}
+    const feeStones=Number(b.entry_fee_stones)||0,feeSpirit=Number(b.entry_fee_spirit)||0;const wallet=(await client.query(`SELECT spirit_stones,spirit_power,beast_attack,beast_defense,beast_speed,beast_spirit FROM profiles WHERE user_id=$1 FOR UPDATE`,[uid])).rows[0];if(Number(wallet.spirit_stones)<feeStones||Number(wallet.spirit_power)<feeSpirit){await client.query('ROLLBACK');return res.status(400).json({error:'Không đủ phí vào cửa.'});}
+    if(feeStones||feeSpirit)await client.query(`UPDATE profiles SET spirit_stones=spirit_stones-$2,spirit_power=spirit_power-$3,updated_at=NOW() WHERE user_id=$1`,[uid,feeStones,feeSpirit]);
+    let outcome='failure',score=0,reward=null,message='';
+    if(mode==='question'){
+      const q=(await client.query(`SELECT q.*,r.remaining,r.active FROM personal_bicanh_questions q LEFT JOIN personal_bicanh_rewards r ON r.id=q.reward_id WHERE q.bicanh_id=$1 AND q.used=FALSE AND (q.reward_id IS NULL OR (r.active=TRUE AND r.remaining>0)) ORDER BY q.id LIMIT 1 FOR UPDATE`,[id])).rows[0];if(!q){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh hiện không còn câu hỏi đang hoạt động.'});}const answer=Number(req.body?.answerIndex);if(answer!==Number(q.answer_index)){outcome='failure';message='Trả lời sai. Đồng nghĩa với thất bại.';}else{outcome='success';reward=q.reward_id?await client.query(`SELECT * FROM personal_bicanh_rewards WHERE id=$1 FOR UPDATE`,[q.reward_id]).then(x=>x.rows[0]):null;if(reward){const granted=await grantPersonalBicanhReward(client,uid,reward);message=`Trả lời chính xác · nhận ${granted.name}.`;score=100;await client.query(`UPDATE personal_bicanh_rewards SET remaining=CASE WHEN remaining>0 THEN remaining-1 ELSE remaining END,active=CASE WHEN remaining>1 THEN active ELSE FALSE END WHERE id=$1`,[reward.id]);await maybeNotifyPersonalRewardDepleted(client,id,reward.id,b.owner_id);}await client.query(`UPDATE personal_bicanh_questions SET used=TRUE WHERE id=$1`,[q.id]);await client.query(`INSERT INTO personal_bicanh_notifications(bicanh_id,owner_id,message) VALUES($1,$2,$3)`,[id,b.owner_id,`Một môn nhân đã trả lời đúng câu hỏi #${q.id}. Bộ câu hỏi đã được xóa/khóa, hãy thay câu hỏi mới.`]);}
+    } else if(mode==='boss'){
+      const boss=(await client.query(`SELECT * FROM personal_bicanh_bosses WHERE bicanh_id=$1 ORDER BY is_final DESC,id LIMIT 1`,[id])).rows[0];if(!boss){await client.query('ROLLBACK');return res.status(409).json({error:'Bí Cảnh chưa có Boss.'});}const p={...wallet,spirit_power:Number(wallet.spirit_power)||0,equipment_power:0,auction_power_bonus:0,auction_attack_bonus:0};const power=challengePower(p);const bossPower=Math.max(1,Number(boss.power)||1);const chance=Math.max(5,Math.min(95,Math.round(power/(power+bossPower)*100)));if(crypto.randomInt(1,101)<=chance){outcome='success';score=Math.round(power);reward=await weightedPersonalReward(client,id);if(reward){const granted=await grantPersonalBicanhReward(client,uid,reward);message=`Đánh bại ${boss.name} · ${granted.name}.`;if(Number(reward.remaining)>0)await client.query(`UPDATE personal_bicanh_rewards SET remaining=remaining-1,active=CASE WHEN remaining<=1 THEN FALSE ELSE active END WHERE id=$1`,[reward.id]);await maybeNotifyPersonalRewardDepleted(client,id,reward.id,b.owner_id);}}else message=`Thất bại trước ${boss.name}. Tỷ lệ thành công ${chance}%.`;
+    } else {
+      const roll=crypto.randomInt(1,101);if(roll<=Number(b.success_percent)){outcome='success';score=roll;reward=await weightedPersonalReward(client,id);if(reward){const granted=await grantPersonalBicanhReward(client,uid,reward);message=`Cơ duyên thành công · nhận ${granted.name}.`;if(Number(reward.remaining)>0)await client.query(`UPDATE personal_bicanh_rewards SET remaining=remaining-1,active=CASE WHEN remaining<=1 THEN FALSE ELSE active END WHERE id=$1`,[reward.id]);await maybeNotifyPersonalRewardDepleted(client,id,reward.id,b.owner_id);}else message='Cơ duyên thành công nhưng chủ nhân chưa đặt phần thưởng.';}else message=`Bí Cảnh thất bại · tỷ lệ thành công ${b.success_percent}%.`;
+    }
+    await client.query(`INSERT INTO personal_bicanh_participants(bicanh_id,user_id,mode,status,score,reward_id) VALUES($1,$2,$3,$4,$5,$6)`,[id,uid,mode,outcome,score,reward?.id||null]);
+    const incomeBase=feeStones||feeSpirit;const income=Math.floor(incomeBase*Math.max(0,Math.min(100,Number(b.income_percent)||0))/100);if(income>0){if(b.income_type==='stones')await client.query(`UPDATE profiles SET spirit_stones=spirit_stones+$2,updated_at=NOW() WHERE user_id=$1`,[b.owner_id,income]);else await client.query(`UPDATE profiles SET spirit_power=LEAST($3,spirit_power+$2),updated_at=NOW() WHERE user_id=$1`,[b.owner_id,income,MAX_CHI_CAO_SPIRIT]);}
+    await client.query(`UPDATE personal_bicanh SET is_open=FALSE,recovery_until=NOW()+($2::double precision*INTERVAL '1 minute'),updated_at=NOW() WHERE id=$1`,[id,Number(b.recovery_minutes)||0]);await client.query('COMMIT');res.json({ok:true,outcome,score,message,reward:reward?{id:reward.id,type:reward.reward_type}:null,income});
+  }catch(e){try{await client.query('ROLLBACK')}catch{};console.error('personal bicanh enter:',e);res.status(500).json({error:`Tiến vào Bí Cảnh thất bại: ${e?.message||'lỗi cơ sở dữ liệu'}`});}finally{client.release();}});
+
+app.patch('/api/bicanh/personal/notifications/:id/read',auth,async(req,res)=>{try{await query(`UPDATE personal_bicanh_notifications SET read_at=NOW() WHERE id=$1 AND owner_id=$2`,[Number(req.params.id),req.session.user_id]);res.json({ok:true});}catch(e){res.status(500).json({error:'Không thể cập nhật thông báo.'});}});
 
 app.get('/api/bicanh/history',auth,async(req,res)=>{
   try{
